@@ -7,6 +7,17 @@ import (
 	"github.com/hirano00o/gprt/internal/model"
 )
 
+// normalizeNewlines replaces every "\r\n" in s with a bare "\n". GitHub
+// passes a pull request's body, comment/review bodies, and commit message
+// headlines through verbatim, so a Windows-authored one can carry CRLF line
+// endings; gprt's own rendering (word wrap, line-by-line Markdown-lite
+// parsing in internal/ui) only ever splits on "\n", which would otherwise
+// leave a stray "\r" as a literal, visible control character at the end of
+// every such line.
+func normalizeNewlines(s string) string {
+	return strings.ReplaceAll(s, "\r\n", "\n")
+}
+
 // mapPullRequestDetail maps a decoded pull_request.graphql result into
 // model.PullRequest. host becomes the ref's host, mirroring
 // mapPullRequest's convention in map.go: the query itself carries only
@@ -36,7 +47,7 @@ func mapPullRequestDetail(host string, node pullRequestDetailNode, viewerLogin s
 			ID:             r.ID,
 			Author:         model.User{Login: r.Author.Login},
 			State:          model.ReviewState(r.State),
-			Body:           r.Body,
+			Body:           normalizeNewlines(r.Body),
 			SubmittedAt:    r.SubmittedAt,
 			ReactionGroups: toReactionGroups(r.ReactionGroups),
 			URL:            r.URL,
@@ -62,7 +73,7 @@ func mapPullRequestDetail(host string, node pullRequestDetailNode, viewerLogin s
 		Ref:              ref,
 		RepositoryID:     node.Repository.ID,
 		Title:            node.Title,
-		Body:             node.Body,
+		Body:             normalizeNewlines(node.Body),
 		Author:           model.User{Login: node.Author.Login},
 		State:            model.PRState(node.State),
 		IsDraft:          node.IsDraft,
@@ -212,7 +223,7 @@ func mapReviewComment(c reviewCommentNode) model.ReviewComment {
 		ID:              c.ID,
 		ReviewID:        reviewID,
 		Author:          model.User{Login: c.Author.Login},
-		Body:            c.Body,
+		Body:            normalizeNewlines(c.Body),
 		CreatedAt:       c.CreatedAt,
 		State:           model.ReviewCommentState(c.State),
 		ReactionGroups:  toReactionGroups(c.ReactionGroups),
@@ -236,7 +247,7 @@ func mapPendingReview(nodes []pendingReviewNode, viewerLogin string) *model.Revi
 		ID:     n.ID,
 		Author: model.User{Login: viewerLogin},
 		State:  model.ReviewState(n.State),
-		Body:   n.Body,
+		Body:   normalizeNewlines(n.Body),
 	}
 }
 
@@ -254,7 +265,7 @@ func mapTimelineItem(n timelineItemNode) (model.TimelineItem, bool) {
 			IssueComment: &model.IssueComment{
 				ID:              n.ID,
 				Author:          model.User{Login: n.Author.Login},
-				Body:            n.Body,
+				Body:            normalizeNewlines(n.Body),
 				CreatedAt:       n.CreatedAt,
 				UpdatedAt:       n.UpdatedAt,
 				ReactionGroups:  toReactionGroups(n.ReactionGroups),
@@ -270,7 +281,7 @@ func mapTimelineItem(n timelineItemNode) (model.TimelineItem, bool) {
 				ID:             n.ID,
 				Author:         model.User{Login: n.Author.Login},
 				State:          model.ReviewState(n.State),
-				Body:           n.Body,
+				Body:           normalizeNewlines(n.Body),
 				SubmittedAt:    n.SubmittedAt,
 				ReactionGroups: toReactionGroups(n.ReactionGroups),
 				URL:            n.URL,
@@ -330,7 +341,7 @@ func mapTimelineCommit(n timelineItemNode) (model.TimelineItem, bool) {
 		Kind: model.TimelineKindCommit,
 		Commit: &model.Commit{
 			OID:         n.Commit.OID,
-			Message:     n.Commit.MessageHeadline,
+			Message:     normalizeNewlines(n.Commit.MessageHeadline),
 			Author:      author,
 			CommittedAt: n.Commit.CommittedDate,
 		},
