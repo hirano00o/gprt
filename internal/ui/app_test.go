@@ -43,6 +43,12 @@ func (f *fakeGitHub) Viewer(context.Context) (model.User, model.RateLimit, error
 	return f.viewer, model.RateLimit{}, nil
 }
 
+// PullRequest is a minimal stub: no test in this package (M1a scope)
+// exercises PR detail fetching yet.
+func (f *fakeGitHub) PullRequest(context.Context, model.PRRef, string) (gh.DetailResult, error) {
+	return gh.DetailResult{}, nil
+}
+
 func (f *fakeGitHub) SearchPullRequests(ctx context.Context, query, cursor string) (gh.SearchResult, error) {
 	f.mu.Lock()
 	block := f.block

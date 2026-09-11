@@ -25,6 +25,7 @@ import (
 type GitHub interface {
 	Viewer(ctx context.Context) (model.User, model.RateLimit, error)
 	SearchPullRequests(ctx context.Context, query, cursor string) (gh.SearchResult, error)
+	PullRequest(ctx context.Context, ref model.PRRef, viewerLogin string) (gh.DetailResult, error)
 }
 
 // Deps are the Store's dependencies, supplied once at construction.
@@ -184,6 +185,40 @@ type Store struct {
 
 	inFlight map[inFlightKey]struct{}
 
+	// current is the pull request reference opened by OpenPR, or nil when
+	// none is open. currentPR is its most recently applied detail (from
+	// cache or the network); it is not cleared merely because a later
+	// fetch fails (see applyDetailResult), only by OpenPR switching to a
+	// different pull request or by ClosePR.
+	current   *model.PRRef
+	currentPR *model.PullRequest
+
+	// detailLoading, detailStale, detailErr, detailWarnings, and
+	// detailFetchedAt mirror sectionState's loading/stale/lastErr/
+	// warnings fields, but for the single "current" pull request rather
+	// than a list section — see DetailState.
+	detailLoading   bool
+	detailStale     bool
+	detailErr       error
+	detailWarnings  []string
+	detailFetchedAt time.Time
+
+	// detailGen is the current PR detail's generation token: it
+	// increments on every OpenPR/RefreshPR/ReloadPR/ClosePR call, and a
+	// dispatched fetch result whose token no longer matches is dropped
+	// (see fetchDetail). detailCancel cancels the in-flight fetch tagged
+	// with that generation (unlike the list's listCtx, there is no
+	// detailCtx field: nothing in this slice needs to read the context
+	// itself back out — fetchDetail's own ctx parameter, captured in its
+	// closure, is the only reader — only cancel it, so only the
+	// CancelFunc is kept). detailFetchInFlight is the (single-slot)
+	// in-flight dedup flag required by docs/DESIGN.md's concurrency rule
+	// 5 — there is only ever one "current" pull request, so a map keyed
+	// like sections' inFlight is unnecessary.
+	detailGen           int
+	detailCancel        context.CancelFunc
+	detailFetchInFlight bool
+
 	subscribers []func(Event)
 }
 
@@ -315,8 +350,12 @@ func (s *Store) LastRefresh() time.Time {
 	return s.lastRefresh
 }
 
-// Loading reports whether any section currently has a fetch in flight.
+// Loading reports whether any section, or the current pull request's
+// detail, currently has a fetch in flight.
 func (s *Store) Loading() bool {
+	if s.detailLoading {
+		return true
+	}
 	for _, sec := range s.sections {
 		if sec.loading {
 			return true

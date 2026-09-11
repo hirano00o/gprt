@@ -1,0 +1,376 @@
+query PullRequestDetail(
+  $owner: String!
+  $name: String!
+  $number: Int!
+  $viewer: String!
+  $checksCursor: String
+  $threadsCursor: String
+  $timelineCursor: String
+) {
+  repository(owner: $owner, name: $name) {
+    pullRequest(number: $number) {
+      id
+      number
+      title
+      body
+      state
+      isDraft
+      mergeable
+      mergeStateStatus
+      reviewDecision
+      author {
+        login
+      }
+      repository {
+        id
+        nameWithOwner
+      }
+      baseRefName
+      headRefName
+      headRefOid
+      additions
+      deletions
+      changedFiles
+      createdAt
+      updatedAt
+      url
+      viewerCanUpdate
+      viewerDidAuthor
+      viewerCanClose
+      viewerCanReopen
+      viewerCanReact
+      reactionGroups {
+        content
+        viewerHasReacted
+        reactors {
+          totalCount
+        }
+      }
+      labels(first: 20) {
+        nodes {
+          name
+          color
+        }
+      }
+      reviewRequests(first: 20) {
+        nodes {
+          asCodeOwner
+          requestedReviewer {
+            __typename
+            ... on User {
+              login
+            }
+            ... on Team {
+              slug
+            }
+            ... on Bot {
+              login
+            }
+            ... on Mannequin {
+              login
+            }
+            # No fragment for EnterpriseTeam: see queries/search.graphql for why
+            # (that type does not exist on GitHub Enterprise Server, and an
+            # inline fragment on a type absent from the schema is a query
+            # validation error there).
+          }
+        }
+      }
+      latestReviews(first: 20) {
+        nodes {
+          id
+          author {
+            login
+          }
+          state
+          body
+          submittedAt
+          url
+          reactionGroups {
+            content
+            viewerHasReacted
+            reactors {
+              totalCount
+            }
+          }
+        }
+      }
+      commits(last: 1) {
+        nodes {
+          commit {
+            oid
+            statusCheckRollup {
+              state
+              contexts(first: 100, after: $checksCursor) {
+                pageInfo {
+                  hasNextPage
+                  endCursor
+                }
+                nodes {
+                  __typename
+                  ... on CheckRun {
+                    name
+                    status
+                    conclusion
+                    detailsUrl
+                    isRequired(pullRequestNumber: $number)
+                    checkSuite {
+                      workflowRun {
+                        workflow {
+                          name
+                        }
+                      }
+                    }
+                  }
+                  ... on StatusContext {
+                    context
+                    state
+                    targetUrl
+                    description
+                    isRequired(pullRequestNumber: $number)
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+      reviewThreads(first: 50, after: $threadsCursor) {
+        pageInfo {
+          hasNextPage
+          endCursor
+        }
+        nodes {
+          id
+          isResolved
+          isOutdated
+          path
+          line
+          startLine
+          diffSide
+          startDiffSide
+          subjectType
+          viewerCanReply
+          viewerCanResolve
+          viewerCanUnresolve
+          comments(first: 100) {
+            nodes {
+              id
+              author {
+                login
+              }
+              body
+              createdAt
+              state
+              url
+              reactionGroups {
+                content
+                viewerHasReacted
+                reactors {
+                  totalCount
+                }
+              }
+              viewerCanUpdate
+              viewerCanDelete
+              pullRequestReview {
+                id
+              }
+            }
+          }
+        }
+      }
+      timelineItems(
+        first: 100
+        after: $timelineCursor
+        itemTypes: [
+          ISSUE_COMMENT
+          PULL_REQUEST_REVIEW
+          PULL_REQUEST_COMMIT
+          READY_FOR_REVIEW_EVENT
+          CONVERT_TO_DRAFT_EVENT
+          MERGED_EVENT
+          CLOSED_EVENT
+          REOPENED_EVENT
+          REVIEW_REQUESTED_EVENT
+          REVIEW_REQUEST_REMOVED_EVENT
+          HEAD_REF_FORCE_PUSHED_EVENT
+          RENAMED_TITLE_EVENT
+          LABELED_EVENT
+          UNLABELED_EVENT
+          BASE_REF_CHANGED_EVENT
+        ]
+      ) {
+        pageInfo {
+          hasNextPage
+          endCursor
+        }
+        nodes {
+          __typename
+          ... on IssueComment {
+            id
+            author {
+              login
+            }
+            body
+            createdAt
+            updatedAt
+            url
+            reactionGroups {
+              content
+              viewerHasReacted
+              reactors {
+                totalCount
+              }
+            }
+            viewerCanUpdate
+            viewerCanDelete
+          }
+          ... on PullRequestReview {
+            id
+            author {
+              login
+            }
+            body
+            state
+            submittedAt
+            url
+            reactionGroups {
+              content
+              viewerHasReacted
+              reactors {
+                totalCount
+              }
+            }
+          }
+          ... on PullRequestCommit {
+            commit {
+              oid
+              messageHeadline
+              author {
+                user {
+                  login
+                }
+                name
+              }
+              committedDate
+            }
+          }
+          ... on ReadyForReviewEvent {
+            actor {
+              login
+            }
+            createdAt
+          }
+          ... on ConvertToDraftEvent {
+            actor {
+              login
+            }
+            createdAt
+          }
+          ... on MergedEvent {
+            actor {
+              login
+            }
+            createdAt
+          }
+          ... on ClosedEvent {
+            actor {
+              login
+            }
+            createdAt
+          }
+          ... on ReopenedEvent {
+            actor {
+              login
+            }
+            createdAt
+          }
+          ... on ReviewRequestedEvent {
+            actor {
+              login
+            }
+            createdAt
+            requestedReviewer {
+              __typename
+              ... on User {
+                login
+              }
+              ... on Team {
+                slug
+              }
+            }
+          }
+          ... on ReviewRequestRemovedEvent {
+            actor {
+              login
+            }
+            createdAt
+            requestedReviewer {
+              __typename
+              ... on User {
+                login
+              }
+              ... on Team {
+                slug
+              }
+            }
+          }
+          ... on HeadRefForcePushedEvent {
+            actor {
+              login
+            }
+            createdAt
+            afterCommit {
+              abbreviatedOid
+            }
+          }
+          ... on RenamedTitleEvent {
+            actor {
+              login
+            }
+            createdAt
+            previousTitle
+            currentTitle
+          }
+          ... on LabeledEvent {
+            actor {
+              login
+            }
+            createdAt
+            label {
+              name
+            }
+          }
+          ... on UnlabeledEvent {
+            actor {
+              login
+            }
+            createdAt
+            label {
+              name
+            }
+          }
+          ... on BaseRefChangedEvent {
+            actor {
+              login
+            }
+            createdAt
+            previousRefName
+            currentRefName
+          }
+        }
+      }
+      reviews(first: 1, author: $viewer, states: [PENDING]) {
+        nodes {
+          id
+          body
+          state
+        }
+      }
+    }
+  }
+  rateLimit {
+    remaining
+    resetAt
+  }
+}

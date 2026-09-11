@@ -1,0 +1,105 @@
+{
+  "data": {
+    "repository": {
+      "pullRequest": {
+        "id": "PR_x",
+        "number": 1,
+        "title": "t",
+        "body": "",
+        "state": "OPEN",
+        "isDraft": false,
+        "mergeable": "MERGEABLE",
+        "mergeStateStatus": "CLEAN",
+        "reviewDecision": "",
+        "author": { "login": "a" },
+        "repository": { "id": "R_x", "nameWithOwner": "acme/widgets" },
+        "baseRefName": "main",
+        "headRefName": "feature",
+        "headRefOid": "abc",
+        "additions": 0,
+        "deletions": 0,
+        "changedFiles": 0,
+        "createdAt": "2026-09-01T00:00:00Z",
+        "updatedAt": "2026-09-01T00:00:00Z",
+        "url": "https://example.com/pr/1",
+        "viewerCanUpdate": false,
+        "viewerDidAuthor": false,
+        "viewerCanClose": false,
+        "viewerCanReopen": false,
+        "viewerCanReact": false,
+        "reactionGroups": [],
+        "labels": { "nodes": [] },
+        "reviewRequests": { "nodes": [] },
+        "latestReviews": { "nodes": [] },
+        "commits": {
+          "nodes": [
+            {
+              "commit": {
+                "oid": "abc",
+                "statusCheckRollup": {
+                  "state": "SUCCESS",
+                  "contexts": {
+                    "pageInfo": { "hasNextPage": false, "endCursor": "" },
+                    "nodes": [
+                      null,
+                      {
+                        "__typename": "CheckRun",
+                        "name": "build",
+                        "status": "COMPLETED",
+                        "conclusion": "SUCCESS",
+                        "detailsUrl": "",
+                        "isRequired": false,
+                        "checkSuite": { "workflowRun": null }
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "reviewThreads": {
+          "pageInfo": { "hasNextPage": false, "endCursor": "" },
+          "nodes": [
+            null,
+            {
+              "id": "RT_1",
+              "isResolved": false,
+              "isOutdated": false,
+              "path": "a.go",
+              "line": 1,
+              "startLine": 0,
+              "diffSide": "RIGHT",
+              "startDiffSide": "RIGHT",
+              "subjectType": "LINE",
+              "viewerCanReply": true,
+              "viewerCanResolve": true,
+              "viewerCanUnresolve": false,
+              "comments": { "nodes": [] }
+            }
+          ]
+        },
+        "timelineItems": {
+          "pageInfo": { "hasNextPage": false, "endCursor": "" },
+          "nodes": [
+            null,
+            {
+              "__typename": "IssueComment",
+              "id": "IC_1",
+              "author": { "login": "a" },
+              "body": "hello",
+              "createdAt": "2026-09-01T00:00:00Z",
+              "updatedAt": "2026-09-01T00:00:00Z",
+              "url": "https://example.com/ic/1",
+              "reactionGroups": [],
+              "viewerCanUpdate": false,
+              "viewerCanDelete": false
+            }
+          ]
+        },
+        "reviews": { "nodes": [] }
+      }
+    },
+    "rateLimit": { "remaining": 10, "resetAt": "2026-09-11T00:00:00Z" }
+  }
+}

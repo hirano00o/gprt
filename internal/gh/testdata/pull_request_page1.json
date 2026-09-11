@@ -1,0 +1,239 @@
+{
+  "data": {
+    "repository": {
+      "pullRequest": {
+        "id": "PR_kwDOAbCdef",
+        "number": 42,
+        "title": "Add PR detail query",
+        "body": "This PR adds the detail query.",
+        "state": "OPEN",
+        "isDraft": false,
+        "mergeable": "MERGEABLE",
+        "mergeStateStatus": "CLEAN",
+        "reviewDecision": "REVIEW_REQUIRED",
+        "author": { "login": "octocat" },
+        "repository": { "id": "R_kgDOAbCdef", "nameWithOwner": "acme/widgets" },
+        "baseRefName": "main",
+        "headRefName": "feature-x",
+        "headRefOid": "abc123def456",
+        "additions": 120,
+        "deletions": 30,
+        "changedFiles": 5,
+        "createdAt": "2026-09-01T10:00:00Z",
+        "updatedAt": "2026-09-10T15:30:00Z",
+        "url": "https://example.com/acme/widgets/pull/42",
+        "viewerCanUpdate": true,
+        "viewerDidAuthor": true,
+        "viewerCanClose": true,
+        "viewerCanReopen": false,
+        "viewerCanReact": true,
+        "reactionGroups": [
+          { "content": "THUMBS_UP", "viewerHasReacted": true, "reactors": { "totalCount": 3 } },
+          { "content": "HEART", "viewerHasReacted": false, "reactors": { "totalCount": 0 } }
+        ],
+        "labels": {
+          "nodes": [
+            { "name": "bug", "color": "d73a4a" },
+            { "name": "enhancement", "color": "a2eeef" }
+          ]
+        },
+        "reviewRequests": {
+          "nodes": [
+            { "asCodeOwner": true, "requestedReviewer": { "__typename": "User", "login": "reviewer1" } },
+            { "asCodeOwner": false, "requestedReviewer": { "__typename": "Team", "slug": "core-team" } }
+          ]
+        },
+        "latestReviews": {
+          "nodes": [
+            {
+              "id": "PRR_1",
+              "author": { "login": "reviewer1" },
+              "state": "CHANGES_REQUESTED",
+              "body": "Please address the comments.",
+              "submittedAt": "2026-09-05T12:00:00Z",
+              "url": "https://example.com/acme/widgets/pull/42#pullrequestreview-1",
+              "reactionGroups": []
+            }
+          ]
+        },
+        "commits": {
+          "nodes": [
+            {
+              "commit": {
+                "oid": "abc123def456",
+                "statusCheckRollup": {
+                  "state": "FAILURE",
+                  "contexts": {
+                    "pageInfo": { "hasNextPage": true, "endCursor": "checks-c1" },
+                    "nodes": [
+                      {
+                        "__typename": "CheckRun",
+                        "name": "build",
+                        "status": "COMPLETED",
+                        "conclusion": "SUCCESS",
+                        "detailsUrl": "https://example.com/checks/1",
+                        "isRequired": true,
+                        "checkSuite": { "workflowRun": { "workflow": { "name": "CI" } } }
+                      },
+                      {
+                        "__typename": "StatusContext",
+                        "context": "ci/legacy",
+                        "state": "FAILURE",
+                        "targetUrl": "https://example.com/legacy/1",
+                        "description": "legacy check failed",
+                        "isRequired": false
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "reviewThreads": {
+          "pageInfo": { "hasNextPage": true, "endCursor": "threads-c1" },
+          "nodes": [
+            {
+              "id": "RT_1",
+              "isResolved": false,
+              "isOutdated": false,
+              "path": "main.go",
+              "line": 10,
+              "startLine": 0,
+              "diffSide": "RIGHT",
+              "startDiffSide": "RIGHT",
+              "subjectType": "LINE",
+              "viewerCanReply": true,
+              "viewerCanResolve": true,
+              "viewerCanUnresolve": false,
+              "comments": {
+                "nodes": [
+                  {
+                    "id": "RC_1",
+                    "author": { "login": "reviewer1" },
+                    "body": "Please fix this.",
+                    "createdAt": "2026-09-05T12:01:00Z",
+                    "state": "SUBMITTED",
+                    "url": "https://example.com/acme/widgets/pull/42#discussion_r1",
+                    "reactionGroups": [],
+                    "viewerCanUpdate": false,
+                    "viewerCanDelete": false,
+                    "pullRequestReview": { "id": "PRR_1" }
+                  },
+                  {
+                    "id": "RC_2",
+                    "author": { "login": "octocat" },
+                    "body": "Working on it.",
+                    "createdAt": "2026-09-06T09:00:00Z",
+                    "state": "PENDING",
+                    "url": "https://example.com/acme/widgets/pull/42#discussion_r2",
+                    "reactionGroups": [],
+                    "viewerCanUpdate": true,
+                    "viewerCanDelete": true,
+                    "pullRequestReview": { "id": "PRV_1" }
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "timelineItems": {
+          "pageInfo": { "hasNextPage": true, "endCursor": "timeline-c1" },
+          "nodes": [
+            {
+              "__typename": "IssueComment",
+              "id": "IC_1",
+              "author": { "login": "octocat" },
+              "body": "General comment",
+              "createdAt": "2026-09-02T00:00:00Z",
+              "updatedAt": "2026-09-02T00:00:00Z",
+              "url": "https://example.com/ic/1",
+              "reactionGroups": [],
+              "viewerCanUpdate": true,
+              "viewerCanDelete": true
+            },
+            {
+              "__typename": "PullRequestReview",
+              "id": "PRR_2",
+              "author": { "login": "reviewer1" },
+              "body": "LGTM overall",
+              "state": "COMMENTED",
+              "submittedAt": "2026-09-03T00:00:00Z",
+              "url": "https://example.com/prr/2",
+              "reactionGroups": []
+            },
+            {
+              "__typename": "PullRequestCommit",
+              "commit": {
+                "oid": "c1",
+                "messageHeadline": "Fix bug",
+                "author": { "user": { "login": "octocat" }, "name": "The Octocat" },
+                "committedDate": "2026-09-01T11:00:00Z"
+              }
+            },
+            {
+              "__typename": "PullRequestCommit",
+              "commit": {
+                "oid": "c2",
+                "messageHeadline": "External patch",
+                "author": { "user": null, "name": "External Contributor" },
+                "committedDate": "2026-09-01T12:00:00Z"
+              }
+            },
+            { "__typename": "ReadyForReviewEvent", "actor": { "login": "octocat" }, "createdAt": "2026-09-01T13:00:00Z" },
+            { "__typename": "ConvertToDraftEvent", "actor": { "login": "octocat" }, "createdAt": "2026-09-01T13:05:00Z" },
+            { "__typename": "MergedEvent", "actor": { "login": "octocat" }, "createdAt": "2026-09-10T00:00:00Z" },
+            { "__typename": "ClosedEvent", "actor": { "login": "octocat" }, "createdAt": "2026-09-10T00:00:01Z" },
+            { "__typename": "ReopenedEvent", "actor": { "login": "octocat" }, "createdAt": "2026-09-10T00:00:02Z" },
+            {
+              "__typename": "ReviewRequestedEvent",
+              "actor": { "login": "octocat" },
+              "createdAt": "2026-09-01T14:00:00Z",
+              "requestedReviewer": { "__typename": "User", "login": "reviewer1" }
+            },
+            {
+              "__typename": "ReviewRequestRemovedEvent",
+              "actor": { "login": "octocat" },
+              "createdAt": "2026-09-01T15:00:00Z",
+              "requestedReviewer": { "__typename": "Team", "slug": "core-team" }
+            },
+            {
+              "__typename": "HeadRefForcePushedEvent",
+              "actor": { "login": "octocat" },
+              "createdAt": "2026-09-01T16:00:00Z",
+              "afterCommit": { "abbreviatedOid": "abc1234" }
+            },
+            {
+              "__typename": "RenamedTitleEvent",
+              "actor": { "login": "octocat" },
+              "createdAt": "2026-09-01T17:00:00Z",
+              "previousTitle": "Old title",
+              "currentTitle": "Add PR detail query"
+            },
+            {
+              "__typename": "LabeledEvent",
+              "actor": { "login": "octocat" },
+              "createdAt": "2026-09-01T18:00:00Z",
+              "label": { "name": "bug" }
+            },
+            {
+              "__typename": "UnlabeledEvent",
+              "actor": { "login": "octocat" },
+              "createdAt": "2026-09-01T19:00:00Z",
+              "label": { "name": "wontfix" }
+            },
+            {
+              "__typename": "BaseRefChangedEvent",
+              "actor": { "login": "octocat" },
+              "createdAt": "2026-09-01T20:00:00Z",
+              "previousRefName": "develop",
+              "currentRefName": "main"
+            }
+          ]
+        },
+        "reviews": { "nodes": [{ "id": "PRV_1", "body": "Draft comments", "state": "PENDING" }] }
+      }
+    },
+    "rateLimit": { "remaining": 4900, "resetAt": "2026-09-11T13:00:00Z" }
+  }
+}

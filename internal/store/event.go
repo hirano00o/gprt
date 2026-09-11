@@ -14,13 +14,21 @@ const (
 	// new items applied, a filter change, or a state change.
 	EventListChanged
 	// EventLoadingChanged fires whenever any section's loading flag
-	// changes.
+	// changes, or (M1b) whenever the current pull request's detail
+	// loading flag changes — matching Loading(), which folds in both. It
+	// always accompanies EventPRLoadingChanged for the latter case.
 	EventLoadingChanged
 	// EventRateLimitChanged fires whenever a fresh RateLimit is observed.
 	EventRateLimitChanged
 	// EventError fires whenever a fetch fails or a goroutine panics.
 	// Section is set when the error is scoped to one section.
 	EventError
+	// EventPRChanged fires whenever CurrentRef or CurrentPR would return
+	// something different: OpenPR, a cached or network detail applied,
+	// or ClosePR.
+	EventPRChanged
+	// EventPRLoadingChanged fires whenever DetailState().Loading changes.
+	EventPRLoadingChanged
 )
 
 // Event is published synchronously, on the UI goroutine, by Subscribe
