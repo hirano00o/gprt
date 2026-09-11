@@ -36,8 +36,8 @@ type Config struct {
 
 // ListConfig configures the pull request list view.
 type ListConfig struct {
-	// State filters the list by pull request state: "open", "closed",
-	// "merged", or "all".
+	// State filters the list by pull request state: "open", "closed"
+	// (closed but not merged), "merged", or "all".
 	State string `yaml:"state"`
 	// Sections are user-defined search sections appended after the
 	// built-in ones (direct review requests, team review requests, mine,

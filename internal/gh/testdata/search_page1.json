@@ -1,0 +1,74 @@
+{
+  "data": {
+    "search": {
+      "issueCount": 3,
+      "pageInfo": { "endCursor": "cursor-1", "hasNextPage": true },
+      "nodes": [
+        {
+          "id": "PR_1",
+          "number": 101,
+          "title": "Add feature A",
+          "state": "OPEN",
+          "isDraft": false,
+          "reviewDecision": "REVIEW_REQUIRED",
+          "author": { "login": "alice" },
+          "repository": { "id": "REPO_1", "nameWithOwner": "acme/widgets" },
+          "baseRefName": "main",
+          "headRefName": "feature-a",
+          "headRefOid": "abc123",
+          "createdAt": "2026-09-01T00:00:00Z",
+          "updatedAt": "2026-09-10T00:00:00Z",
+          "url": "https://example.com/acme/widgets/pull/101",
+          "additions": 10,
+          "deletions": 2,
+          "changedFiles": 3,
+          "viewerDidAuthor": true,
+          "labels": { "nodes": [{ "name": "bug", "color": "d73a4a" }] },
+          "reviewRequests": {
+            "nodes": [
+              { "asCodeOwner": true, "requestedReviewer": { "__typename": "User", "login": "bob" } },
+              { "asCodeOwner": false, "requestedReviewer": { "__typename": "Team", "slug": "core" } },
+              { "asCodeOwner": false, "requestedReviewer": { "__typename": "Bot", "login": "some-bot" } },
+              { "asCodeOwner": false, "requestedReviewer": { "__typename": "Mannequin", "login": "some-mannequin" } },
+              { "asCodeOwner": false, "requestedReviewer": { "__typename": "EnterpriseTeam" } },
+              { "asCodeOwner": false, "requestedReviewer": null }
+            ]
+          },
+          "latestReviews": {
+            "nodes": [
+              { "id": "REV_1", "author": { "login": "bob" }, "state": "APPROVED", "submittedAt": "2026-09-09T00:00:00Z" }
+            ]
+          },
+          "commits": {
+            "nodes": [{ "commit": { "statusCheckRollup": { "state": "SUCCESS" } } }]
+          }
+        },
+        {
+          "id": "PR_2",
+          "number": 102,
+          "title": "Fix bug B",
+          "state": "OPEN",
+          "isDraft": true,
+          "reviewDecision": null,
+          "author": { "login": "carol" },
+          "repository": { "id": "REPO_1", "nameWithOwner": "acme/widgets" },
+          "baseRefName": "main",
+          "headRefName": "fix-b",
+          "headRefOid": "def456",
+          "createdAt": "2026-09-02T00:00:00Z",
+          "updatedAt": "2026-09-11T00:00:00Z",
+          "url": "https://example.com/acme/widgets/pull/102",
+          "additions": 5,
+          "deletions": 1,
+          "changedFiles": 1,
+          "viewerDidAuthor": false,
+          "labels": { "nodes": [] },
+          "reviewRequests": { "nodes": [] },
+          "latestReviews": { "nodes": [] },
+          "commits": { "nodes": [{ "commit": { "statusCheckRollup": null } }] }
+        }
+      ]
+    },
+    "rateLimit": { "remaining": 4990, "resetAt": "2026-09-11T13:00:00Z" }
+  }
+}

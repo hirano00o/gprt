@@ -1,0 +1,12 @@
+{
+  "data": {
+    "viewer": {
+      "login": "octocat",
+      "name": "The Octocat"
+    },
+    "rateLimit": {
+      "remaining": 4999,
+      "resetAt": "2026-09-11T12:00:00Z"
+    }
+  }
+}
