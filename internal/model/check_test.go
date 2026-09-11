@@ -2,6 +2,24 @@ package model
 
 import "testing"
 
+func TestStatusState_Values(t *testing.T) {
+	tests := []struct {
+		val  StatusState
+		want string
+	}{
+		{StatusStateSuccess, "SUCCESS"},
+		{StatusStateFailure, "FAILURE"},
+		{StatusStatePending, "PENDING"},
+		{StatusStateError, "ERROR"},
+		{StatusStateExpected, "EXPECTED"},
+	}
+	for _, tc := range tests {
+		if string(tc.val) != tc.want {
+			t.Errorf("StatusState = %q, want %q", string(tc.val), tc.want)
+		}
+	}
+}
+
 func TestSummarize(t *testing.T) {
 	tests := []struct {
 		name   string
