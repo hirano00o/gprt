@@ -5,7 +5,7 @@ GitHub PR TUI application
 
 ## Status
 
-This project is under active development and is not yet usable end to end. Milestone **M1a (foundation and PR list)** is in progress: configuration, logging, the domain model, the disk cache store, the browser launcher, the GitHub search client, and the PR list store are implemented. The PR list UI, PR detail, diff view, editor, and review/mutation flows are still planned. See [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md) for the full status by requirement and milestone.
+Milestone **M1a (foundation and PR list)** is complete: `go run ./cmd/gprt` lists your pull requests, grouped into sections (direct review requests, team review requests, your own, other involvement), sorted, colour-coded, filterable with `/`, and kept fresh by a 5-minute auto-refresh and a manual `R` reload. Every navigation/action key is remappable via config, and `?` shows the effective bindings. The **[PR]**/**[Files]** detail tabs are placeholders (a title/repo/author/state/URL preview, and a static message respectively) — the full description/checks/conversation view (M1b), the diff view (M2), commenting/reviewing (M3a/M3b/M4), and PR creation/editing (M5) are still planned. See [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md) for the full status by requirement and milestone.
 
 ## Features (roadmap)
 
@@ -23,7 +23,7 @@ This project is under active development and is not yet usable end to end. Miles
 | F10 | CI checks: rollup icon, check list, refreshed with the PR, open a check in the browser |
 | F11 | Every navigation/action key is remappable in config; the editor's own keys are fixed |
 
-F1's GitHub search client and list store (`internal/gh`, `internal/store`) exist; its TUI, and every other feature above, are still planned. See [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md) for per-item status.
+F1 (the PR list, end to end — search client, store, and TUI) and the browser-opening half of F9 are done; every other feature above is still planned. See [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md) for per-item status.
 
 ## Requirements
 
@@ -36,7 +36,22 @@ F1's GitHub search client and list store (`internal/gh`, `internal/store`) exist
 go install github.com/hirano00o/gprt/cmd/gprt@latest
 ```
 
-(Once released — no `cmd/gprt` binary or tagged release exists yet.)
+(Once released — no tagged release exists yet. `go build ./cmd/gprt` builds a local `gprt` binary today.)
+
+## Usage
+
+```sh
+go run ./cmd/gprt              # or: gprt, once built/installed
+go run ./cmd/gprt --debug      # log to <state dir>/gprt.log (see below)
+go run ./cmd/gprt --config /path/to/config.yaml
+go run ./cmd/gprt --version
+```
+
+| Flag | Effect |
+|------|--------|
+| `--config <path>` | Use this config file instead of the default config directory's `config.yaml`; unlike the default path, a missing file here is a startup error, not a silent fallback to defaults |
+| `--debug` | Write JSON debug logs to `<state dir>/gprt.log` (also enabled by `GPRT_DEBUG`) |
+| `--version` | Print the version and exit |
 
 ## Configuration
 
@@ -64,7 +79,7 @@ list:
     - name: Backend
       query: "org:acme label:backend"
 keys:                     # action ID → key sequence (vim notation); unspecified actions keep defaults
-  list.toggle: "<C-w>o"
+  global.toggle_list: "<C-w>o"
   diff.comment: "c"
   pr.submit: "S"
 ```
@@ -76,7 +91,7 @@ Other directories used by `gprt`:
 
 ## Keybindings
 
-Keybindings are vim-style and remappable through the `keys:` config section. See [docs/KEYBINDINGS.md](docs/KEYBINDINGS.md) for the full table and action IDs.
+Keybindings are vim-style and remappable through the `keys:` config section. `j`/`k`/`gg`/`G`/`Ctrl-d`/`Ctrl-u` move the list cursor, `/` filters, `Enter`/`l` opens a PR, `o` opens it in the browser, `R` reloads, `Ctrl-w h`/`Ctrl-w l` move focus between the list and detail columns, `Ctrl-w o` toggles the list column, `gt`/`gT`/`Ctrl-l`/`Ctrl-h` switch the **[PR]**/**[Files]** tabs, `?` shows help, `:` opens a command line (`:q`, `:help`, `:messages`, `:reload`), and `q`/`Ctrl-c` quit. See [docs/KEYBINDINGS.md](docs/KEYBINDINGS.md) for the full table, action IDs, and which bindings are implemented yet.
 
 ## Development
 
