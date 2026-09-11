@@ -21,6 +21,7 @@ import (
 	"github.com/hirano00o/gprt/internal/store"
 	"github.com/hirano00o/gprt/internal/ui/keys"
 	"github.com/hirano00o/gprt/internal/ui/theme"
+	"github.com/hirano00o/gprt/internal/ui/widget"
 )
 
 // fakeGitHub is a minimal test double for store.GitHub: Viewer returns a
@@ -30,23 +31,81 @@ import (
 // every LoadMore page, since these tests never scroll past one page). A
 // test that needs to observe an in-flight fetch (for example the loading
 // marker a section's header row should show) can arm block via SetBlock so
-// SearchPullRequests waits until the test closes it.
+// SearchPullRequests waits until the test closes it. PullRequest similarly
+// returns whatever was registered via SetPRResult/SetPRError for the
+// requested ref, gated by a separate prBlock so a test can observe the PR
+// detail fetch's own loading/stale window independently of the list's.
 type fakeGitHub struct {
-	mu      sync.Mutex
-	viewer  model.User
-	results map[string]gh.SearchResult
-	errs    map[string]error
-	block   chan struct{}
+	mu       sync.Mutex
+	viewer   model.User
+	results  map[string]gh.SearchResult
+	errs     map[string]error
+	block    chan struct{}
+	prResult map[string]gh.DetailResult
+	prErr    map[string]error
+	prBlock  chan struct{}
+	prCalls  int
 }
 
 func (f *fakeGitHub) Viewer(context.Context) (model.User, model.RateLimit, error) {
 	return f.viewer, model.RateLimit{}, nil
 }
 
-// PullRequest is a minimal stub: no test in this package (M1a scope)
-// exercises PR detail fetching yet.
-func (f *fakeGitHub) PullRequest(context.Context, model.PRRef, string) (gh.DetailResult, error) {
-	return gh.DetailResult{}, nil
+func (f *fakeGitHub) PullRequest(ctx context.Context, ref model.PRRef, _ string) (gh.DetailResult, error) {
+	f.mu.Lock()
+	f.prCalls++
+	block := f.prBlock
+	f.mu.Unlock()
+	if block != nil {
+		select {
+		case <-block:
+		case <-ctx.Done():
+			return gh.DetailResult{}, ctx.Err()
+		}
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err, ok := f.prErr[ref.Key()]; ok {
+		return gh.DetailResult{}, err
+	}
+	return f.prResult[ref.Key()], nil
+}
+
+// SetPRResult changes what PullRequest returns for ref, clearing any error
+// previously armed for it via SetPRError.
+func (f *fakeGitHub) SetPRResult(ref model.PRRef, res gh.DetailResult) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.prResult == nil {
+		f.prResult = map[string]gh.DetailResult{}
+	}
+	f.prResult[ref.Key()] = res
+	delete(f.prErr, ref.Key())
+}
+
+// SetPRError makes PullRequest fail with err for ref.
+func (f *fakeGitHub) SetPRError(ref model.PRRef, err error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.prErr == nil {
+		f.prErr = map[string]error{}
+	}
+	f.prErr[ref.Key()] = err
+}
+
+// SetPRBlock arms (or, passed nil, disarms) a gate every subsequent
+// PullRequest call waits on before returning.
+func (f *fakeGitHub) SetPRBlock(ch chan struct{}) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.prBlock = ch
+}
+
+// PRCalls returns how many times PullRequest has been called so far.
+func (f *fakeGitHub) PRCalls() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.prCalls
 }
 
 func (f *fakeGitHub) SearchPullRequests(ctx context.Context, query, cursor string) (gh.SearchResult, error) {
@@ -118,12 +177,99 @@ func fixturePR(number int, title string) model.PullRequest {
 	}
 }
 
+// fixtureDetailPR builds a rich pull request detail fixture for ref,
+// covering every block the PR tab renders: a body with a heading and a
+// fenced code block, two labels, two reviewers (one approved, one
+// requested), three checks (success/failure/pending, the failing one with
+// a details URL), a timeline with an issue comment (with a reaction), a
+// review with a body, a commit, and a RenamedTitleEvent, and two review
+// threads (one resolved).
+func fixtureDetailPR(ref model.PRRef) model.PullRequest {
+	now := time.Now()
+	return model.PullRequest{
+		ID:               fmt.Sprintf("PR_detail_%d", ref.Number),
+		Ref:              ref,
+		Title:            "Add widget support",
+		Body:             "# Summary\n\nThis adds widgets.\n\n```\nfunc Widget() {}\n```\n",
+		Author:           model.User{Login: "alice"},
+		State:            model.PRStateOpen,
+		MergeStateStatus: model.MergeStateStatusClean,
+		BaseRefName:      "main",
+		HeadRefName:      "alice/widgets",
+		ReviewDecision:   model.ReviewDecisionReviewRequired,
+		Labels:           []model.Label{{Name: "backend"}, {Name: "urgent"}},
+		ReviewRequests:   []model.Reviewer{{Login: "bob", Kind: model.ReviewerKindUser}},
+		LatestReviews:    []model.Review{{Author: model.User{Login: "carol"}, State: model.ReviewStateApproved}},
+		Additions:        12,
+		Deletions:        4,
+		ChangedFiles:     2,
+		Checks: []model.Check{
+			{Name: "build", Status: model.CheckStatusCompleted, Conclusion: model.CheckConclusionSuccess, Workflow: "CI"},
+			{Name: "lint", Status: model.CheckStatusCompleted, Conclusion: model.CheckConclusionFailure, Workflow: "CI", URL: fmt.Sprintf("https://github.com/%s/runs/lint", ref.Repo.NameWithOwner())},
+			{Name: "deploy", Status: model.CheckStatusInProgress, Workflow: "CD"},
+		},
+		Timeline: []model.TimelineItem{
+			{
+				Kind: model.TimelineKindIssueComment,
+				IssueComment: &model.IssueComment{
+					ID:             "IC_1",
+					Author:         model.User{Login: "dave"},
+					Body:           "Thanks for the PR!",
+					CreatedAt:      now.Add(-30 * time.Minute),
+					ReactionGroups: []model.ReactionGroup{{Content: model.ReactionThumbsUp, Count: 2}},
+					URL:            fmt.Sprintf("https://github.com/%s/pull/%d#issuecomment-1", ref.Repo.NameWithOwner(), ref.Number),
+				},
+			},
+			{
+				Kind: model.TimelineKindReview,
+				Review: &model.Review{
+					ID:          "RV_1",
+					Author:      model.User{Login: "carol"},
+					State:       model.ReviewStateApproved,
+					Body:        "Looks great.",
+					SubmittedAt: now.Add(-20 * time.Minute),
+					URL:         fmt.Sprintf("https://github.com/%s/pull/%d#pullrequestreview-1", ref.Repo.NameWithOwner(), ref.Number),
+				},
+			},
+			{
+				Kind: model.TimelineKindCommit,
+				Commit: &model.Commit{
+					OID:         "abcdef1234567890",
+					Message:     "Add widget support",
+					Author:      model.User{Login: "alice"},
+					CommittedAt: now.Add(-1 * time.Hour),
+				},
+			},
+			{
+				Kind: model.TimelineKindEvent,
+				Event: &model.Event{
+					Type:  "RenamedTitleEvent",
+					Actor: model.User{Login: "alice"},
+					At:    now.Add(-40 * time.Minute),
+					// Matching internal/gh/pull_request_map.go's actual
+					// rendered format exactly (fmt.Sprintf("renamed from
+					// %q to %q", ...)): it is a complete phrase, not a
+					// fragment meant to follow a UI-side verb.
+					Detail: `renamed from "Add widgets" to "Add widget support"`,
+				},
+			},
+		},
+		ReviewThreads: []model.ReviewThread{
+			{ID: "t1", Path: "a.go", Line: 1, IsResolved: true},
+			{ID: "t2", Path: "b.go", Line: 2, IsResolved: false},
+		},
+		CreatedAt: now.Add(-2 * time.Hour),
+		UpdatedAt: now.Add(-5 * time.Minute),
+		URL:       fmt.Sprintf("https://github.com/%s/pull/%d", ref.Repo.NameWithOwner(), ref.Number),
+	}
+}
+
 // newTestApp builds an App wired to a fake GitHub with two fixture pull
 // requests in two different sections (direct review requests, and the
 // viewer's own), running against a tcell.SimulationScreen. It blocks until
 // both fixtures have loaded and registers a cleanup that stops the app and
 // waits for Run to return.
-func newTestApp(t *testing.T, overrides map[string]string) (*App, <-chan struct{}, *fakeGitHub) {
+func newTestApp(t *testing.T, overrides map[string]string) (*App, <-chan struct{}, *fakeGitHub, tcell.SimulationScreen) {
 	t.Helper()
 
 	km, err := keys.Merge(keys.Defaults(), overrides)
@@ -228,7 +374,7 @@ func newTestApp(t *testing.T, overrides map[string]string) (*App, <-chan struct{
 	// order is fully determined by fixed section priority, never by
 	// fetch-arrival order.
 	act(app.app, func() { app.listView.MoveTop() })
-	return app, done, fake
+	return app, done, fake, screen
 }
 
 // act runs f on the UI goroutine (via app.QueueUpdate) and waits for it to
@@ -240,20 +386,36 @@ func act(app *tview.Application, f func()) {
 // query runs f on the UI goroutine (via app.QueueUpdate) and returns its
 // result, so a test can read App- or widget-owned state without racing the
 // event loop goroutine the way a direct, unsynchronized field read would.
+// It forces one draw cycle first (via Application.ForceDraw, which is safe
+// to call from within a queued update — see its doc comment): unlike
+// widget.ListView, widget.DetailView only rebuilds its blocks inside Draw
+// (so its width-dependent content matches whatever is actually on screen),
+// and this test harness drives input through app.QueueUpdate directly
+// rather than tview's own polling event loop, which is what normally
+// triggers a draw after every real keypress (see Application.Run's
+// EventLoop) — without this, a query reading app.prView.Rows() right after
+// a state change could observe stale content from the last real draw.
 func query[T any](app *tview.Application, f func() T) T {
 	var v T
-	app.QueueUpdate(func() { v = f() })
+	app.QueueUpdate(func() {
+		app.ForceDraw()
+		v = f()
+	})
 	return v
 }
 
 // waitFor polls cond, evaluated on the UI goroutine via app.QueueUpdate,
-// until it returns true or a two-second deadline passes.
+// until it returns true or a two-second deadline passes. See query's doc
+// comment for why it forces a draw cycle before every check.
 func waitFor(t *testing.T, app *tview.Application, cond func() bool) {
 	t.Helper()
 	deadline := time.Now().Add(2 * time.Second)
 	for {
 		result := make(chan bool, 1)
-		app.QueueUpdate(func() { result <- cond() })
+		app.QueueUpdate(func() {
+			app.ForceDraw()
+			result <- cond()
+		})
 		if <-result {
 			return
 		}
@@ -297,7 +459,7 @@ func sendSpecial(app *tview.Application, key tcell.Key) {
 }
 
 func TestAppInitialRenderShowsSectionsAndRows(t *testing.T) {
-	app, _, _ := newTestApp(t, nil)
+	app, _, _, _ := newTestApp(t, nil)
 
 	title := query(app.app, func() string {
 		id := app.listView.CurrentID()
@@ -347,7 +509,7 @@ func containsSubstring(s, substr string) bool {
 }
 
 func TestAppJKMoveCursor(t *testing.T) {
-	app, _, _ := newTestApp(t, nil)
+	app, _, _, _ := newTestApp(t, nil)
 
 	first := query(app.app, app.listView.CurrentID)
 	sendRune(app.app, 'j')
@@ -362,7 +524,12 @@ func TestAppJKMoveCursor(t *testing.T) {
 }
 
 func TestAppStalePreviewCallbackIsIgnoredAfterSelectionMoves(t *testing.T) {
-	app, _, _ := newTestApp(t, nil)
+	app, _, fake, _ := newTestApp(t, nil)
+
+	fake.SetPRResult(fixtureRef(1), gh.DetailResult{PR: fixtureDetailPR(fixtureRef(1))})
+	secondPR := fixtureDetailPR(fixtureRef(2))
+	secondPR.Title = "Second PR detail"
+	fake.SetPRResult(fixtureRef(2), gh.DetailResult{PR: secondPR})
 
 	firstID := query(app.app, app.listView.CurrentID)
 	act(app.app, func() { app.listView.MoveBy(1) })
@@ -371,17 +538,19 @@ func TestAppStalePreviewCallbackIsIgnoredAfterSelectionMoves(t *testing.T) {
 		t.Fatal("MoveBy(1) did not move the cursor; the fixture needs at least two rows")
 	}
 
-	// A legitimate preview of the row the cursor is now on.
+	// A legitimate preview of the row the cursor is now on: showPreview now
+	// calls Store.OpenPR, whose fetch resolves asynchronously.
 	act(app.app, func() { app.showPreview(secondID) })
-	wantTitle := query(app.app, func() string {
-		if app.currentPR == nil {
-			return ""
-		}
-		return app.currentPR.item.PR.Title
+	waitFor(t, app.app, func() bool {
+		pr := app.deps.Store.CurrentPR()
+		return pr != nil && pr.Title == "Second PR detail"
 	})
-	if wantTitle == "" {
-		t.Fatal("showPreview(secondID) did not set currentPR")
-	}
+	wantTitle := query(app.app, func() string {
+		if pr := app.deps.Store.CurrentPR(); pr != nil {
+			return pr.Title
+		}
+		return ""
+	})
 
 	// A stale debounce callback for the FIRST row fires late — as if its
 	// timer.Stop() call had raced the timer already starting, which
@@ -391,18 +560,60 @@ func TestAppStalePreviewCallbackIsIgnoredAfterSelectionMoves(t *testing.T) {
 	act(app.app, func() { app.showPreview(firstID) })
 
 	gotTitle := query(app.app, func() string {
-		if app.currentPR == nil {
-			return ""
+		if pr := app.deps.Store.CurrentPR(); pr != nil {
+			return pr.Title
 		}
-		return app.currentPR.item.PR.Title
+		return ""
 	})
 	if gotTitle != wantTitle {
-		t.Fatalf("a stale preview callback overrode the current selection: currentPR.Title = %q, want %q", gotTitle, wantTitle)
+		t.Fatalf("a stale preview callback overrode the current selection: CurrentPR().Title = %q, want %q", gotTitle, wantTitle)
+	}
+}
+
+// TestAppStalePreviewIfNotAlreadyOpenCallbackIsIgnoredAfterSelectionMoves is
+// previewIfNotAlreadyOpen's sibling of the showPreview test above: the
+// debounce path has its own "id != CurrentID()" stale-cursor guard (see
+// previewIfNotAlreadyOpen's doc comment), exercised here directly rather
+// than only ever through showPreview.
+func TestAppStalePreviewIfNotAlreadyOpenCallbackIsIgnoredAfterSelectionMoves(t *testing.T) {
+	app, _, fake, _ := newTestApp(t, nil)
+
+	fake.SetPRResult(fixtureRef(1), gh.DetailResult{PR: fixtureDetailPR(fixtureRef(1))})
+	secondPR := fixtureDetailPR(fixtureRef(2))
+	secondPR.Title = "Second PR detail"
+	fake.SetPRResult(fixtureRef(2), gh.DetailResult{PR: secondPR})
+
+	firstID := query(app.app, app.listView.CurrentID)
+	act(app.app, func() { app.listView.MoveBy(1) })
+	secondID := query(app.app, app.listView.CurrentID)
+	if secondID == firstID {
+		t.Fatal("MoveBy(1) did not move the cursor; the fixture needs at least two rows")
+	}
+
+	sendSpecial(app.app, tcell.KeyEnter)
+	waitFor(t, app.app, func() bool {
+		pr := app.deps.Store.CurrentPR()
+		return pr != nil && pr.Title == "Second PR detail"
+	})
+
+	// A stale debounce callback for the FIRST row (the one the cursor was
+	// on before Enter moved focus and opened the second) fires late. It
+	// must not override the still-current selection.
+	act(app.app, func() { app.previewIfNotAlreadyOpen(firstID) })
+
+	gotTitle := query(app.app, func() string {
+		if pr := app.deps.Store.CurrentPR(); pr != nil {
+			return pr.Title
+		}
+		return ""
+	})
+	if gotTitle != "Second PR detail" {
+		t.Fatalf("a stale previewIfNotAlreadyOpen callback overrode the current selection: CurrentPR().Title = %q, want %q", gotTitle, "Second PR detail")
 	}
 }
 
 func TestAppGgAndG(t *testing.T) {
-	app, _, _ := newTestApp(t, nil)
+	app, _, _, _ := newTestApp(t, nil)
 	first := query(app.app, app.listView.CurrentID)
 
 	sendRune(app.app, 'G')
@@ -418,7 +629,7 @@ func TestAppGgAndG(t *testing.T) {
 }
 
 func TestAppFilterShowsAndNarrowsRows(t *testing.T) {
-	app, _, _ := newTestApp(t, nil)
+	app, _, _, _ := newTestApp(t, nil)
 
 	sendRune(app.app, '/')
 	waitFor(t, app.app, func() bool { return app.app.GetFocus() == app.filterInput })
@@ -444,7 +655,7 @@ func TestAppFilterShowsAndNarrowsRows(t *testing.T) {
 }
 
 func TestAppEscClearsFilter(t *testing.T) {
-	app, _, _ := newTestApp(t, nil)
+	app, _, _, _ := newTestApp(t, nil)
 
 	sendRune(app.app, '/')
 	waitFor(t, app.app, func() bool { return app.app.GetFocus() == app.filterInput })
@@ -458,7 +669,7 @@ func TestAppEscClearsFilter(t *testing.T) {
 }
 
 func TestAppLoadingChangedRefreshesListRowsImmediately(t *testing.T) {
-	app, _, fake := newTestApp(t, nil)
+	app, _, fake, _ := newTestApp(t, nil)
 
 	// Block every fetch this reload starts so the test can observe the
 	// list's rows while a section is still loading, before any result
@@ -493,7 +704,7 @@ func TestAppLoadingChangedRefreshesListRowsImmediately(t *testing.T) {
 }
 
 func TestAppCommandLineQuits(t *testing.T) {
-	app, done, _ := newTestApp(t, nil)
+	app, done, _, _ := newTestApp(t, nil)
 
 	sendRune(app.app, ':')
 	waitFor(t, app.app, func() bool { return app.app.GetFocus() == app.cmdLine })
@@ -509,7 +720,7 @@ func TestAppCommandLineQuits(t *testing.T) {
 }
 
 func TestAppToastTimerRaceDoesNotClearANewerToast(t *testing.T) {
-	app, _, _ := newTestApp(t, nil)
+	app, _, _, _ := newTestApp(t, nil)
 
 	var firstSeq int
 	act(app.app, func() {
@@ -529,7 +740,7 @@ func TestAppToastTimerRaceDoesNotClearANewerToast(t *testing.T) {
 }
 
 func TestAppToastClearsAfterItsDuration(t *testing.T) {
-	app, _, _ := newTestApp(t, nil)
+	app, _, _, _ := newTestApp(t, nil)
 
 	old := toastDuration
 	toastDuration = 20 * time.Millisecond
@@ -540,7 +751,7 @@ func TestAppToastClearsAfterItsDuration(t *testing.T) {
 }
 
 func TestAppHelpOpensAndCloses(t *testing.T) {
-	app, _, _ := newTestApp(t, nil)
+	app, _, _, _ := newTestApp(t, nil)
 
 	sendRune(app.app, '?')
 	waitFor(t, app.app, func() bool { return app.overlay == "help" })
@@ -550,7 +761,7 @@ func TestAppHelpOpensAndCloses(t *testing.T) {
 }
 
 func TestAppHelpAlsoClosesOnQuestionMark(t *testing.T) {
-	app, _, _ := newTestApp(t, nil)
+	app, _, _, _ := newTestApp(t, nil)
 
 	sendRune(app.app, '?')
 	waitFor(t, app.app, func() bool { return app.overlay == "help" })
@@ -560,7 +771,7 @@ func TestAppHelpAlsoClosesOnQuestionMark(t *testing.T) {
 }
 
 func TestAppOverlayForwardsUnboundKeysToItsTextView(t *testing.T) {
-	app, _, _ := newTestApp(t, nil)
+	app, _, _, _ := newTestApp(t, nil)
 
 	sendRune(app.app, '?')
 	waitFor(t, app.app, func() bool { return app.overlay == "help" })
@@ -577,47 +788,34 @@ func TestAppOverlayForwardsUnboundKeysToItsTextView(t *testing.T) {
 	}
 }
 
-func TestAppDetailPaneForwardsUnboundKeysForNativeScrolling(t *testing.T) {
-	app, _, _ := newTestApp(t, nil)
+// TestAppDetailPaneForwardsGenuinelyUnboundKeys guards the router's general
+// "let it through" fallback for the detail context: a key with no binding
+// in ContextDetail or ContextGlobal (unlike j/k/gg/G/Ctrl-d/Ctrl-u, which
+// M1b now binds to move the PR tab's DetailView cursor — see
+// TestAppJKGMoveWithinDetail) must still reach whatever has focus
+// unmolested, so a still-native TextView (the Files tab's placeholder,
+// until M2) keeps scrolling on any key gprt does not bind itself.
+func TestAppDetailPaneForwardsGenuinelyUnboundKeys(t *testing.T) {
+	app, _, _, _ := newTestApp(t, nil)
 
 	sendKey(app.app, tcell.NewEventKey(tcell.KeyCtrlW, 0, tcell.ModCtrl))
 	sendRune(app.app, 'l')
 	waitFor(t, app.app, func() bool { return app.isDetailFocused() })
 
-	// "j" is not bound in ContextDetail (only ContextList/Diff/Files):
-	// the router must return the original event so the focused TextView's
-	// own InputHandler can scroll with it.
 	var result *tcell.EventKey
 	act(app.app, func() {
-		result = app.handleKey(tcell.NewEventKey(tcell.KeyRune, 'j', tcell.ModNone))
+		result = app.handleKey(tcell.NewEventKey(tcell.KeyRune, 'z', tcell.ModNone))
 	})
 	if result == nil {
-		t.Fatal("handleKey swallowed an unbound key while a detail TextView was focused; it cannot scroll natively")
+		t.Fatal("handleKey swallowed a key bound in no context while a detail pane was focused")
 	}
-
-	// End-to-end: pumping enough long content and "j" presses through the
-	// real router should move the TextView's own scroll offset.
-	act(app.app, func() {
-		var b strings.Builder
-		for i := range 100 {
-			fmt.Fprintf(&b, "line %d\n", i)
-		}
-		app.prView.SetText(b.String())
-	})
-	for range 5 {
-		sendRune(app.app, 'j')
-	}
-	waitFor(t, app.app, func() bool {
-		row, _ := app.prView.GetScrollOffset()
-		return row > 0
-	})
 }
 
 func TestAppDetailPaneBoundKeysStillDispatch(t *testing.T) {
 	// A regression guard for the fix above: an actually-bound key in
 	// ContextDetail (gt) must still be consumed by the router, not
 	// forwarded to the TextView as if it were unbound.
-	app, _, _ := newTestApp(t, nil)
+	app, _, _, _ := newTestApp(t, nil)
 
 	sendKey(app.app, tcell.NewEventKey(tcell.KeyCtrlW, 0, tcell.ModCtrl))
 	sendRune(app.app, 'l')
@@ -629,7 +827,7 @@ func TestAppDetailPaneBoundKeysStillDispatch(t *testing.T) {
 }
 
 func TestAppCtrlWMovesFocus(t *testing.T) {
-	app, _, _ := newTestApp(t, nil)
+	app, _, _, _ := newTestApp(t, nil)
 
 	sendKey(app.app, tcell.NewEventKey(tcell.KeyCtrlW, 0, tcell.ModCtrl))
 	sendRune(app.app, 'l')
@@ -641,7 +839,7 @@ func TestAppCtrlWMovesFocus(t *testing.T) {
 }
 
 func TestAppCtrlWoCollapsesList(t *testing.T) {
-	app, _, _ := newTestApp(t, nil)
+	app, _, _, _ := newTestApp(t, nil)
 	if !query(app.app, func() bool { return app.listExpanded }) {
 		t.Fatal("list must start expanded")
 	}
@@ -652,7 +850,7 @@ func TestAppCtrlWoCollapsesList(t *testing.T) {
 }
 
 func TestAppCtrlWhReExpandsACollapsedList(t *testing.T) {
-	app, _, _ := newTestApp(t, nil)
+	app, _, _, _ := newTestApp(t, nil)
 
 	// Collapse the list and move focus to the detail column, matching
 	// what Ctrl-w o itself already does when the list has focus.
@@ -670,7 +868,7 @@ func TestAppCtrlWhReExpandsACollapsedList(t *testing.T) {
 }
 
 func TestAppGtSwitchesTab(t *testing.T) {
-	app, _, _ := newTestApp(t, nil)
+	app, _, _, _ := newTestApp(t, nil)
 
 	sendKey(app.app, tcell.NewEventKey(tcell.KeyCtrlW, 0, tcell.ModCtrl))
 	sendRune(app.app, 'l')
@@ -682,7 +880,7 @@ func TestAppGtSwitchesTab(t *testing.T) {
 }
 
 func TestAppRemappedKeyFromConfig(t *testing.T) {
-	app, _, _ := newTestApp(t, map[string]string{"list.down": "<C-n>"})
+	app, _, _, _ := newTestApp(t, map[string]string{"list.down": "<C-n>"})
 	first := query(app.app, app.listView.CurrentID)
 
 	sendKey(app.app, tcell.NewEventKey(tcell.KeyCtrlN, 0, tcell.ModCtrl))
@@ -696,7 +894,7 @@ func TestAppRemappedKeyFromConfig(t *testing.T) {
 
 func TestAppCtrlHAmbiguityBothSwitchTabs(t *testing.T) {
 	t.Run("legacy terminal reports KeyBackspace", func(t *testing.T) {
-		app, _, _ := newTestApp(t, nil)
+		app, _, _, _ := newTestApp(t, nil)
 		sendKey(app.app, tcell.NewEventKey(tcell.KeyCtrlW, 0, tcell.ModCtrl))
 		sendRune(app.app, 'l')
 		waitFor(t, app.app, func() bool { return app.isDetailFocused() })
@@ -709,7 +907,7 @@ func TestAppCtrlHAmbiguityBothSwitchTabs(t *testing.T) {
 	})
 
 	t.Run("CSI-u terminal reports KeyCtrlH", func(t *testing.T) {
-		app, _, _ := newTestApp(t, nil)
+		app, _, _, _ := newTestApp(t, nil)
 		sendKey(app.app, tcell.NewEventKey(tcell.KeyCtrlW, 0, tcell.ModCtrl))
 		sendRune(app.app, 'l')
 		waitFor(t, app.app, func() bool { return app.isDetailFocused() })
@@ -723,7 +921,7 @@ func TestAppCtrlHAmbiguityBothSwitchTabs(t *testing.T) {
 }
 
 func TestAppShowErrorFromABackgroundGoroutine(t *testing.T) {
-	app, _, _ := newTestApp(t, nil)
+	app, _, _, _ := newTestApp(t, nil)
 
 	done := make(chan struct{})
 	go func() {
@@ -753,7 +951,7 @@ func TestAppShowErrorFromABackgroundGoroutine(t *testing.T) {
 }
 
 func TestAppOpenBrowserFailureShowsAToast(t *testing.T) {
-	app, _, _ := newTestApp(t, nil)
+	app, _, _, _ := newTestApp(t, nil)
 
 	act(app.app, func() {
 		app.deps.Browser = &browser.Opener{
@@ -782,8 +980,26 @@ func TestAppOpenBrowserFailureShowsAToast(t *testing.T) {
 	}
 }
 
+// TestAppOpenBrowserWithPRTabFocusedAndNoPROpenShowsAToast guards against
+// "o" silently doing nothing on the PR tab before any pull request has
+// ever been opened (the empty-state block has no URL, and CurrentPR() is
+// nil): the user should be told there is nothing to open, not left
+// guessing whether the key was even registered.
+func TestAppOpenBrowserWithPRTabFocusedAndNoPROpenShowsAToast(t *testing.T) {
+	app, _, _, _ := newTestApp(t, nil)
+
+	sendKey(app.app, tcell.NewEventKey(tcell.KeyCtrlW, 0, tcell.ModCtrl))
+	sendRune(app.app, 'l')
+	waitFor(t, app.app, func() bool { return app.app.GetFocus() == app.prView })
+
+	sendRune(app.app, 'o')
+	waitFor(t, app.app, func() bool {
+		return containsSubstring(app.statusBar.toast, "no pull request open")
+	})
+}
+
 func TestAppPersistentErrorMarkerOnStatusBarAndHeaderRow(t *testing.T) {
-	app, _, fake := newTestApp(t, nil)
+	app, _, fake, _ := newTestApp(t, nil)
 
 	directQuery := gh.BuildSearchQuery(model.SectionKindDirectReview, "", "open")
 	fake.SetError(directQuery, errors.New("network unreachable"))
@@ -817,7 +1033,7 @@ func TestAppPersistentErrorMarkerOnStatusBarAndHeaderRow(t *testing.T) {
 }
 
 func TestAppSectionWarningsShowHeaderMarkerAndToastOnce(t *testing.T) {
-	app, _, fake := newTestApp(t, nil)
+	app, _, fake, _ := newTestApp(t, nil)
 
 	directQuery := gh.BuildSearchQuery(model.SectionKindDirectReview, "", "open")
 	fake.SetResult(directQuery, gh.SearchResult{
@@ -852,7 +1068,7 @@ func TestAppSectionWarningsShowHeaderMarkerAndToastOnce(t *testing.T) {
 }
 
 func TestAppMessagesOverlayListsSectionWarnings(t *testing.T) {
-	app, _, fake := newTestApp(t, nil)
+	app, _, fake, _ := newTestApp(t, nil)
 
 	directQuery := gh.BuildSearchQuery(model.SectionKindDirectReview, "", "open")
 	fake.SetResult(directQuery, gh.SearchResult{
@@ -889,8 +1105,42 @@ func TestAppMessagesOverlayListsSectionWarnings(t *testing.T) {
 	}
 }
 
+// TestAppMessagesOverlayListsDetailWarnings guards against the current
+// pull request's own DetailState().Warnings (a paginated timeline/threads/
+// checks connection truncated at its limit, for example) being invisible
+// anywhere in the UI: the PR tab's header already shows them as "⚠" lines,
+// but :messages should list them too, alongside section warnings, the same
+// way it already does for the list.
+func TestAppMessagesOverlayListsDetailWarnings(t *testing.T) {
+	app, _, fake, _ := newTestApp(t, nil)
+	ref := fixtureRef(1)
+	pr := fixtureDetailPR(ref)
+	fake.SetPRResult(ref, gh.DetailResult{PR: pr, Warnings: []string{"5 review threads omitted"}})
+
+	sendSpecial(app.app, tcell.KeyEnter)
+	waitFor(t, app.app, func() bool { return len(app.deps.Store.DetailState().Warnings) > 0 })
+
+	sendRune(app.app, ':')
+	waitFor(t, app.app, func() bool { return app.app.GetFocus() == app.cmdLine })
+	for _, r := range "messages" {
+		sendRune(app.app, r)
+	}
+	sendSpecial(app.app, tcell.KeyEnter)
+	waitFor(t, app.app, func() bool { return app.overlay == "messages" })
+
+	text := query(app.app, func() string {
+		return app.root.GetPage("messages").(*tview.TextView).GetText(true)
+	})
+	if !containsSubstring(text, "Warnings") {
+		t.Errorf(":messages text = %q, want it to include a \"Warnings\" heading", text)
+	}
+	if !containsSubstring(text, "5 review threads omitted") {
+		t.Errorf(":messages text = %q, want it to list the current pull request's detail warning", text)
+	}
+}
+
 func TestAppStatusBarHintFollowsFocus(t *testing.T) {
-	app, _, _ := newTestApp(t, nil)
+	app, _, _, _ := newTestApp(t, nil)
 	listHint := query(app.app, func() string { return app.statusBar.hint })
 	if !strings.Contains(listHint, "filter") {
 		t.Fatalf("initial hint should describe the list pane, got %q", listHint)
@@ -918,4 +1168,362 @@ func TestReviewerSpansBoldTheViewer(t *testing.T) {
 	if !bold["bob"] || bold["alice"] {
 		t.Fatalf("expected only the viewer's login in bold, got %v", bold)
 	}
+}
+
+// prViewText flattens every span of every rendered row of the PR tab's
+// DetailView into one string, for substring assertions that do not care
+// about styling or exact line boundaries.
+func prViewText(dv *widget.DetailView) string {
+	var sb strings.Builder
+	for _, row := range dv.Rows() {
+		for _, line := range row.Lines {
+			for _, s := range line {
+				sb.WriteString(s.Text)
+			}
+			sb.WriteByte('\n')
+		}
+	}
+	return sb.String()
+}
+
+// detailSelectableIndex returns the index, among rows' selectable rows
+// only, of the row with the given ID — the form widget.ListView.SetCursor
+// (and so widget.DetailView.SetCursor, promoted from it) expects — or -1 if
+// no selectable row has that ID.
+func detailSelectableIndex(rows []widget.ListRow, id string) int {
+	idx := -1
+	for _, r := range rows {
+		if !r.Selectable {
+			continue
+		}
+		idx++
+		if r.ID == id {
+			return idx
+		}
+	}
+	return -1
+}
+
+func TestAppEnterOpensPRAndShowsDetail(t *testing.T) {
+	app, _, fake, _ := newTestApp(t, nil)
+	ref := fixtureRef(1)
+	fake.SetPRResult(ref, gh.DetailResult{PR: fixtureDetailPR(ref)})
+
+	sendSpecial(app.app, tcell.KeyEnter)
+	waitFor(t, app.app, func() bool { return app.deps.Store.CurrentPR() != nil })
+	waitFor(t, app.app, func() bool { return app.isDetailFocused() })
+
+	waitFor(t, app.app, func() bool {
+		return containsSubstring(prViewText(app.prView), "Add widget support")
+	})
+}
+
+func TestAppFailedDetailFetchShowsErrorInsteadOfLoadingForever(t *testing.T) {
+	app, _, fake, _ := newTestApp(t, nil)
+	ref := fixtureRef(1)
+	fake.SetPRError(ref, errors.New("boom"))
+
+	sendSpecial(app.app, tcell.KeyEnter)
+	waitFor(t, app.app, func() bool { return app.deps.Store.DetailState().Err != nil })
+
+	waitFor(t, app.app, func() bool {
+		return containsSubstring(prViewText(app.prView), "Error loading pull request: boom")
+	})
+	if containsSubstring(prViewText(app.prView), "Loading pull request") {
+		t.Error("PR tab still shows the loading placeholder after the fetch failed")
+	}
+}
+
+func TestAppShowsCachedThenLiveDetail(t *testing.T) {
+	app, _, fake, _ := newTestApp(t, nil)
+	ref := fixtureRef(1)
+	fake.SetPRResult(ref, gh.DetailResult{PR: fixtureDetailPR(ref)})
+
+	// First open: no cache yet, so it goes straight to the (unblocked)
+	// network fetch, which also writes the on-disk cache entry.
+	sendSpecial(app.app, tcell.KeyEnter)
+	waitFor(t, app.app, func() bool { return !app.deps.Store.DetailState().FetchedAt.IsZero() })
+
+	// Re-open the same pull request with the network fetch blocked: OpenPR
+	// applies the now-cached detail synchronously, marked stale, before the
+	// (blocked) network fetch resolves. Re-opened explicitly via
+	// Store.OpenPR, not another Enter keypress: focus is already on the
+	// detail pane at this point, where "Enter" is unbound, so a second
+	// keypress here would exercise nothing.
+	block := make(chan struct{})
+	fake.SetPRBlock(block)
+	act(app.app, func() { app.deps.Store.OpenPR(ref) })
+
+	waitFor(t, app.app, func() bool {
+		return app.deps.Store.DetailState().Stale && containsSubstring(prViewText(app.prView), "cached")
+	})
+
+	close(block)
+	waitFor(t, app.app, func() bool {
+		return !app.deps.Store.DetailState().Stale && !containsSubstring(prViewText(app.prView), "cached")
+	})
+}
+
+func TestAppChecksSummaryAndRowsRenderInDetail(t *testing.T) {
+	app, _, fake, _ := newTestApp(t, nil)
+	ref := fixtureRef(1)
+	fake.SetPRResult(ref, gh.DetailResult{PR: fixtureDetailPR(ref)})
+
+	sendSpecial(app.app, tcell.KeyEnter)
+	waitFor(t, app.app, func() bool {
+		text := prViewText(app.prView)
+		return containsSubstring(text, "1 passed") && containsSubstring(text, "1 failed") && containsSubstring(text, "1 pending") &&
+			containsSubstring(text, "build") && containsSubstring(text, "lint") && containsSubstring(text, "deploy")
+	})
+}
+
+func TestAppConversationCommentAndEventRenderInDetail(t *testing.T) {
+	app, _, fake, _ := newTestApp(t, nil)
+	ref := fixtureRef(1)
+	fake.SetPRResult(ref, gh.DetailResult{PR: fixtureDetailPR(ref)})
+
+	sendSpecial(app.app, tcell.KeyEnter)
+	waitFor(t, app.app, func() bool {
+		text := prViewText(app.prView)
+		return containsSubstring(text, "dave") &&
+			containsSubstring(text, "commented") &&
+			containsSubstring(text, "Thanks for the PR!") &&
+			containsSubstring(text, `renamed from "Add widgets" to "Add widget support"`)
+	})
+}
+
+func TestAppJKGMoveWithinDetail(t *testing.T) {
+	app, _, fake, _ := newTestApp(t, nil)
+	ref := fixtureRef(1)
+	fake.SetPRResult(ref, gh.DetailResult{PR: fixtureDetailPR(ref)})
+
+	sendSpecial(app.app, tcell.KeyEnter)
+	waitFor(t, app.app, func() bool { return app.isDetailFocused() })
+	waitFor(t, app.app, func() bool { return app.prView.CurrentID() != "" })
+
+	first := query(app.app, app.prView.CurrentID)
+	sendRune(app.app, 'j')
+	waitFor(t, app.app, func() bool { return app.prView.CurrentID() != first })
+	second := query(app.app, app.prView.CurrentID)
+
+	sendRune(app.app, 'k')
+	waitFor(t, app.app, func() bool { return app.prView.CurrentID() == first })
+
+	sendRune(app.app, 'G')
+	waitFor(t, app.app, func() bool {
+		id := app.prView.CurrentID()
+		return id != first && id != second
+	})
+	last := query(app.app, app.prView.CurrentID)
+	if !strings.HasPrefix(last, "timeline:") {
+		t.Errorf("CurrentID() after G = %q, want the last conversation block (a timeline: ID)", last)
+	}
+}
+
+func TestAppOOpensCheckAndHeaderURLsInBrowser(t *testing.T) {
+	app, _, fake, _ := newTestApp(t, nil)
+	ref := fixtureRef(1)
+	pr := fixtureDetailPR(ref)
+	fake.SetPRResult(ref, gh.DetailResult{PR: pr})
+
+	sendSpecial(app.app, tcell.KeyEnter)
+	waitFor(t, app.app, func() bool { return app.isDetailFocused() })
+	waitFor(t, app.app, func() bool { return detailSelectableIndex(app.prView.Rows(), "check:1") >= 0 })
+
+	var opened []string
+	act(app.app, func() {
+		app.deps.Browser = &browser.Opener{
+			Env:      func(string) string { return "" },
+			Fallback: func(rawURL string) error { opened = append(opened, rawURL); return nil },
+		}
+	})
+
+	// opened is only ever mutated inside Fallback, which openCurrentInBrowser
+	// calls on the UI goroutine (via sendRune below); waitFor's own
+	// QueueUpdate round trip is what makes reading it directly afterwards
+	// (rather than nesting another query/QueueUpdate call, which would
+	// deadlock: see query's doc comment) race-free from the test goroutine.
+	failingCheckIdx := query(app.app, func() int { return detailSelectableIndex(app.prView.Rows(), "check:1") })
+	act(app.app, func() { app.prView.SetCursor(failingCheckIdx) })
+	sendRune(app.app, 'o')
+	waitFor(t, app.app, func() bool { return len(opened) == 1 })
+	if got := opened[0]; got != pr.Checks[1].URL {
+		t.Errorf("o on the failing check row opened %q, want its details URL %q", got, pr.Checks[1].URL)
+	}
+
+	act(app.app, func() { app.prView.MoveTop() }) // the header is the first selectable block
+	if id := query(app.app, app.prView.CurrentID); id != "header" {
+		t.Fatalf("MoveTop() landed on %q, want the header block", id)
+	}
+	sendRune(app.app, 'o')
+	waitFor(t, app.app, func() bool { return len(opened) == 2 })
+	if got := opened[1]; got != pr.URL {
+		t.Errorf("o on the header opened %q, want the PR URL %q", got, pr.URL)
+	}
+}
+
+func TestAppNarrowingScreenRewrapsDescription(t *testing.T) {
+	app, _, fake, screen := newTestApp(t, nil)
+	ref := fixtureRef(1)
+	pr := fixtureDetailPR(ref)
+	pr.Body = strings.Repeat("word ", 40)
+	fake.SetPRResult(ref, gh.DetailResult{PR: pr})
+
+	sendSpecial(app.app, tcell.KeyEnter)
+	waitFor(t, app.app, func() bool { return app.deps.Store.CurrentPR() != nil })
+
+	descLines := func() int {
+		for _, row := range app.prView.Rows() {
+			if row.ID == "description" {
+				return len(row.Lines)
+			}
+		}
+		return -1
+	}
+	wideLines := query(app.app, descLines)
+	if wideLines <= 0 {
+		t.Fatal("description block not found before resizing")
+	}
+
+	screen.SetSize(40, 30)
+	waitFor(t, app.app, func() bool { return descLines() != wideLines })
+}
+
+func TestAppReloadTriggersASecondPullRequestFetch(t *testing.T) {
+	app, _, fake, _ := newTestApp(t, nil)
+	ref := fixtureRef(1)
+	fake.SetPRResult(ref, gh.DetailResult{PR: fixtureDetailPR(ref)})
+
+	sendSpecial(app.app, tcell.KeyEnter)
+	waitFor(t, app.app, func() bool { return fake.PRCalls() >= 1 })
+	firstCalls := fake.PRCalls()
+
+	sendRune(app.app, 'R')
+	waitFor(t, app.app, func() bool { return fake.PRCalls() > firstCalls })
+}
+
+// TestAppRefreshListDoesNotReopenAnAlreadyOpenPR guards against a list
+// rebuild (auto-refresh, a filter keystroke, a loading/error transition,
+// ...) re-firing the cursor's changed callback for a row that did not
+// actually move — widget.ListView.SetRows calls its changed callback
+// unconditionally whenever a selectable row exists, not only when the
+// cursor's row changed — which would otherwise restart the preview
+// debounce and needlessly re-open (and briefly re-show as "(cached)") a
+// pull request that is already open and unchanged.
+func TestAppRefreshListDoesNotReopenAnAlreadyOpenPR(t *testing.T) {
+	app, _, fake, _ := newTestApp(t, nil)
+	ref := fixtureRef(1)
+	fake.SetPRResult(ref, gh.DetailResult{PR: fixtureDetailPR(ref)})
+
+	sendSpecial(app.app, tcell.KeyEnter)
+	waitFor(t, app.app, func() bool { return !app.deps.Store.DetailState().FetchedAt.IsZero() })
+	callsAfterOpen := fake.PRCalls()
+
+	for range 5 {
+		act(app.app, func() { app.refreshList() })
+	}
+	// Give the debounce timer (300ms) a chance to fire if the bug were
+	// still present, then synchronise with the UI goroutine once more so
+	// any callback it queued has definitely run.
+	time.Sleep(previewDebounce + 100*time.Millisecond)
+	act(app.app, func() {})
+
+	if got := fake.PRCalls(); got != callsAfterOpen {
+		t.Errorf("PullRequest was called %d times after refreshList with no cursor change, want still %d (no re-open)", got, callsAfterOpen)
+	}
+	if app.deps.Store.DetailState().Stale {
+		t.Error("DetailState().Stale = true after a redundant refresh; the already-open PR must not be re-shown as (cached)")
+	}
+}
+
+// TestAppOpenPRDoesNotSelfSustainALoopWhileFetchIsSlow reproduces the full
+// self-sustaining loop the redundant-re-open bug caused, not just its
+// single-refreshList symptom (TestAppRefreshListDoesNotReopenAnAlreadyOpenPR
+// above): OpenPR's own fetch starting fires EventLoadingChanged, whose
+// handler calls refreshList, which re-fires the cursor's changed callback
+// and restarts the preview debounce; with a fetch slower than the
+// debounce, the old code's debounce would fire while the first fetch was
+// still in flight and re-call OpenPR, starting a second fetch that itself
+// triggers another EventLoadingChanged/refreshList/debounce cycle,
+// indefinitely, for as long as the fetch keeps taking longer than the
+// debounce. The "already open" guard (previewIfNotAlreadyOpen) breaks the
+// cycle at its very first iteration, so exactly one PullRequest call ever
+// happens no matter how long the fetch is blocked.
+func TestAppOpenPRDoesNotSelfSustainALoopWhileFetchIsSlow(t *testing.T) {
+	app, _, fake, _ := newTestApp(t, nil)
+	ref := fixtureRef(1)
+	fake.SetPRResult(ref, gh.DetailResult{PR: fixtureDetailPR(ref)})
+
+	block := make(chan struct{})
+	fake.SetPRBlock(block)
+	t.Cleanup(func() { close(block) })
+
+	sendSpecial(app.app, tcell.KeyEnter)
+	waitFor(t, app.app, func() bool { return fake.PRCalls() >= 1 })
+
+	// Let several debounce windows pass while the fetch is still blocked:
+	// with the bug present, each one would have re-called OpenPR (a new
+	// fetch, itself blocked, itself triggering the next cycle).
+	time.Sleep(3*previewDebounce + 200*time.Millisecond)
+	act(app.app, func() {}) // synchronise with the UI goroutine once more
+
+	if got := fake.PRCalls(); got != 1 {
+		t.Errorf("PullRequest was called %d times while its own fetch was still in flight, want exactly 1 (no self-sustaining re-open loop)", got)
+	}
+}
+
+// TestAppSwitchingPRResetsDetailCursorToTop guards against the PR tab's
+// cursor carrying over between pull requests: block IDs are positional
+// (header, description, checks-summary, check:N, timeline:N), not scoped
+// to a pull request, so widget.ListView's own by-ID cursor preservation
+// cannot tell "the same PR, re-fetched" from "a completely different PR"
+// on its own.
+func TestAppSwitchingPRResetsDetailCursorToTop(t *testing.T) {
+	app, _, fake, _ := newTestApp(t, nil)
+	refA, refB := fixtureRef(1), fixtureRef(2)
+	fake.SetPRResult(refA, gh.DetailResult{PR: fixtureDetailPR(refA)})
+	fake.SetPRResult(refB, gh.DetailResult{PR: fixtureDetailPR(refB)})
+
+	// Open A (cursor starts on row A per newTestApp's MoveTop()), then B,
+	// so A's detail gets cached for a later re-open.
+	sendSpecial(app.app, tcell.KeyEnter)
+	waitFor(t, app.app, func() bool {
+		pr := app.deps.Store.CurrentPR()
+		return pr != nil && pr.Ref == refA
+	})
+
+	act(app.app, func() { app.listView.MoveBy(1) })
+	sendSpecial(app.app, tcell.KeyEnter)
+	waitFor(t, app.app, func() bool {
+		pr := app.deps.Store.CurrentPR()
+		return pr != nil && pr.Ref == refB
+	})
+
+	// Move the PR tab's cursor away from the top for PR B.
+	act(app.app, func() { app.prView.MoveBottom() })
+	waitFor(t, app.app, func() bool { return app.prView.CurrentID() != "header" })
+
+	// Re-open A: OpenPR applies its cache immediately.
+	act(app.app, func() { app.deps.Store.OpenPR(refA) })
+	waitFor(t, app.app, func() bool {
+		pr := app.deps.Store.CurrentPR()
+		return pr != nil && pr.Ref == refA
+	})
+
+	if id := query(app.app, app.prView.CurrentID); id != "header" {
+		t.Errorf("CurrentID() after switching to a different (cached) PR = %q, want the top block (header)", id)
+	}
+}
+
+func TestAppCtrlWhFromDetailReturnsToList(t *testing.T) {
+	app, _, fake, _ := newTestApp(t, nil)
+	ref := fixtureRef(1)
+	fake.SetPRResult(ref, gh.DetailResult{PR: fixtureDetailPR(ref)})
+
+	sendSpecial(app.app, tcell.KeyEnter)
+	waitFor(t, app.app, func() bool { return app.isDetailFocused() })
+
+	sendKey(app.app, tcell.NewEventKey(tcell.KeyCtrlW, 0, tcell.ModCtrl))
+	sendRune(app.app, 'h')
+	waitFor(t, app.app, func() bool { return app.app.GetFocus() == app.listView })
 }

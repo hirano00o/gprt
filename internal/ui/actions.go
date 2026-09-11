@@ -1,9 +1,9 @@
 package ui
 
 import (
-	"fmt"
 	"time"
 
+	"github.com/hirano00o/gprt/internal/model"
 	"github.com/hirano00o/gprt/internal/ui/theme"
 	"github.com/hirano00o/gprt/internal/ui/widget"
 )
@@ -43,7 +43,14 @@ func (a *App) checkSectionWarnings() {
 const previewDebounce = 300 * time.Millisecond
 
 // onRowChanged is ListView's changed callback: it fires on every cursor
-// movement (and once per SetRows, whenever a selectable row exists).
+// movement, and once per SetRows whenever a selectable row exists —
+// including a SetRows call the cursor's row did not actually change for
+// (a background list refresh, a filter keystroke, a loading/error
+// transition, ...), since SetRows notifies unconditionally. The debounce
+// this schedules therefore needs previewIfNotAlreadyOpen's "already open"
+// guard, not showPreview's unconditional one: otherwise every such refresh
+// would restart the debounce and needlessly re-open (showing it as
+// "(cached)" again) a pull request that is already open and unchanged.
 func (a *App) onRowChanged(row widget.ListRow) {
 	a.triggerLoadMoreIfNeeded(row.ID)
 
@@ -53,7 +60,7 @@ func (a *App) onRowChanged(row widget.ListRow) {
 	id := row.ID
 	a.previewTimer = time.AfterFunc(previewDebounce, func() {
 		a.app.QueueUpdateDraw(func() {
-			a.showPreview(id)
+			a.previewIfNotAlreadyOpen(id)
 		})
 	})
 }
@@ -70,12 +77,14 @@ func (a *App) onRowSelected(row widget.ListRow) {
 	a.focusDetail()
 }
 
-// showPreview sets the PR tab's content to the row identified by id, if it
-// is still the row under the cursor and present in the current rowIndex.
-// Both checks matter: the list may have changed between the debounce
-// firing and now, and time.Timer.Stop cannot recall a callback that has
-// already queued its QueueUpdateDraw, so a stale debounce for an earlier
-// row can run after Enter previewed the current one and must not win.
+// showPreview opens the pull request identified by id via Store.OpenPR, if
+// id is still the row under the cursor and present in the current
+// rowIndex. Both checks matter: the list may have changed between the
+// debounce firing and now, and time.Timer.Stop cannot recall a callback
+// that has already queued its QueueUpdateDraw, so a stale debounce for an
+// earlier row can run after Enter opened the current one and must not win.
+// The PR tab itself is re-rendered by the EventPRChanged subscription
+// OpenPR triggers (synchronously, for its cache-first apply), not here.
 func (a *App) showPreview(id string) {
 	if id != a.listView.CurrentID() {
 		return
@@ -84,8 +93,30 @@ func (a *App) showPreview(id string) {
 	if !ok {
 		return
 	}
-	a.currentPR = state
-	a.renderPRTab()
+	a.deps.Store.OpenPR(state.item.PR.Ref)
+}
+
+// previewIfNotAlreadyOpen is showPreview's counterpart for the debounce
+// path only (see onRowChanged's doc comment): it additionally skips the
+// call to Store.OpenPR when id's pull request is already the one open, so
+// a list rebuild that leaves the cursor on the same row cannot needlessly
+// re-open (and briefly re-show as cached) a pull request already showing
+// live data. Enter/l (onRowSelected) intentionally keep calling showPreview
+// directly: the user pressing Enter on the already-open row is a
+// deliberate request to (re-)open it, not an incidental side effect of a
+// refresh.
+func (a *App) previewIfNotAlreadyOpen(id string) {
+	if id != a.listView.CurrentID() {
+		return
+	}
+	state, ok := a.rowIndex[id]
+	if !ok {
+		return
+	}
+	if ref, open := a.deps.Store.CurrentRef(); open && ref == state.item.PR.Ref {
+		return
+	}
+	a.deps.Store.OpenPR(state.item.PR.Ref)
 }
 
 // triggerLoadMoreIfNeeded starts fetching the next page of a section once
@@ -105,19 +136,46 @@ func (a *App) triggerLoadMoreIfNeeded(id string) {
 	}
 }
 
-// renderPRTab renders the "PR" tab's placeholder content: the currently
-// previewed pull request's title, repository, author, state, and URL. The
-// full description/checks/conversation view arrives in M1b.
+// renderPRTab rebuilds the PR tab's blocks from the Store's current pull
+// request detail state (see detail.go's buildPRBlocks): header,
+// description, checks, and conversation timeline, or an informational
+// placeholder when nothing is open yet. When the open pull request has
+// changed since the last call, the DetailView's cursor is reset to the top
+// first (see lastRenderedRef's doc comment) — a plain SetBlocks call alone
+// would let widget.ListView's own by-ID cursor preservation carry the
+// cursor over onto whatever block of the new pull request happens to
+// share an ID with the old one's.
 func (a *App) renderPRTab() {
-	if a.currentPR == nil {
-		a.prView.SetText("Select a pull request to preview it here.")
-		return
+	ref, hasRef := a.deps.Store.CurrentRef()
+	if prRefChanged(a.lastRenderedRef, ref, hasRef) {
+		a.prView.SetRows(nil)
+		if hasRef {
+			r := ref
+			a.lastRenderedRef = &r
+		} else {
+			a.lastRenderedRef = nil
+		}
 	}
-	pr := a.currentPR.item.PR
-	a.prView.SetText(fmt.Sprintf(
-		"#%d %s\n\nRepository: %s\nAuthor:     %s\nState:      %s\nURL:        %s\n\nThe full detail view (description, checks, conversation) arrives in M1b.",
-		pr.Ref.Number, pr.Title, pr.Ref.Repo.NameWithOwner(), pr.Author.Login, string(pr.State), pr.URL,
+	a.prView.SetBlocks(buildPRBlocks(
+		a.deps.Store.CurrentPR(),
+		a.deps.Store.DetailState(),
+		a.deps.Store.Viewer().Login,
+		a.deps.Icons,
+		a.deps.Logger,
 	))
+}
+
+// prRefChanged reports whether current (present only when hasCurrent)
+// differs from the pull request ref last recorded as last.
+func prRefChanged(last *model.PRRef, current model.PRRef, hasCurrent bool) bool {
+	switch {
+	case last == nil && !hasCurrent:
+		return false
+	case last == nil || !hasCurrent:
+		return true
+	default:
+		return *last != current
+	}
 }
 
 // focusList moves focus to the PR list, re-expanding it first if it was
@@ -261,10 +319,12 @@ func (a *App) reload() {
 	a.deps.Store.Reload()
 }
 
-// openCurrentInBrowser opens the current pull request's URL: the list
-// cursor's row when the list has focus (so browsing does not wait for the
-// preview debounce), otherwise whatever is currently shown in the detail
-// column.
+// openCurrentInBrowser opens a URL in the browser: the list cursor's row's
+// PR URL when the list has focus (so browsing does not wait for the
+// preview debounce); the selected block's own URL when the PR tab has
+// focus, falling back to the open pull request's URL when the current
+// block has none of its own (for example a commit or event row); otherwise
+// whatever pull request is currently open, if any.
 func (a *App) openCurrentInBrowser() {
 	var url string
 	switch {
@@ -272,8 +332,24 @@ func (a *App) openCurrentInBrowser() {
 		if state, ok := a.rowIndex[a.listView.CurrentID()]; ok {
 			url = state.item.PR.URL
 		}
-	case a.currentPR != nil:
-		url = a.currentPR.item.PR.URL
+	case a.app.GetFocus() == a.prView:
+		url = a.prView.CurrentURL()
+		if url == "" {
+			if pr := a.deps.Store.CurrentPR(); pr != nil {
+				url = pr.URL
+			} else {
+				// The empty-state block (nothing open yet) has no URL of
+				// its own: without this, "o" here would silently do
+				// nothing, leaving the user unsure whether the key even
+				// registered.
+				a.showToast("no pull request open", theme.Warning)
+				return
+			}
+		}
+	default:
+		if pr := a.deps.Store.CurrentPR(); pr != nil {
+			url = pr.URL
+		}
 	}
 	if url == "" {
 		return

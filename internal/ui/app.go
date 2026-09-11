@@ -65,7 +65,7 @@ type App struct {
 	detailColumn *tview.Flex
 	tabBar       *tabBarView
 	detailPages  *tview.Pages
-	prView       *tview.TextView
+	prView       *widget.DetailView
 	filesView    *tview.TextView
 	currentTab   string
 
@@ -83,7 +83,6 @@ type App struct {
 	overlay    string // "" | "help" | "messages"
 	savedFocus tview.Primitive
 
-	currentPR *previewState
 	// rowIndex maps a ListRow.ID (a PR's PRRef.Key()) to the data needed
 	// to preview it and to decide whether reaching it should trigger
 	// Store.LoadMore, rebuilt every time buildRows runs.
@@ -93,6 +92,14 @@ type App struct {
 	// every refresh. Cleared for a section once its warnings go away, so
 	// a later, different batch of warnings is announced again.
 	warnedSections map[string]bool
+	// lastRenderedRef is the pull request ref renderPRTab last rendered
+	// the PR tab's blocks for (nil when none has been open yet), used to
+	// detect a switch to a different pull request so the PR tab's cursor
+	// resets to the top instead of carrying over a position that happens
+	// to share a block ID (block IDs are positional — "header",
+	// "timeline:2", ... — not scoped to a pull request) with whatever the
+	// previous one was showing.
+	lastRenderedRef *model.PRRef
 
 	previewTimer *time.Timer
 	toastTimer   *time.Timer

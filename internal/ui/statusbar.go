@@ -98,8 +98,10 @@ func (a *App) hintForFocus() string {
 	switch a.app.GetFocus() {
 	case a.listView:
 		return "j/k move  gg/G top/bottom  / filter  Enter open  o browser  R reload  ? help  q quit"
-	case a.prView, a.filesView:
-		return "j/k move  gt/Ctrl-l next tab  gT/Ctrl-h prev tab  Ctrl-w h back  ? help  q quit"
+	case a.prView:
+		return "j/k move  gg/G top/bottom  o browser  gt/Ctrl-l next tab  gT/Ctrl-h prev tab  Ctrl-w h back  ? help  q quit"
+	case a.filesView:
+		return "gt/Ctrl-l next tab  gT/Ctrl-h prev tab  Ctrl-w h back  ? help  q quit"
 	case a.filterInput:
 		return "type to filter  Enter keep  Esc clear"
 	case a.cmdLine:
@@ -139,19 +141,56 @@ func (a *App) renderStatusBar(spinnerFrame int) {
 	a.statusBar.SetRight(right)
 }
 
-// relativeTime renders t as a short "Ns ago" / "Nm ago" / "Nh ago" string
-// relative to time.Now(), matching the compact style of the rest of the
-// status bar.
+// relativeTime renders t as a short "Ns ago" / "Nm ago" / "Nh ago" /
+// "Nd ago" / "Nmo ago" / "Ny ago" string relative to time.Now(), matching
+// the compact style of the rest of the status bar (months and years are
+// rough 30-/365-day approximations, not calendar-aware — good enough for
+// a "how long ago" reading, which is all this is for; the PR tab's
+// "opened"/"updated" lines are what actually need the day/month/year
+// buckets, since a pull request can be arbitrarily old, unlike the status
+// bar's own "last refresh"). A zero t (never set — for example a PENDING
+// review's SubmittedAt, which the timeline should not normally carry but a
+// defensive caller may still hand in) has no reasonable relative time to
+// show, so it returns "" rather than the enormous, nonsensical duration
+// time.Since would otherwise compute against Go's zero time. A t in the
+// future (clock skew, or a rounding edge right around "now") reads as
+// "just now" rather than a negative duration.
 func relativeTime(t time.Time) string {
+	if t.IsZero() {
+		return ""
+	}
 	d := time.Since(t)
+	const day = 24 * time.Hour
 	switch {
+	case d < 0:
+		return "just now"
 	case d < time.Minute:
 		return fmt.Sprintf("%ds ago", int(d.Seconds()))
 	case d < time.Hour:
 		return fmt.Sprintf("%dm ago", int(d.Minutes()))
-	default:
+	case d < day:
 		return fmt.Sprintf("%dh ago", int(d.Hours()))
+	case d < 30*day:
+		return fmt.Sprintf("%dd ago", int(d/day))
+	case d < 365*day:
+		return fmt.Sprintf("%dmo ago", int(d/(30*day)))
+	default:
+		return fmt.Sprintf("%dy ago", int(d/(365*day)))
 	}
+}
+
+// withRelativeTime appends " " + relativeTime(t) to prefix, or returns
+// prefix unchanged when t is zero (see relativeTime's doc comment) — used
+// by the PR tab's header/comment/review/event lines so a missing
+// timestamp (a PENDING review's SubmittedAt, for instance) never leaves a
+// dangling trailing space, let alone relativeTime's own zero-time
+// nonsense.
+func withRelativeTime(prefix string, t time.Time) string {
+	rel := relativeTime(t)
+	if rel == "" {
+		return prefix
+	}
+	return prefix + " " + rel
 }
 
 // onLoadingChanged starts or stops the spinner ticker to match the Store's
