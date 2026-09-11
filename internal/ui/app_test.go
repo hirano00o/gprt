@@ -101,6 +101,13 @@ func (f *fakeGitHub) SetPRBlock(ch chan struct{}) {
 	f.prBlock = ch
 }
 
+// ChangedFiles always returns an empty result: no test in this file
+// exercises the Files tab's data (M2's UI slice arrives in a later
+// milestone), so this fake only needs to satisfy store.GitHub.
+func (f *fakeGitHub) ChangedFiles(context.Context, model.PRRef, int, string) (gh.FilesResult, error) {
+	return gh.FilesResult{}, nil
+}
+
 // PRCalls returns how many times PullRequest has been called so far.
 func (f *fakeGitHub) PRCalls() int {
 	f.mu.Lock()
