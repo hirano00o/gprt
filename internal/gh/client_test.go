@@ -78,6 +78,24 @@ func TestClientOptions_UsesGivenHostTokenAndTimeout(t *testing.T) {
 	}
 }
 
+func TestRestBaseURL(t *testing.T) {
+	tests := []struct {
+		host string
+		want string
+	}{
+		{"github.com", "https://api.github.com"},
+		{"api.github.com", "https://api.github.com"},
+		{"enterprise.example.com", "https://enterprise.example.com/api/v3"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.host, func(t *testing.T) {
+			if got := restBaseURL(tt.host); got != tt.want {
+				t.Errorf("restBaseURL(%q) = %q, want %q", tt.host, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestNew_DefaultTimeout(t *testing.T) {
 	// A client built without an explicit Timeout must still work end to
 	// end (the default is applied rather than left at zero/no-timeout, but
