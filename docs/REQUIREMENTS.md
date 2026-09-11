@@ -6,7 +6,7 @@ Status values: `Done`, `In progress`, `Planned`. Milestones refer to the branche
 
 | # | Requirement | Decision | Status | Milestone |
 |---|-------------|----------|--------|-----------|
-| F1 | PR list | Cross-repository via GitHub search. Built-in sections: direct review requests, team review requests, my PRs, other involvement; config adds custom search sections. Default `state:open`; filter can switch to closed / merged / all (re-search). | Planned | M1a |
+| F1 | PR list | Cross-repository via GitHub search. Built-in sections: direct review requests, team review requests, my PRs, other involvement; config adds custom search sections. Default `state:open`; filter can switch to closed / merged / all (re-search). Search client + store done; UI pending. | In progress | M1a |
 | F2 | PR create | Repository and branches chosen inside the TUI (no cwd git): repo picker, head branch (pushed), base (default branch preselected), title, body (vim editor, PR template pre-filled), reviewers (users + teams, autocomplete), draft flag. After creation the PR opens and its checks show/refresh. | Planned | M5 |
 | F3 | Files changed | Left file tree (diffview.nvim style, collapsible) + right diff. Unified diff with `+`/`-` colours immediately, language syntax highlighting (chroma) applied asynchronously. Comments on a line, a `V` range, or a whole file; replies; resolve/unresolve; inline foldable thread blocks (resolved folded by default). | Planned | M2, M3b |
 | F4 | Review submit | Two paths like GitHub: single comment published immediately, or pending review accumulating comments and submitted with Approve / Request changes / Comment + body. Pending comments editable/deletable before submit. | Planned | M3b, M4 |
@@ -32,10 +32,10 @@ Status values: `Done`, `In progress`, `Planned`. Milestones refer to the branche
 | Requirement | Decision | Status | Milestone |
 |-------------|----------|--------|-----------|
 | Lazy loading | List page 1 → detail → files pages → highlight, loaded on demand rather than up front. | Planned | M1a–M2 |
-| Cache | Disk cache with ETag revalidation for REST and stale-while-revalidate for GraphQL. The on-disk `Entry{Body, ETag, FetchedAt}` store (`internal/cache`) with atomic writes and PR-scoped invalidation exists; wiring it into the GitHub client's REST/GraphQL calls is not yet done. | In progress | M1a–M3b |
-| Refresh | 5-minute auto refresh (configurable via `refresh_interval`) for the list and the current PR. | Planned | M1a |
+| Cache | Disk cache with ETag revalidation for REST and stale-while-revalidate for GraphQL. The on-disk `Entry{Body, ETag, FetchedAt}` store (`internal/cache`) with atomic writes and PR-scoped invalidation exists; `internal/store` now caches search results per section (stale-while-revalidate: a cached page-1 result is shown immediately, marked stale, while a network refetch runs) and the viewer lookup. REST ETag revalidation (for file patches, M2) is not yet done. | In progress | M1a–M3b |
+| Refresh | 5-minute auto refresh (configurable via `refresh_interval`) for the list and the current PR. `internal/store.StartAutoRefresh` implements the ticker for the list; wiring it to the UI and to the current PR (M1b) is pending. | In progress | M1a |
 | Drafts | Drafts persisted on every change and restored across PR switches/reloads/restarts. | Planned | M3a |
-| Auth | Reused from `gh` (`GH_TOKEN`/`GITHUB_TOKEN` override; GHES via gh host config). | Planned | M1a |
+| Auth | Reused from `gh` (`GH_TOKEN`/`GITHUB_TOKEN` override; GHES via gh host config). Implemented by `gh.New` via go-gh's `auth.DefaultHost`/`auth.TokenForHost`. | Done | M1a |
 | Language | All docs, comments, commits, and UI strings in English. | Done | (ongoing convention) |
 | Stack | Go 1.26, tview + tcell only (no BubbleTea), no mouse support. The `go.mod` module targets Go 1.26; `tview`/`tcell` are not yet added as dependencies. | In progress | M1a |
 
@@ -50,6 +50,8 @@ These are not independently numbered requirements; they are the building blocks 
 | `internal/model` | Domain types: `PullRequest`, `ReviewThread`, `ReviewComment`, `IssueComment`, `Check`, `ChangedFile`, `Section`, `RepoRef`/`PRRef`, reactions, timeline | Done |
 | `internal/cache` | Disk+memory `Store` keyed by host/login/repo/PR, atomic writes, `InvalidatePR`/`InvalidateSearch` | Done |
 | `internal/browser` | URL opener resolving `GPRT_BROWSER` → config `browser` → `$BROWSER` → OS default, http(s)-only | Done |
+| `internal/gh` | GitHub client: `go-gh` auth resolution, embedded GraphQL queries, `Viewer`, `SearchPullRequests`, `BuildSearchQuery`, classified `Error{Kind}`. PR detail, files, and mutations are not yet implemented. | In progress |
+| `internal/store` | UI-goroutine-owned state for the PR list: sections (built-in + custom), cache-first load with stale-while-revalidate, generation tokens, in-flight dedup, pagination, filter (`repo:`/`author:`/`reviewer:`/`label:`/`state:` + free text), auto-refresh ticker, dedupe/sort in `Rows`. PR detail, files, drafts, and mutations are not yet implemented. | In progress |
 
 ## Open items to confirm against the live API
 
