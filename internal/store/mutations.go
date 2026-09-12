@@ -90,10 +90,26 @@ func (s *Store) PendingMutations() int {
 	return n
 }
 
+// MutationError returns the most recently finished mutation's own
+// standing error, or nil if it succeeded (or none has run yet). Unlike
+// LastError(), which also surfaces other, unrelated standing errors (the
+// current pull request's detail, its files, or a list section) whenever
+// none of them are masked by a higher-priority one, MutationError()
+// reports only the mutation queue's own outcome — the question a caller
+// tracking one specific send/edit/delete's own success actually needs
+// answered.
+func (s *Store) MutationError() error {
+	return s.mutationErr
+}
+
 // AddComment publishes a new general (non-review) comment on the current
-// pull request via GitHub's addComment mutation. A no-op (besides an
-// EventError) when no pull request is open, or when its detail has not
-// resolved yet (there is no node ID to attach the comment to).
+// pull request via GitHub's addComment mutation. Returns false (besides
+// emitting an EventError) without enqueueing anything when no pull request
+// is open, or when its detail has not resolved yet (there is no node ID to
+// attach the comment to) — callers that hold text a caller-visible buffer
+// depends on (a composer) must check this return value before discarding
+// that buffer, since a false return means no mutation now exists whose
+// completion could ever tell them the send failed.
 //
 // On success, the returned comment is appended to the current pull
 // request's Timeline optimistically (see appendTimelineComment), then the
@@ -102,9 +118,9 @@ func (s *Store) PendingMutations() int {
 // fetch already happens to be in flight, so a mutation's own result is
 // never left unconfirmed by a fresh network read purely because an
 // unrelated fetch beat it to starting.
-func (s *Store) AddComment(body string) {
+func (s *Store) AddComment(body string) bool {
 	if !s.mutationTarget() {
-		return
+		return false
 	}
 	subjectID := s.currentPR.ID
 
@@ -119,19 +135,22 @@ func (s *Store) AddComment(body string) {
 			s.emit(Event{Kind: EventPRChanged})
 		}, nil
 	})
+	return true
 }
 
 // EditComment updates an existing issue comment's body via GitHub's
-// updateIssueComment mutation. A no-op (besides an EventError) when no
-// pull request is open.
+// updateIssueComment mutation. Returns false (besides emitting an
+// EventError) without enqueueing anything when no pull request is open —
+// see AddComment's doc comment for why a caller holding text on the
+// strength of this call must check the return value.
 //
 // On success, the matching Timeline entry (found by id) is replaced
 // optimistically with the server's returned comment (see
 // replaceTimelineComment), then the pull request's cache entry is
 // invalidated and refetched, mirroring AddComment.
-func (s *Store) EditComment(id, body string) {
+func (s *Store) EditComment(id, body string) bool {
 	if !s.mutationTarget() {
-		return
+		return false
 	}
 
 	s.enqueueMutation("edit_comment", func(ctx context.Context) (func(), error) {
@@ -145,6 +164,7 @@ func (s *Store) EditComment(id, body string) {
 			s.emit(Event{Kind: EventPRChanged})
 		}, nil
 	})
+	return true
 }
 
 // DeleteComment removes an existing issue comment via GitHub's

@@ -187,12 +187,30 @@ func (s *Store) List(pr string) ([]Draft, error) {
 	return drafts, errors.Join(errs...)
 }
 
-// Count returns how many drafts exist for pr. It is exactly len(List(pr))
-// (drafts is small enough per pull request that a dedicated,
-// non-decoding count is not worth the extra code path), so a corrupt file
-// is excluded from the count the same way List excludes it, and Count
-// returns the same aggregated error List would.
+// Count returns how many drafts exist for pr: a plain directory listing
+// of its ".json" entries, deliberately never reading or decoding any of
+// them the way List does — callers such as gprt's own status bar call
+// Count on every render, far more often than they call List, so it must
+// stay cheap regardless of how many drafts exist or whether any of them
+// happen to be corrupt (which List reports as an aggregated error but
+// Count does not: a corrupt file still counts as "one draft" here).
 func (s *Store) Count(pr string) (int, error) {
-	list, err := s.List(pr)
-	return len(list), err
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	entries, err := os.ReadDir(s.prDir(pr))
+	if errors.Is(err, os.ErrNotExist) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, fmt.Errorf("drafts: count %s: %w", pr, err)
+	}
+
+	n := 0
+	for _, e := range entries {
+		if !e.IsDir() && filepath.Ext(e.Name()) == ".json" {
+			n++
+		}
+	}
+	return n, nil
 }
