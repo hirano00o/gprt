@@ -1,0 +1,27 @@
+mutation UpdateIssueComment($id: ID!, $body: String!) {
+  updateIssueComment(input: { id: $id, body: $body }) {
+    issueComment {
+      id
+      author {
+        login
+      }
+      body
+      createdAt
+      updatedAt
+      url
+      reactionGroups {
+        content
+        viewerHasReacted
+        reactors {
+          totalCount
+        }
+      }
+      viewerCanUpdate
+      viewerCanDelete
+    }
+  }
+  rateLimit {
+    remaining
+    resetAt
+  }
+}

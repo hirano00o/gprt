@@ -1,0 +1,29 @@
+mutation AddComment($id: ID!, $body: String!) {
+  addComment(input: { subjectId: $id, body: $body }) {
+    commentEdge {
+      node {
+        id
+        author {
+          login
+        }
+        body
+        createdAt
+        updatedAt
+        url
+        reactionGroups {
+          content
+          viewerHasReacted
+          reactors {
+            totalCount
+          }
+        }
+        viewerCanUpdate
+        viewerCanDelete
+      }
+    }
+  }
+  rateLimit {
+    remaining
+    resetAt
+  }
+}
