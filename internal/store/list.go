@@ -56,6 +56,16 @@ func (s *Store) Stop() {
 		// both.
 		s.filesCancel()
 	}
+	if s.mutationCancel != nil {
+		// Cancels whichever mutation is currently running, if any (see
+		// mutations.go: finishMutation treats a cancelled mutation's
+		// result as silent, matching every other fetch's own
+		// cancellation handling). Every mutation not yet started is
+		// dropped outright: nothing has been sent to GitHub for them yet,
+		// so there is nothing to invalidate or apply.
+		s.mutationCancel()
+	}
+	s.mutationQueue = nil
 }
 
 // applyCachedViewer synchronously applies the previously cached viewer, if
@@ -82,7 +92,7 @@ func (s *Store) applyCachedViewer() {
 		return
 	}
 	s.viewer = cached.User
-	s.rateLimit = cached.RateLimit
+	s.setRateLimit(cached.RateLimit)
 	s.emit(Event{Kind: EventViewerLoaded})
 }
 
@@ -164,13 +174,12 @@ func (s *Store) applyViewerResult(user model.User, rl model.RateLimit, err error
 	mismatch := !s.viewerConfirmed && s.viewer.Login != "" && user.Login != "" && s.viewer.Login != user.Login
 
 	s.viewer = user
-	s.rateLimit = rl
+	s.setRateLimit(rl)
 	s.viewerConfirmed = true
 	s.viewerLastErr = nil
 	s.recomputeLastErr()
 	s.cacheViewer(user, rl)
 	s.emit(Event{Kind: EventViewerLoaded})
-	s.emit(Event{Kind: EventRateLimitChanged})
 
 	if mismatch {
 		s.discardAllSectionItems()
@@ -587,10 +596,9 @@ func (s *Store) applyFetchResult(gen, i int, cursor string, res gh.SearchResult,
 	}
 	s.logNewWarnings(sec, res.Warnings)
 
-	s.rateLimit = res.RateLimit
+	s.setRateLimit(res.RateLimit)
 
 	s.emit(Event{Kind: EventListChanged})
-	s.emit(Event{Kind: EventRateLimitChanged})
 	s.emit(Event{Kind: EventLoadingChanged})
 
 	if sec.refreshTargetPages > 0 && sec.loadedPages < sec.refreshTargetPages && sec.hasNext {
@@ -601,18 +609,18 @@ func (s *Store) applyFetchResult(gen, i int, cursor string, res gh.SearchResult,
 }
 
 // recomputeLastErr sets lastErr to viewerLastErr if it is set, otherwise to
-// detailErr, otherwise to filesErr, otherwise to the first section (in
-// priority order) with a standing error, otherwise nil. It is called after
-// every viewer, detail, files, or section fetch outcome instead of
-// assigning lastErr directly, so a success clears it
-// (or an error sets it) as a pure function of the current, persistent
-// per-source error state rather than "whichever dispatch happened to run
-// last": the viewer fetch and each section's fetch are independent,
-// uncoordinated goroutines, so without this an unrelated success (say,
-// the viewer's own retry-fetch, which shares the same dispatch channel as
-// every section's fetch) could race with and silently clear a genuine,
-// still-standing error from a different source purely because of dispatch
-// ordering.
+// mutationErr, otherwise to detailErr, otherwise to filesErr, otherwise to
+// the first section (in priority order) with a standing error, otherwise
+// nil. It is called after every viewer, mutation, detail, files, or
+// section fetch outcome instead of assigning lastErr directly, so a
+// success clears it (or an error sets it) as a pure function of the
+// current, persistent per-source error state rather than "whichever
+// dispatch happened to run last": the viewer fetch and each section's
+// fetch are independent, uncoordinated goroutines, so without this an
+// unrelated success (say, the viewer's own retry-fetch, which shares the
+// same dispatch channel as every section's fetch) could race with and
+// silently clear a genuine, still-standing error from a different source
+// purely because of dispatch ordering.
 func (s *Store) recomputeLastErr() {
 	if s.panicErr != nil {
 		s.lastErr = s.panicErr
@@ -620,6 +628,14 @@ func (s *Store) recomputeLastErr() {
 	}
 	if s.viewerLastErr != nil {
 		s.lastErr = s.viewerLastErr
+		return
+	}
+	if s.mutationErr != nil {
+		// Ranked above detailErr/filesErr/section errors: a failed
+		// mutation is a direct result of something the user just did
+		// (send a comment, edit, delete), so it is more immediately
+		// relevant than a routine background fetch's standing error.
+		s.lastErr = s.mutationErr
 		return
 	}
 	if s.detailErr != nil {

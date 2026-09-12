@@ -41,6 +41,10 @@ const (
 	// changes. It always accompanies EventLoadingChanged, matching
 	// EventPRLoadingChanged's own pairing.
 	EventFilesLoadingChanged
+	// EventMutationChanged fires whenever Mutating() or
+	// PendingMutations() would return something different: a queued
+	// mutation starts running, or one finishes (successfully or not).
+	EventMutationChanged
 )
 
 // Event is published synchronously, on the UI goroutine, by Subscribe
