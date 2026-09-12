@@ -164,6 +164,8 @@ func classifyGraphQLError(gqlErr *api.GraphQLError, orig error) error {
 			return &Error{Kind: KindRateLimited, Message: item.Message, Err: orig}
 		case "FORBIDDEN", "INSUFFICIENT_SCOPES":
 			return &Error{Kind: KindAuth, Message: item.Message, Err: orig}
+		case "UNPROCESSABLE":
+			return &Error{Kind: KindValidation, Message: item.Message, Err: orig}
 		}
 	}
 	return &Error{Kind: KindUnknown, Message: strings.Join(messages, "; "), Err: orig}

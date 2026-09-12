@@ -1,0 +1,36 @@
+mutation AddThreadReply($threadId: ID!, $body: String!, $reviewId: ID) {
+  addPullRequestReviewThreadReply(
+    input: {
+      pullRequestReviewThreadId: $threadId
+      body: $body
+      pullRequestReviewId: $reviewId
+    }
+  ) {
+    comment {
+      id
+      author {
+        login
+      }
+      body
+      createdAt
+      state
+      url
+      reactionGroups {
+        content
+        viewerHasReacted
+        reactors {
+          totalCount
+        }
+      }
+      viewerCanUpdate
+      viewerCanDelete
+      pullRequestReview {
+        id
+      }
+    }
+  }
+  rateLimit {
+    remaining
+    resetAt
+  }
+}

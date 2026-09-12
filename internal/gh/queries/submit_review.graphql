@@ -1,0 +1,15 @@
+mutation SubmitReview($reviewId: ID!, $event: PullRequestReviewEvent!, $body: String) {
+  submitPullRequestReview(
+    input: { pullRequestReviewId: $reviewId, event: $event, body: $body }
+  ) {
+    pullRequestReview {
+      id
+      state
+      body
+    }
+  }
+  rateLimit {
+    remaining
+    resetAt
+  }
+}
