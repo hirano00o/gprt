@@ -36,15 +36,18 @@ import (
 // requested ref, gated by a separate prBlock so a test can observe the PR
 // detail fetch's own loading/stale window independently of the list's.
 type fakeGitHub struct {
-	mu       sync.Mutex
-	viewer   model.User
-	results  map[string]gh.SearchResult
-	errs     map[string]error
-	block    chan struct{}
-	prResult map[string]gh.DetailResult
-	prErr    map[string]error
-	prBlock  chan struct{}
-	prCalls  int
+	mu         sync.Mutex
+	viewer     model.User
+	results    map[string]gh.SearchResult
+	errs       map[string]error
+	block      chan struct{}
+	prResult   map[string]gh.DetailResult
+	prErr      map[string]error
+	prBlock    chan struct{}
+	prCalls    int
+	filesPages map[string][]gh.FilesResult
+	filesErrs  map[string]map[int]error
+	filesBlock chan struct{}
 }
 
 func (f *fakeGitHub) Viewer(context.Context) (model.User, model.RateLimit, error) {
@@ -101,11 +104,66 @@ func (f *fakeGitHub) SetPRBlock(ch chan struct{}) {
 	f.prBlock = ch
 }
 
-// ChangedFiles always returns an empty result: no test in this file
-// exercises the Files tab's data (M2's UI slice arrives in a later
-// milestone), so this fake only needs to satisfy store.GitHub.
-func (f *fakeGitHub) ChangedFiles(context.Context, model.PRRef, int, string) (gh.FilesResult, error) {
-	return gh.FilesResult{}, nil
+// ChangedFiles returns whatever page was registered for ref via
+// SetFilesPages (1-based, matching the REST endpoint's own "page"
+// parameter), or an empty result for a ref/page nothing was registered
+// for.
+func (f *fakeGitHub) ChangedFiles(ctx context.Context, ref model.PRRef, page int, _ string) (gh.FilesResult, error) {
+	f.mu.Lock()
+	block := f.filesBlock
+	f.mu.Unlock()
+	if block != nil {
+		select {
+		case <-block:
+		case <-ctx.Done():
+			return gh.FilesResult{}, ctx.Err()
+		}
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if errs, ok := f.filesErrs[ref.Key()]; ok {
+		if err, ok := errs[page]; ok {
+			return gh.FilesResult{}, err
+		}
+	}
+	pages := f.filesPages[ref.Key()]
+	if page < 1 || page > len(pages) {
+		return gh.FilesResult{}, nil
+	}
+	return pages[page-1], nil
+}
+
+// SetFilesPages registers the sequence of REST pages ChangedFiles returns
+// for ref, in page order (pages[0] is page 1, and so on).
+func (f *fakeGitHub) SetFilesPages(ref model.PRRef, pages []gh.FilesResult) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.filesPages == nil {
+		f.filesPages = map[string][]gh.FilesResult{}
+	}
+	f.filesPages[ref.Key()] = pages
+}
+
+// SetFilesError makes ChangedFiles fail with err for ref's given page
+// (1-based).
+func (f *fakeGitHub) SetFilesError(ref model.PRRef, page int, err error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.filesErrs == nil {
+		f.filesErrs = map[string]map[int]error{}
+	}
+	if f.filesErrs[ref.Key()] == nil {
+		f.filesErrs[ref.Key()] = map[int]error{}
+	}
+	f.filesErrs[ref.Key()][page] = err
+}
+
+// SetFilesBlock arms (or, passed nil, disarms) a gate every subsequent
+// ChangedFiles call waits on before returning.
+func (f *fakeGitHub) SetFilesBlock(ch chan struct{}) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.filesBlock = ch
 }
 
 // PRCalls returns how many times PullRequest has been called so far.

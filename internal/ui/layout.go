@@ -56,12 +56,11 @@ func (a *App) buildDetailColumn() {
 	a.tabBar.SetActive(0)
 
 	a.prView = widget.NewDetailView()
-	a.filesView = tview.NewTextView().SetWrap(true)
-	a.filesView.SetText("Files view arrives in M2.")
+	a.buildFilesTab()
 
 	a.detailPages = tview.NewPages()
 	a.detailPages.AddPage("pr", a.prView, true, true)
-	a.detailPages.AddPage("files", a.filesView, true, false)
+	a.detailPages.AddPage("files", a.filesFlex, true, false)
 	a.currentTab = "pr"
 
 	a.detailColumn = tview.NewFlex().SetDirection(tview.FlexRow)

@@ -37,6 +37,23 @@ func (a *App) handleKey(ev *tcell.EventKey) *tcell.EventKey {
 		return a.routeOverlayKey(ev, normalized)
 	}
 
+	// Ending an active visual selection on the diff needs its own, earlier
+	// check: Esc is not a dispatchable Action, so it would never otherwise
+	// reach diffView.EndVisual(). It still falls through to the Sequencer
+	// feed below (rather than returning immediately) so Esc keeps doing
+	// its usual job there too — resetting any pending multi-key prefix
+	// (see keys.validateSequenceStart) — since skipping that would let a
+	// half-typed sequence like "z" (a prefix of za/zM/zR/zh/zl) survive
+	// across the Esc keypress and combine with whatever key comes next.
+	if a.app.GetFocus() == a.diffView && a.diffView.InVisual() {
+		for _, k := range normalized {
+			if isEscKey(k) {
+				a.diffView.EndVisual()
+				break
+			}
+		}
+	}
+
 	ctxs := a.currentContexts()
 	anyConsumed := false
 	for _, k := range normalized {
@@ -49,16 +66,17 @@ func (a *App) handleKey(ev *tcell.EventKey) *tcell.EventKey {
 		}
 	}
 	if !anyConsumed {
-		// No context bound (or mid-sequence toward) this key at all: let
-		// it fall through to whatever has focus. list.down/up/top/bottom/
-		// half_down/half_up (j/k/gg/G/Ctrl-d/Ctrl-u) are bound in
-		// ContextDetail too, so they are consumed (as a no-op while the
-		// Files tab is focused — see focusedListPane) rather than
-		// reaching its placeholder TextView; only a genuinely unbound key
-		// (PgUp/PgDn, arrows, ...) actually falls through to it for
-		// native scrolling. For the ListView-backed list and PR tab,
-		// neither of which acts on a forwarded key at all, this is
-		// harmless either way.
+		// No context bound (or mid-sequence toward) this key at all: let it
+		// fall through to whatever has focus. list.down/up/top/bottom/
+		// half_down/half_up (j/k/gg/G/Ctrl-d/Ctrl-u) are bound in every
+		// movable context, including ContextFiles (see keys.defaultTable's
+		// own doc comment), so they are consumed above and reach the tree
+		// via focusedListPane's treeMovablePane rather than this fallthrough
+		// at all. A key genuinely unbound in every context (arrows, Home/End,
+		// mouse-adjacent keys, ...) still falls through here to whatever has
+		// focus; for the ListView-backed list, the PR tab, the tree, and the
+		// DiffView, none of which act on a forwarded key they do not already
+		// bind themselves, this is harmless either way.
 		return ev
 	}
 	return nil
@@ -147,17 +165,23 @@ func (a *App) currentContexts() []keys.Context {
 	switch a.app.GetFocus() {
 	case a.listView:
 		return []keys.Context{keys.ContextList, keys.ContextGlobal}
-	case a.prView, a.filesView:
+	case a.prView:
 		return []keys.Context{keys.ContextDetail, keys.ContextGlobal}
+	case a.treeView:
+		return []keys.Context{keys.ContextFiles, keys.ContextGlobal}
+	case a.diffView:
+		return []keys.Context{keys.ContextDiff, keys.ContextGlobal}
 	default:
 		return []keys.Context{keys.ContextGlobal}
 	}
 }
 
-// movablePane is the subset of widget.ListView's movement API that
+// movablePane is the subset of widget.ListView's/widget.DiffView's movement
+// API (plus treeMovablePane's native-key-synthesising adaptation of it) that
 // list.down/up/top/bottom/half_down/half_up dispatch to, so those actions
-// route to whichever ListView-backed pane currently has focus (the PR
-// list, or the PR tab's DetailView) rather than always moving the list.
+// route to whichever movable pane currently has focus (the PR list, the PR
+// tab's DetailView, the Files tab's tree, or its DiffView) rather than
+// always moving the list.
 type movablePane interface {
 	MoveBy(n int)
 	MoveTop()
@@ -166,10 +190,9 @@ type movablePane interface {
 }
 
 // noopMovablePane discards every movement: the default focusedListPane
-// result when neither ListView-backed pane has focus (for example the
-// Files tab's placeholder TextView), so a list movement key bound in
-// ContextDetail does nothing rather than silently moving the PR list in
-// the background.
+// result when no movable pane has focus at all, so a list movement key
+// bound in ContextDetail/ContextDiff does nothing rather than silently
+// moving the PR list in the background.
 type noopMovablePane struct{}
 
 func (noopMovablePane) MoveBy(int)       {}
@@ -177,22 +200,29 @@ func (noopMovablePane) MoveTop()         {}
 func (noopMovablePane) MoveBottom()      {}
 func (noopMovablePane) MoveHalfPage(int) {}
 
-// focusedListPane returns the ListView-backed pane that currently has
-// focus (the PR list, or the PR tab's DetailView), or a no-op pane when
-// neither does.
+// focusedListPane returns the movable pane that currently has focus (the PR
+// list, the PR tab's DetailView, the Files tab's tree — wrapped in a
+// treeMovablePane, see files.go — or its DiffView), or a no-op pane when
+// none does.
 func (a *App) focusedListPane() movablePane {
 	switch a.app.GetFocus() {
 	case a.listView:
 		return a.listView
 	case a.prView:
 		return a.prView
+	case a.treeView:
+		return treeMovablePane{tree: a.treeView}
+	case a.diffView:
+		return a.diffView
 	default:
 		return noopMovablePane{}
 	}
 }
 
 // dispatch runs the effect of a resolved Action. Actions not yet
-// implemented in M1a/M1b (files/diff/thread/comment/pr actions,
+// implemented (comment/thread/pr mutation actions — diff.comment,
+// diff.comment_file, thread.reply, thread.toggle_resolved, comment.edit,
+// comment.delete, comment.react, pr.pending, pr.submit, pr.edit,
 // list.new_pr) are silently ignored rather than surfacing a toast for
 // every exploratory keypress — docs/REQUIREMENTS.md tracks their
 // milestone.
@@ -213,11 +243,15 @@ func (a *App) dispatch(action keys.Action, count int) {
 	case keys.ActionListFilter:
 		a.openFilter()
 	case keys.ActionListOpen:
-		a.listView.Select()
+		if a.app.GetFocus() == a.treeView {
+			a.treeOpen()
+		} else {
+			a.listView.Select()
+		}
 	case keys.ActionGlobalFocusLeft:
-		a.focusList()
+		a.focusPrevPane()
 	case keys.ActionGlobalFocusRight:
-		a.focusDetail()
+		a.focusNextPane()
 	case keys.ActionGlobalToggleList:
 		a.toggleListColumn()
 	case keys.ActionGlobalReload:
@@ -234,5 +268,27 @@ func (a *App) dispatch(action keys.Action, count int) {
 		a.nextTab()
 	case keys.ActionDetailTabPrev:
 		a.prevTab()
+	case keys.ActionFilesToggleTree:
+		a.toggleTree()
+	case keys.ActionDiffVisual:
+		a.diffView.StartVisual()
+	case keys.ActionDiffFold:
+		a.diffView.ToggleFoldAtCursor()
+	case keys.ActionDiffUnfoldAll:
+		a.diffView.FoldAll(false)
+	case keys.ActionDiffFoldAll:
+		a.diffView.FoldAll(true)
+	case keys.ActionDiffScrollLeft:
+		a.diffView.ScrollHorizontal(-diffScrollStep)
+	case keys.ActionDiffScrollRight:
+		a.diffView.ScrollHorizontal(diffScrollStep)
+	case keys.ActionDiffNextThread:
+		a.diffView.NextThread()
+	case keys.ActionDiffPrevThread:
+		a.diffView.PrevThread()
+	case keys.ActionDiffNextFile:
+		a.stepFile(1)
+	case keys.ActionDiffPrevFile:
+		a.stepFile(-1)
 	}
 }

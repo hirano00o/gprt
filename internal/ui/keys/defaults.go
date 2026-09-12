@@ -33,26 +33,53 @@ type defaultEntry struct {
 // Ctrl-H keypress is exactly what reaches the router as <BS>. Binding the
 // literal parsed form of "<C-h>" here would never match anything Normalize
 // actually produces.
+//
+// list.down/up/top/bottom/half_down/half_up are bound in ContextFiles too
+// (M2 review round 2, item 14), using the exact same sequences as every
+// other movable context: the Files tab's tree pane is a tview.TreeView,
+// which already binds j/k/g/G (and, via 'K'/'J', parent/child navigation)
+// itself, but gt/gT (tab switching) are also bound in ContextFiles, so a
+// bare "g" always matches at least a Prefix there — it can never reach
+// tview's own native single-"g"-means-home handling by falling through
+// unconsumed (see keys.ctxTable.lookup/Sequencer.Feed: a key that is a
+// Prefix of any bound sequence in the current context is always Consumed,
+// regardless of whether it ever completes one). Binding list.top to "gg"
+// here, like ContextList/ContextDiff/ContextDetail already do, resolves
+// that: internal/ui's focusedListPane wraps the tree in a treeMovablePane
+// adapter that implements movablePane by synthesising the tree's own
+// native keys (j/k/PgDn/PgUp, and repeated k/j for top/bottom — see
+// treeMovablePane.MoveTop's own doc comment for why not tview's native "g"/
+// "G") through its InputHandler, rather than reimplementing tree traversal
+// by hand — the visible behaviour is unchanged for j/k/PgDn/PgUp, and "gg"
+// (not a lone "g") now reliably moves the cursor to the top instead of
+// never firing at all.
 var defaultTable = []defaultEntry{
-	{[]Context{ContextList, ContextDiff, ContextFiles, ContextDetail}, "j", ActionListDown},
-	{[]Context{ContextList, ContextDiff, ContextFiles, ContextDetail}, "k", ActionListUp},
-	{[]Context{ContextList, ContextDiff, ContextFiles, ContextDetail}, "gg", ActionListTop},
-	{[]Context{ContextList, ContextDiff, ContextFiles, ContextDetail}, "G", ActionListBottom},
-	{[]Context{ContextList, ContextDiff, ContextFiles, ContextDetail}, "<C-d>", ActionListHalfDown},
-	{[]Context{ContextList, ContextDiff, ContextFiles, ContextDetail}, "<C-u>", ActionListHalfUp},
+	{[]Context{ContextList, ContextFiles, ContextDiff, ContextDetail}, "j", ActionListDown},
+	{[]Context{ContextList, ContextFiles, ContextDiff, ContextDetail}, "k", ActionListUp},
+	{[]Context{ContextList, ContextFiles, ContextDiff, ContextDetail}, "gg", ActionListTop},
+	{[]Context{ContextList, ContextFiles, ContextDiff, ContextDetail}, "G", ActionListBottom},
+	{[]Context{ContextList, ContextFiles, ContextDiff, ContextDetail}, "<C-d>", ActionListHalfDown},
+	{[]Context{ContextList, ContextFiles, ContextDiff, ContextDetail}, "<C-u>", ActionListHalfUp},
 
 	{[]Context{ContextGlobal}, "<C-w>h", ActionGlobalFocusLeft},
 	{[]Context{ContextGlobal}, "<C-w>l", ActionGlobalFocusRight},
 	{[]Context{ContextComposer}, "<C-w>j", ActionGlobalFocusDown},
 	{[]Context{ContextComposer}, "<C-w>k", ActionGlobalFocusUp},
 
-	{[]Context{ContextDetail}, "<C-l>", ActionDetailTabNext},
-	{[]Context{ContextDetail}, "gt", ActionDetailTabNext},
-	{[]Context{ContextDetail}, "<BS>", ActionDetailTabPrev}, // Ctrl-h, see doc comment above
-	{[]Context{ContextDetail}, "gT", ActionDetailTabPrev},
+	// Bound in ContextFiles/ContextDiff too (not just ContextDetail): the
+	// Files tab's tree and diff panes are their own contexts, but tab
+	// switching must still work no matter which of the detail column's
+	// panes currently has focus.
+	{[]Context{ContextDetail, ContextFiles, ContextDiff}, "<C-l>", ActionDetailTabNext},
+	{[]Context{ContextDetail, ContextFiles, ContextDiff}, "gt", ActionDetailTabNext},
+	{[]Context{ContextDetail, ContextFiles, ContextDiff}, "<BS>", ActionDetailTabPrev}, // Ctrl-h, see doc comment above
+	{[]Context{ContextDetail, ContextFiles, ContextDiff}, "gT", ActionDetailTabPrev},
 
 	{[]Context{ContextGlobal}, "<C-w>o", ActionGlobalToggleList},
-	{[]Context{ContextFiles}, "<C-w>t", ActionFilesToggleTree},
+	// Bound in ContextDiff too (not just ContextFiles): once the tree is
+	// hidden, focus can only ever be on the diff, so the action to show it
+	// again must be reachable from there.
+	{[]Context{ContextFiles, ContextDiff}, "<C-w>t", ActionFilesToggleTree},
 	{[]Context{ContextGlobal}, "R", ActionGlobalReload},
 
 	{[]Context{ContextList}, "/", ActionListFilter},

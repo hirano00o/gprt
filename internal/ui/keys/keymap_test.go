@@ -62,7 +62,7 @@ func TestMergeOverridesReplaceAllContextsOfAnAction(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Merge returned error: %v", err)
 	}
-	for _, ctx := range []Context{ContextList, ContextDiff, ContextFiles} {
+	for _, ctx := range []Context{ContextList, ContextFiles, ContextDiff} {
 		if action, kind := km.Lookup(ctx, mustParse("<C-n>")); kind != Exact || action != ActionListDown {
 			t.Errorf("Lookup(%v, <C-n>) = (%q, %v), want (%q, Exact)", ctx, action, kind, ActionListDown)
 		}
