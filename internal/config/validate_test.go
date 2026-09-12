@@ -45,6 +45,21 @@ func TestConfig_Validate(t *testing.T) {
 			func(c *Config) { c.Keys = map[string]string{"list.filter": "/"} },
 			"",
 		},
+		{
+			"unknown highlight style",
+			func(c *Config) { c.HighlightStyle = "not-a-real-chroma-style" },
+			"is not a chroma style name",
+		},
+		{
+			"known highlight style is valid",
+			func(c *Config) { c.HighlightStyle = "monokai" },
+			"",
+		},
+		{
+			"empty highlight style is valid (theme.SetHighlightStyle treats it as \"use the default\")",
+			func(c *Config) { c.HighlightStyle = "" },
+			"",
+		},
 	}
 
 	for _, tc := range tests {
@@ -65,6 +80,26 @@ func TestConfig_Validate(t *testing.T) {
 				t.Errorf("Validate() = %q, want substring %q", err.Error(), tc.wantErr)
 			}
 		})
+	}
+}
+
+// TestConfig_Validate_HighlightStyleErrorMentionsExamples guards against
+// the highlight_style error regressing to a bare "unknown style %q" with no
+// pointer to where a valid name actually comes from (M2 review round 3,
+// item 27): a user hitting this at startup has no obvious way to discover
+// chroma's own style names otherwise.
+func TestConfig_Validate_HighlightStyleErrorMentionsExamples(t *testing.T) {
+	c := Default()
+	c.HighlightStyle = "not-a-real-chroma-style"
+
+	err := c.Validate()
+	if err == nil {
+		t.Fatal("Validate() = nil, want error")
+	}
+	for _, want := range []string{"chroma", "github-dark", "monokai", "dracula"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("Validate() error %q does not mention %q", err.Error(), want)
+		}
 	}
 }
 
