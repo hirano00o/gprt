@@ -15,9 +15,11 @@ import (
 
 	"github.com/hirano00o/gprt/internal/browser"
 	"github.com/hirano00o/gprt/internal/config"
+	"github.com/hirano00o/gprt/internal/drafts"
 	"github.com/hirano00o/gprt/internal/logging"
 	"github.com/hirano00o/gprt/internal/model"
 	"github.com/hirano00o/gprt/internal/store"
+	"github.com/hirano00o/gprt/internal/ui/editor"
 	"github.com/hirano00o/gprt/internal/ui/keys"
 	"github.com/hirano00o/gprt/internal/ui/theme"
 	"github.com/hirano00o/gprt/internal/ui/widget"
@@ -47,6 +49,12 @@ type Deps struct {
 	Recent func() []logging.Entry
 	// Version is gprt's version string, shown by the help overlay.
 	Version string
+	// Drafts persists in-progress composer text across PR switches,
+	// reloads, and restarts. A nil Drafts disables draft persistence
+	// (composer text is still usable within a single session — only
+	// write-through saving, restore, and the status bar's draft count
+	// are skipped).
+	Drafts *drafts.Store
 }
 
 // App is gprt's tview application: the root layout, the router, and the
@@ -125,6 +133,39 @@ type App struct {
 	cmdLine     *tview.InputField
 	cmdHistory  []string
 	cmdHistIdx  int
+
+	// composerFlex is added to detailColumn (a title line over
+	// composerEditor) while a composer is open, and nil otherwise — see
+	// openComposer/closeComposer in composer.go. composerReturnFocus is
+	// whichever primitive had focus right before the composer opened, so
+	// closing it (or a Ctrl-w j/k toggle) can restore it.
+	composerFlex         *tview.Flex
+	composerTitle        *tview.TextView
+	composerEditor       *editor.Editor
+	composerTarget       *composerTarget
+	composerReturnFocus  tview.Primitive
+	composerCtrlWPending bool
+	// composerDraftSaveErrShown latches once a write-through draft save
+	// fails for the currently open composer, so the error toasts once
+	// per composer session rather than on every keystroke.
+	composerDraftSaveErrShown bool
+	// composerDirty is set the first time onComposerChange actually fires
+	// for the currently open composer (a real user edit — see
+	// editor.Editor.SetText's own suppression of it for a prefill/
+	// restore) and reset on every openComposer. closeComposer's own
+	// "keep" path (":q") only saves the draft when this is true, so
+	// merely opening a composer and closing it again without typing
+	// anything never creates one — a pre-existing draft, loaded at open
+	// time and left untouched, still survives regardless, since not
+	// re-saving it is a no-op, not a deletion.
+	composerDirty bool
+	// pendingSend is set the instant a composer's Send closes it (the
+	// draft is deleted immediately — see composer.go's sendComposer) and
+	// cleared once the resulting mutation's own EventMutationChanged
+	// fires with Mutating() false: at most one can ever be outstanding,
+	// since sendComposer refuses to send at all while a mutation is
+	// already in flight.
+	pendingSend *pendingSend
 
 	seq *keys.Sequencer
 

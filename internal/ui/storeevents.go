@@ -25,8 +25,16 @@ func (a *App) subscribeStore() {
 		case store.EventViewerLoaded, store.EventRateLimitChanged:
 			a.renderStatusBar(0)
 		case store.EventPRChanged:
+			// Before anything else: a composer belongs to the pull
+			// request it was opened for (composerTarget.ref), never to
+			// "whichever one happens to be open" — see
+			// closeComposerIfWrongPR's own doc comment.
+			a.closeComposerIfWrongPR()
 			a.renderPRTab()
 			a.onPRChangedForFiles()
+			// The status bar's "✎ N" draft count is scoped to whichever
+			// pull request is currently open.
+			a.renderStatusBar(a.spinnerFrame)
 		case store.EventPRLoadingChanged:
 			a.renderStatusBar(0)
 			// A failed fetch changes DetailState().Err/Loading without
@@ -52,6 +60,8 @@ func (a *App) subscribeStore() {
 			}
 		case store.EventFilesLoadingChanged:
 			a.renderStatusBar(0)
+		case store.EventMutationChanged:
+			a.onMutationChanged()
 		case store.EventError:
 			if ev.Err != nil {
 				a.showToast(ev.Err.Error(), theme.Error)

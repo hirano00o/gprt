@@ -3,22 +3,33 @@ package ui
 import (
 	"github.com/gdamore/tcell/v2"
 
+	"github.com/hirano00o/gprt/internal/ui/editor"
 	"github.com/hirano00o/gprt/internal/ui/keys"
 )
 
 // handleKey is the App's single app.SetInputCapture function: every key
 // event is normalized and routed here before any primitive sees it.
-// Ctrl-C always quits immediately, regardless of what has focus (gprt has
-// no in-flight mutations yet to warrant the confirmation docs/DESIGN.md's
-// concurrency rule 9 describes; that confirmation is added once M3a's
-// mutation queue exists). Everywhere else, a focused text-entry field
-// (filter or command line) gets everything except Esc/Enter/history keys
-// forwarded unchanged; an open overlay only responds to q/Esc; otherwise
+// Ctrl-C quits immediately, unless a mutation is in flight, in which case
+// it asks for confirmation first (see quitWithConfirmIfMutating) —
+// regardless of what has focus, including the composer, so a composer's
+// own routing never needs to special-case it itself. Everywhere else, a
+// focused text-entry field (filter or command line) gets everything
+// except Esc/Enter/history keys forwarded unchanged; the composer (when
+// open and focused) gets everything except its own Ctrl-w chords (see
+// routeComposerKey); an open overlay only responds to q/Esc; otherwise
 // every key feeds the Sequencer and resolved actions dispatch.
 func (a *App) handleKey(ev *tcell.EventKey) *tcell.EventKey {
 	normalized := keys.Normalize(ev)
 	if containsCtrlC(normalized) {
-		a.quit()
+		// Ctrl-C bypasses routeComposerKey entirely (it is handled here,
+		// before the composer-focus check below, regardless of what has
+		// focus), so a Ctrl-w chord left pending from a keystroke just
+		// before it must be cleared here too — left set, the next
+		// ordinary key typed into the composer afterward (once any
+		// confirm dialog this shows is dismissed) would otherwise be
+		// misread as that chord's own continuation.
+		a.composerCtrlWPending = false
+		a.quitWithConfirmIfMutating()
 		return nil
 	}
 	// Every focus, tab, filter, command-line and overlay change originates
@@ -32,8 +43,25 @@ func (a *App) handleKey(ev *tcell.EventKey) *tcell.EventKey {
 	case a.cmdLine:
 		return a.routeCommandKey(ev, normalized)
 	}
+	// Not a switch case: tview.Flex.Focus (which Editor inherits, like
+	// tview.Form) delegates keyboard focus straight down to its TextArea
+	// child, so Application.GetFocus() itself never equals a.composerEditor
+	// — see Editor.HasFocus's own doc comment.
+	if a.composerEditor != nil && a.composerEditor.HasFocus() {
+		return a.routeComposerKey(ev, normalized)
+	}
 
 	if a.overlay != "" {
+		if a.overlay == "confirm" {
+			// A confirm dialog is a real focused *tview.Modal, not a
+			// scrollable TextView like help/messages: returning ev lets
+			// tview's own event loop hand it straight to the Modal's
+			// native InputHandler (arrow keys/Enter to pick a button,
+			// Escape to cancel), rather than routeOverlayKey's
+			// q/Esc-only handling, which would otherwise swallow every
+			// key the Modal itself needs.
+			return ev
+		}
 		return a.routeOverlayKey(ev, normalized)
 	}
 
@@ -166,7 +194,13 @@ func (a *App) currentContexts() []keys.Context {
 	case a.listView:
 		return []keys.Context{keys.ContextList, keys.ContextGlobal}
 	case a.prView:
-		return []keys.Context{keys.ContextDetail, keys.ContextGlobal}
+		// ContextPR first: it and ContextComment carry identical
+		// bindings for comment/thread actions (diff.comment,
+		// comment.edit, comment.delete, comment.react — see
+		// keys.defaultTable), so resolving through ContextPR alone
+		// covers both without needing to first determine whether the
+		// cursor is actually on a comment block.
+		return []keys.Context{keys.ContextPR, keys.ContextDetail, keys.ContextGlobal}
 	case a.treeView:
 		return []keys.Context{keys.ContextFiles, keys.ContextGlobal}
 	case a.diffView:
@@ -261,7 +295,7 @@ func (a *App) dispatch(action keys.Action, count int) {
 	case keys.ActionGlobalHelp:
 		a.openHelp()
 	case keys.ActionGlobalQuit:
-		a.quit()
+		a.quitWithConfirmIfMutating()
 	case keys.ActionGlobalCommand:
 		a.openCommandLine()
 	case keys.ActionDetailTabNext:
@@ -290,5 +324,103 @@ func (a *App) dispatch(action keys.Action, count int) {
 		a.stepFile(1)
 	case keys.ActionDiffPrevFile:
 		a.stepFile(-1)
+	case keys.ActionGlobalFocusDown, keys.ActionGlobalFocusUp:
+		a.toggleComposerFocus()
+	case keys.ActionDiffComment:
+		if a.app.GetFocus() == a.prView {
+			a.openGeneralCommentComposer()
+		}
+		// A diff-focused line/range comment is M3b scope; ActionDiffComment
+		// while the diff has focus is intentionally still a no-op here.
+	case keys.ActionCommentEdit:
+		a.editCurrentComment()
+	case keys.ActionCommentDelete:
+		a.deleteCurrentComment()
 	}
+}
+
+// quitWithConfirmIfMutating quits immediately, unless a mutation is
+// currently in flight (a comment being sent, edited, or deleted), in
+// which case it asks for confirmation first so Ctrl-C can never silently
+// discard a mutation the user cannot tell has not landed yet.
+func (a *App) quitWithConfirmIfMutating() {
+	if !a.deps.Store.Mutating() {
+		a.quit()
+		return
+	}
+	a.showConfirm("A comment is still being sent. Quit anyway?", "Quit", a.quit)
+}
+
+// isPlainRune reports whether k is r typed with no modifier.
+func isPlainRune(k keys.Key, r rune) bool {
+	return k.Kind == keys.KindRune && k.Rune == r && k.Mod == 0
+}
+
+// isCtrlW reports whether k is Ctrl-w.
+func isCtrlW(k keys.Key) bool {
+	return k.Kind == keys.KindRune && k.Rune == 'w' && k.Mod == tcell.ModCtrl
+}
+
+// routeComposerKey handles every key while the composer's editor has
+// focus: a pending Ctrl-w (composerCtrlWPending) resolves its own
+// h/l/j/k continuation exactly like the rest of the app's Ctrl-w chords
+// (focusPrevPane/focusNextPane/toggleComposerFocus) and drops any other
+// continuation; a fresh Ctrl-w arms that pending state; everything else —
+// including keys that are otherwise global bindings elsewhere, such as
+// "q" or "?", which are plain vim keys inside the editor (:q is how the
+// composer itself closes) — goes straight to Editor.Handle. Ctrl-C is
+// handled earlier, in handleKey, before focus is even considered.
+func (a *App) routeComposerKey(ev *tcell.EventKey, normalized []keys.Key) *tcell.EventKey {
+	for _, k := range normalized {
+		if a.composerCtrlWPending {
+			a.composerCtrlWPending = false
+			switch {
+			case isPlainRune(k, 'h'):
+				a.focusPrevPane()
+			case isPlainRune(k, 'l'):
+				a.focusNextPane()
+			case isPlainRune(k, 'j'), isPlainRune(k, 'k'):
+				a.toggleComposerFocus()
+			}
+			continue
+		}
+		// The focus chord only applies outside insert mode: vim's own
+		// Ctrl-w there deletes the word before the cursor (already in
+		// Vim's insert whitelist, forwarded straight to TextArea, which
+		// implements it natively), and every composer test that types
+		// through insert mode would otherwise never reach it at all.
+		if isCtrlW(k) && a.composerEditor.Vim().Mode() != editor.ModeInsert {
+			a.composerCtrlWPending = true
+			continue
+		}
+		// HandleKey, not Handle: ev may itself normalize to more than one
+		// key (Alt+rune -> [Esc, rune]), and normalized already reflects
+		// that full expansion — calling Handle(ev) again per key here
+		// would re-normalize and reprocess the same event once per key
+		// already produced from it. Stop as soon as an earlier key in
+		// that sequence closes the composer (":q"/Ctrl-s/...), since
+		// there would be nothing left to feed the rest to.
+		a.composerEditor.HandleKey(k, ev)
+		if a.composerEditor == nil {
+			break
+		}
+	}
+	return nil
+}
+
+// toggleComposerFocus implements Ctrl-w j/Ctrl-w k: it moves focus into
+// the composer's editor from wherever composerReturnFocus was captured
+// when it opened, or back out to that pane when the editor already has
+// focus. A no-op when no composer is open.
+func (a *App) toggleComposerFocus() {
+	if a.composerEditor == nil {
+		return
+	}
+	if a.composerEditor.HasFocus() {
+		if a.composerReturnFocus != nil {
+			a.app.SetFocus(a.composerReturnFocus)
+		}
+		return
+	}
+	a.app.SetFocus(a.composerEditor)
 }

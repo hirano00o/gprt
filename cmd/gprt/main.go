@@ -9,10 +9,12 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 
 	"github.com/hirano00o/gprt/internal/browser"
 	"github.com/hirano00o/gprt/internal/cache"
 	"github.com/hirano00o/gprt/internal/config"
+	"github.com/hirano00o/gprt/internal/drafts"
 	"github.com/hirano00o/gprt/internal/gh"
 	"github.com/hirano00o/gprt/internal/logging"
 	"github.com/hirano00o/gprt/internal/store"
@@ -96,6 +98,15 @@ func run() error {
 		return err
 	}
 
+	stateDir, err := config.StateDir()
+	if err != nil {
+		return err
+	}
+	draftStore, err := drafts.New(filepath.Join(stateDir, "drafts"))
+	if err != nil {
+		return err
+	}
+
 	st := store.New(store.Deps{
 		GitHub:   ghClient,
 		Cache:    cacheStore,
@@ -114,6 +125,7 @@ func run() error {
 		Logger:  logger,
 		Recent:  recentMessages(logger),
 		Version: version,
+		Drafts:  draftStore,
 	})
 
 	return app.Run()
