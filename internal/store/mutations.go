@@ -6,16 +6,36 @@
 // about overlapping in-flight requests.
 //
 // A mutation's own network call (mutation.run) executes in a goroutine
-// with only ctx and values captured by the enqueuing call (never the
-// Store itself, matching every other fetch in this package - see
-// docs/DESIGN.md's concurrency rules). Its result is applied back on the
-// UI goroutine (mutation.run's returned apply, called from
-// finishMutation) only if the pull request that was open when the
+// with only ctx and values captured by the enqueuing call or written by
+// its prepare closure (never the Store itself, matching every other fetch
+// in this package - see docs/DESIGN.md's concurrency rules). Its result is
+// applied back on the UI goroutine (mutation.run's returned apply, called
+// from finishMutation) only if the pull request that was open when the
 // mutation was enqueued (mutation.ref) is still the one open: otherwise
 // the optimistic apply is skipped (there is nothing sensible to apply it
-// to), but the target pull request's cache entry is still invalidated, so
-// a later re-open of it does not show data that mutation has since made
-// stale.
+// to). Once a mutation whose run actually reached GitHub finishes —
+// successfully or not — its target pull request's cache entry is
+// invalidated and, if it is still the currently open one, refetched (see
+// invalidateAndRefetch): a failed *network call* may still have partially
+// taken effect server-side (a multi-call run failing partway, or a
+// request that timed out after the server already applied it), so there
+// is no "known safe to leave alone" failure mode to special-case, and
+// converging on GitHub's own state unconditionally is simpler and safer
+// than guessing. A prepare failure never reached GitHub at all (see
+// below), so it skips this convergence step entirely: there is nothing
+// server-side that could have changed for it to converge on, and treating
+// it as if there were would invalidate/refetch a pull request — possibly
+// one no longer even open — for no reason every time a mutation's target
+// simply moved out from under it while queued.
+//
+// Some mutations (see enqueuePreparedMutation) also carry a prepare
+// closure that decides, on the UI goroutine immediately before run's
+// goroutine starts (not back at enqueue time), which GitHub call to
+// actually make: enqueue time is too early for an operation whose
+// behaviour depends on Store state another still-queued mutation might
+// change first (most notably, which send mode currently applies and
+// which pending review's ID to reuse for a review-comment mutation - see
+// internal/store/review.go).
 package store
 
 import (
@@ -40,6 +60,15 @@ var errNoPullRequestOpen = errors.New("store: no pull request open")
 // than to open a pull request they already opened.
 var errPullRequestNotLoaded = errors.New("store: pull request detail not loaded yet")
 
+// errMutationTargetChanged is returned by a mutation's prepare closure (see
+// enqueuePreparedMutation) when the pull request that was open at enqueue
+// time is no longer the open one, or its detail is no longer loaded, by the
+// time this mutation actually reached the front of the queue: nothing was
+// sent to GitHub, since whatever state prepare would otherwise have
+// snapshotted (which send mode applies, which pending review to reuse) can
+// no longer be trusted.
+var errMutationTargetChanged = errors.New("store: pull request changed before the mutation started; nothing was sent")
+
 // mutationTarget reports whether a mutation can be enqueued right now,
 // emitting the appropriate EventError otherwise. It never sets a standing
 // error: nothing was attempted.
@@ -58,19 +87,39 @@ func (s *Store) mutationTarget() bool {
 // mutation is one queued unit of work for the mutation queue. run executes
 // in a goroutine started by startNextMutation: it must not read or write
 // any Store field, only ctx and values already captured in its closure by
-// the enqueuing call (see enqueueMutation's callers below). Its returned
-// apply, if non-nil, is invoked on the UI goroutine by finishMutation, but
-// only when ref is still the currently open pull request.
+// the enqueuing call or written by prepare (see enqueueMutation's/
+// enqueuePreparedMutation's callers below). Its returned apply, if non-nil,
+// is invoked on the UI goroutine by finishMutation, but only when ref is
+// still the currently open pull request.
 type mutation struct {
 	// name identifies the mutation for logging (for example
-	// "add_comment").
+	// "add_comment"). For an operation whose actual GitHub call depends on
+	// state only known once prepare runs (single comment vs. add-to-review,
+	// say), name is mode-independent; the specific path actually taken is
+	// logged at Debug from inside run instead.
 	name string
 	// ref is the pull request that was open when this mutation was
-	// enqueued (see enqueueMutation), used both for the generation guard
-	// in finishMutation and to know which pull request's cache entry to
-	// invalidate on success.
+	// enqueued (see enqueueMutation/enqueuePreparedMutation), used both for
+	// the generation guard in finishMutation and to know which pull
+	// request's cache entry to invalidate.
 	ref model.PRRef
-	run func(ctx context.Context) (apply func(), err error)
+	// prepare, if non-nil, runs synchronously on the UI goroutine from
+	// startNextMutation, immediately before run's goroutine is started —
+	// see enqueuePreparedMutation's doc comment for why this exists (a
+	// mutation queued behind another must not decide "which GitHub call to
+	// make" from state snapshotted back at enqueue time, which may be
+	// stale by the time it actually runs) and why writing to variables
+	// run's closure later reads is race-free despite crossing goroutines
+	// with no lock (prepare's write happens-before run's goroutine is even
+	// started, let alone reads them). A non-nil error aborts the mutation
+	// without ever starting run's goroutine or calling GitHub:
+	// startNextMutation routes it straight to finishMutation as the
+	// mutation's own failure, with no apply, cancelled=false, and
+	// sent=false — GitHub was never called, so finishMutation's failure
+	// path must not invalidate/refetch anything for it (see
+	// invalidateAndRefetch and finishMutation's own doc comments).
+	prepare func() error
+	run     func(ctx context.Context) (apply func(), err error)
 }
 
 // Mutating reports whether a mutation is currently running (as opposed to
@@ -200,6 +249,28 @@ func (s *Store) enqueueMutation(name string, run func(context.Context) (func(), 
 	s.startNextMutation()
 }
 
+// enqueuePreparedMutation appends a mutation whose prepare closure runs on
+// the UI goroutine immediately before run's goroutine starts (see
+// mutation.prepare's doc comment), rather than being decided once, back at
+// enqueue time. This matters for any operation whose GitHub call depends
+// on Store state that can change while this mutation was still queued
+// behind another one — most importantly, which send mode currently applies
+// and which pending review's ID to reuse, since two review-comment
+// mutations enqueued back to back (before either has run) would otherwise
+// both decide "no pending review exists yet" from the same stale snapshot
+// and each try to create one, or a queued single-comment send would fail
+// to notice that the mutation ahead of it just created a pending review it
+// must now attach to instead. prepare re-validates the target itself
+// (comparing against ref, the pull request open at enqueue time) rather
+// than relying on the generation check finishMutation already does for
+// apply, since a failed prepare must never even start run's goroutine or
+// call GitHub. Callers have already verified a pull request is open
+// (s.current != nil), matching enqueueMutation.
+func (s *Store) enqueuePreparedMutation(name string, prepare func() error, run func(context.Context) (func(), error)) {
+	s.mutationQueue = append(s.mutationQueue, mutation{name: name, ref: *s.current, prepare: prepare, run: run})
+	s.startNextMutation()
+}
+
 // startNextMutation starts the queue's head mutation if none is already
 // running. A no-op when a mutation is already in flight (finishMutation
 // calls this again once it completes) or the queue is empty.
@@ -211,6 +282,22 @@ func (s *Store) startNextMutation() {
 	s.mutationQueue = s.mutationQueue[1:]
 	s.mutating = true
 	s.emit(Event{Kind: EventMutationChanged})
+
+	if m.prepare != nil {
+		if err := m.prepare(); err != nil {
+			// No goroutine was ever started and GitHub was never called:
+			// route straight through finishMutation anyway (with no apply,
+			// cancelled=false, and sent=false — see finishMutation's own
+			// doc comment for why sent=false skips invalidate/refetch) so
+			// a prepare failure is reported, logged, and recovers the
+			// queue through exactly the same single path a run failure
+			// does, rather than a second, parallel one. finishMutation
+			// resets s.mutating and calls startNextMutation again, so the
+			// queue keeps draining.
+			s.finishMutation(m, nil, err, false, false)
+			return
+		}
+	}
 
 	if s.mutationCtx == nil {
 		// Created lazily, once, from baseCtx: unlike the list's or the
@@ -237,17 +324,62 @@ func (s *Store) startNextMutation() {
 			}
 			cancelled := ctx.Err() != nil
 			s.deps.Dispatch(func() {
-				s.finishMutation(m, apply, err, cancelled)
+				// sent is always true here: this path only ever runs once
+				// m.run's goroutine has actually started (and so, GitHub
+				// was actually called, or at least attempted), unlike a
+				// prepare failure's own call to finishMutation, which
+				// never gets this far.
+				s.finishMutation(m, apply, err, cancelled, true)
 			})
 		}()
 		apply, err = m.run(ctx)
 	}()
 }
 
+// invalidateAndRefetch invalidates ref's on-disk cache entry and, if ref is
+// still the currently open pull request, starts a fresh detail refetch.
+// Called by finishMutation only when the mutation's run actually reached
+// GitHub (sent=true): a failed *network call* may or may not have taken
+// effect server-side before it failed (a partial multi-call run such as
+// CommentOnFile's create-thread-submit sequence, or a request that timed
+// out after the server had already applied it) — there is no way to tell
+// which from here, so the simplest and safest response is to treat the
+// target pull request's state as unknown and converge to whatever GitHub
+// actually has, exactly like a successful mutation already does, rather
+// than trying to enumerate which failure modes are "known safe" to leave
+// the cache/UI alone for. A prepare failure (sent=false) never reaches
+// this function at all: nothing was sent, so there is nothing server-side
+// to converge on, and invalidating/refetching anyway would waste a
+// network round trip (or a cache entry) for a pull request that may not
+// even be the one open anymore.
+func (s *Store) invalidateAndRefetch(ref model.PRRef) {
+	if s.viewer.Login != "" {
+		if err := s.deps.Cache.InvalidatePR(s.deps.Host, s.viewer.Login, ref); err != nil {
+			s.deps.Logger.Warn("cache invalidate failed", "err", err)
+		}
+	}
+	if s.current != nil && *s.current == ref {
+		// Always a fresh network fetch, never a cache read: the mutation
+		// just changed (or attempted to change) this pull request
+		// server-side, so re-showing a (now invalidated, but still held
+		// in memory) cached snapshot on top of the optimistic apply above
+		// would be a visible regression, mirroring RefreshPR's own
+		// reasoning.
+		s.startDetailFetch(false)
+	}
+}
+
 // finishMutation applies (or reports the failure of) one mutation's
 // result, then starts the next queued mutation, if any. It runs only on
-// the UI goroutine, from a Dispatch callback.
-func (s *Store) finishMutation(m mutation, apply func(), err error, cancelled bool) {
+// the UI goroutine, from a Dispatch callback (or, for a prepare failure,
+// synchronously from startNextMutation itself). sent reports whether this
+// mutation's run actually reached GitHub (always true for a run-path
+// failure or success; false only for a prepare failure, which never
+// started run's goroutine at all — see mutation.prepare's and
+// invalidateAndRefetch's doc comments for why that distinction matters
+// for the failure branch below): err == nil is only ever reached via a
+// successful run, so the success branch does not need to check it.
+func (s *Store) finishMutation(m mutation, apply func(), err error, cancelled, sent bool) {
 	s.mutating = false
 
 	if err != nil {
@@ -256,6 +388,9 @@ func (s *Store) finishMutation(m mutation, apply func(), err error, cancelled bo
 			s.recomputeLastErr()
 			s.deps.Logger.Error("mutation failed", "mutation", m.name, "ref", m.ref.Key(), "err", err)
 			s.emit(Event{Kind: EventError, Err: err})
+			if sent {
+				s.invalidateAndRefetch(m.ref)
+			}
 		}
 		// Our own cancellation (Stop superseding every queued and
 		// running mutation) is not a failure worth reporting, matching
@@ -273,20 +408,7 @@ func (s *Store) finishMutation(m mutation, apply func(), err error, cancelled bo
 	if current && apply != nil {
 		apply()
 	}
-
-	if s.viewer.Login != "" {
-		if err := s.deps.Cache.InvalidatePR(s.deps.Host, s.viewer.Login, m.ref); err != nil {
-			s.deps.Logger.Warn("cache invalidate failed", "err", err)
-		}
-	}
-	if current {
-		// Always a fresh network fetch, never a cache read: the mutation
-		// just changed this pull request server-side, so re-showing a
-		// (now invalidated, but still held in memory) cached snapshot on
-		// top of the optimistic apply above would be a visible
-		// regression, mirroring RefreshPR's own reasoning.
-		s.startDetailFetch(false)
-	}
+	s.invalidateAndRefetch(m.ref)
 
 	s.emit(Event{Kind: EventMutationChanged})
 	s.startNextMutation()
