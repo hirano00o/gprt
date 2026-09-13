@@ -95,6 +95,9 @@ type fakeGitHub struct {
 	deleteReviewCommentFunc   func(ctx context.Context, id string) (model.RateLimit, error)
 	resolveThreadFunc         func(ctx context.Context, threadID string) (model.ReviewThread, model.RateLimit, error)
 	unresolveThreadFunc       func(ctx context.Context, threadID string) (model.ReviewThread, model.RateLimit, error)
+	addReactionFunc           func(ctx context.Context, subjectID string, content model.ReactionContent) ([]model.ReactionGroup, model.RateLimit, error)
+	removeReactionFunc        func(ctx context.Context, subjectID string, content model.ReactionContent) ([]model.ReactionGroup, model.RateLimit, error)
+	mentionableUsersFunc      func(ctx context.Context, repo model.RepoRef, query string, first int) ([]model.User, model.RateLimit, error)
 
 	calls              []searchCall
 	detailCalls        []detailCall
@@ -114,6 +117,9 @@ type fakeGitHub struct {
 	deleteReviewCommentCalls   []deleteReviewCommentCall
 	resolveThreadCalls         []resolveThreadCall
 	unresolveThreadCalls       []unresolveThreadCall
+	addReactionCalls           []addReactionCall
+	removeReactionCalls        []removeReactionCall
+	mentionableUsersCalls      []mentionableUsersCall
 }
 
 // createPendingReviewCall records one CreatePendingReview invocation.
@@ -162,6 +168,25 @@ type resolveThreadCall struct{ threadID string }
 
 // unresolveThreadCall records one UnresolveThread invocation.
 type unresolveThreadCall struct{ threadID string }
+
+// addReactionCall records one AddReaction invocation.
+type addReactionCall struct {
+	subjectID string
+	content   model.ReactionContent
+}
+
+// removeReactionCall records one RemoveReaction invocation.
+type removeReactionCall struct {
+	subjectID string
+	content   model.ReactionContent
+}
+
+// mentionableUsersCall records one MentionableUsers invocation.
+type mentionableUsersCall struct {
+	repo  model.RepoRef
+	query string
+	first int
+}
 
 // addCommentCall records one AddIssueComment invocation for assertions.
 type addCommentCall struct {
@@ -237,6 +262,15 @@ func newFakeGitHub() *fakeGitHub {
 		},
 		unresolveThreadFunc: func(context.Context, string) (model.ReviewThread, model.RateLimit, error) {
 			return model.ReviewThread{}, model.RateLimit{}, nil
+		},
+		addReactionFunc: func(context.Context, string, model.ReactionContent) ([]model.ReactionGroup, model.RateLimit, error) {
+			return nil, model.RateLimit{}, nil
+		},
+		removeReactionFunc: func(context.Context, string, model.ReactionContent) ([]model.ReactionGroup, model.RateLimit, error) {
+			return nil, model.RateLimit{}, nil
+		},
+		mentionableUsersFunc: func(context.Context, model.RepoRef, string, int) ([]model.User, model.RateLimit, error) {
+			return nil, model.RateLimit{}, nil
 		},
 	}
 }
@@ -399,6 +433,36 @@ func (f *fakeGitHub) UnresolveThread(ctx context.Context, threadID string) (mode
 	return fn(ctx, threadID)
 }
 
+func (f *fakeGitHub) AddReaction(
+	ctx context.Context, subjectID string, content model.ReactionContent,
+) ([]model.ReactionGroup, model.RateLimit, error) {
+	f.mu.Lock()
+	f.addReactionCalls = append(f.addReactionCalls, addReactionCall{subjectID: subjectID, content: content})
+	fn := f.addReactionFunc
+	f.mu.Unlock()
+	return fn(ctx, subjectID, content)
+}
+
+func (f *fakeGitHub) RemoveReaction(
+	ctx context.Context, subjectID string, content model.ReactionContent,
+) ([]model.ReactionGroup, model.RateLimit, error) {
+	f.mu.Lock()
+	f.removeReactionCalls = append(f.removeReactionCalls, removeReactionCall{subjectID: subjectID, content: content})
+	fn := f.removeReactionFunc
+	f.mu.Unlock()
+	return fn(ctx, subjectID, content)
+}
+
+func (f *fakeGitHub) MentionableUsers(
+	ctx context.Context, repo model.RepoRef, query string, first int,
+) ([]model.User, model.RateLimit, error) {
+	f.mu.Lock()
+	f.mentionableUsersCalls = append(f.mentionableUsersCalls, mentionableUsersCall{repo: repo, query: query, first: first})
+	fn := f.mentionableUsersFunc
+	f.mu.Unlock()
+	return fn(ctx, repo, query, first)
+}
+
 // createPendingReviewCallsSnapshot returns a copy of every
 // CreatePendingReview call recorded so far, for assertions.
 func (f *fakeGitHub) createPendingReviewCallsSnapshot() []createPendingReviewCall {
@@ -509,6 +573,36 @@ func (f *fakeGitHub) unresolveThreadCallsSnapshot() []unresolveThreadCall {
 	return out
 }
 
+// addReactionCallsSnapshot returns a copy of every AddReaction call
+// recorded so far, for assertions.
+func (f *fakeGitHub) addReactionCallsSnapshot() []addReactionCall {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]addReactionCall, len(f.addReactionCalls))
+	copy(out, f.addReactionCalls)
+	return out
+}
+
+// removeReactionCallsSnapshot returns a copy of every RemoveReaction call
+// recorded so far, for assertions.
+func (f *fakeGitHub) removeReactionCallsSnapshot() []removeReactionCall {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]removeReactionCall, len(f.removeReactionCalls))
+	copy(out, f.removeReactionCalls)
+	return out
+}
+
+// mentionableUsersCallsSnapshot returns a copy of every MentionableUsers
+// call recorded so far, for assertions.
+func (f *fakeGitHub) mentionableUsersCallsSnapshot() []mentionableUsersCall {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]mentionableUsersCall, len(f.mentionableUsersCalls))
+	copy(out, f.mentionableUsersCalls)
+	return out
+}
+
 // setCreatePendingReviewFunc reassigns createPendingReviewFunc under the
 // lock, for the same reason setSearchFunc does.
 func (f *fakeGitHub) setCreatePendingReviewFunc(fn func(ctx context.Context, prID string) (model.Review, model.RateLimit, error)) {
@@ -611,6 +705,36 @@ func (f *fakeGitHub) setUnresolveThreadFunc(
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.unresolveThreadFunc = fn
+}
+
+// setAddReactionFunc reassigns addReactionFunc under the lock, for the same
+// reason setSearchFunc does.
+func (f *fakeGitHub) setAddReactionFunc(
+	fn func(ctx context.Context, subjectID string, content model.ReactionContent) ([]model.ReactionGroup, model.RateLimit, error),
+) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.addReactionFunc = fn
+}
+
+// setRemoveReactionFunc reassigns removeReactionFunc under the lock, for
+// the same reason setSearchFunc does.
+func (f *fakeGitHub) setRemoveReactionFunc(
+	fn func(ctx context.Context, subjectID string, content model.ReactionContent) ([]model.ReactionGroup, model.RateLimit, error),
+) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.removeReactionFunc = fn
+}
+
+// setMentionableUsersFunc reassigns mentionableUsersFunc under the lock,
+// for the same reason setSearchFunc does.
+func (f *fakeGitHub) setMentionableUsersFunc(
+	fn func(ctx context.Context, repo model.RepoRef, query string, first int) ([]model.User, model.RateLimit, error),
+) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.mentionableUsersFunc = fn
 }
 
 func (f *fakeGitHub) searchCalls() []searchCall {

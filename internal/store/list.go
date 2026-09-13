@@ -220,6 +220,16 @@ func (s *Store) applyViewerResult(user model.User, rl model.RateLimit, err error
 		// eventual result is dropped by the generation check in
 		// fetchDetail instead of being applied.
 		s.startDetailFetch(false)
+		// A mentionable-users fetch that already succeeded for this pull
+		// request's repository while the login was still unconfirmed could
+		// not write its cache entry yet (cacheMentionableUsers itself
+		// checks viewerConfirmed); retry that write now that it is true,
+		// rather than leaving it unpersisted for the rest of the session
+		// (see mentionable.go's persistMentionableUsersIfPending). The
+		// mismatch branch above needs no equivalent call: its own
+		// ReloadPR() already force-refetches and persists mentionable
+		// users fresh, under the now-confirmed login.
+		s.persistMentionableUsersIfPending(s.current.Repo)
 	}
 }
 

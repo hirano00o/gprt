@@ -49,6 +49,17 @@ type GitHub interface {
 	DeleteReviewComment(ctx context.Context, id string) (model.RateLimit, error)
 	ResolveThread(ctx context.Context, threadID string) (model.ReviewThread, model.RateLimit, error)
 	UnresolveThread(ctx context.Context, threadID string) (model.ReviewThread, model.RateLimit, error)
+
+	// Reaction mutations (see reaction.go): AddReaction/RemoveReaction both
+	// return the reacted-on subject's full, refreshed set of reaction
+	// groups, mirroring gh.Client's own signatures.
+	AddReaction(ctx context.Context, subjectID string, content model.ReactionContent) ([]model.ReactionGroup, model.RateLimit, error)
+	RemoveReaction(ctx context.Context, subjectID string, content model.ReactionContent) ([]model.ReactionGroup, model.RateLimit, error)
+
+	// MentionableUsers returns a repository's mentionable users (see
+	// mentionable.go), the store's `@`-mention autocomplete candidate
+	// source.
+	MentionableUsers(ctx context.Context, repo model.RepoRef, query string, first int) ([]model.User, model.RateLimit, error)
 }
 
 // lineHighlighter is the subset of *highlight.Highlighter the store depends
@@ -356,6 +367,22 @@ type Store struct {
 	mutationCancel context.CancelFunc
 	mutationErr    error
 
+	// Mentionable users (see mentionable.go): a repository's mentionable
+	// users, loaded lazily by OpenPR the first time a pull request in it is
+	// opened, and kept per repository (mentionableEntry{users, fetchedAt,
+	// loading, persisted}) for the Store's lifetime. Freshness — not a one-shot
+	// "already tried" flag — decides whether a later OpenPR for the same
+	// repository does any work at all: a fresh result short-circuits
+	// immediately, but a repository a previous fetch failed for (fetchedAt
+	// stays zero) or that has simply gone stale is retried the next time
+	// OpenPR opens a pull request in it, or forced by ReloadPR. Fetches use
+	// s.baseCtx directly rather than a dedicated, Stop-cancellable context:
+	// loading dedups a repository's own concurrent fetches, and there is no
+	// "generation" to supersede the way list/detail/files fetches have —
+	// app shutdown cancelling baseCtx itself (see internal/ui/app.go's Run)
+	// is enough.
+	mentionable map[model.RepoRef]mentionableEntry
+
 	subscribers []func(Event)
 }
 
@@ -391,6 +418,7 @@ func New(deps Deps) *Store {
 		warnedMessages: make(map[warnedKey]struct{}),
 		baseCtx:        context.Background(),
 		highlighter:    highlight.New(highlight.Options{}),
+		mentionable:    make(map[model.RepoRef]mentionableEntry),
 	}
 	return s
 }
