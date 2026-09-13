@@ -13,6 +13,9 @@ func TestUnicodeAndNerdIconsDiffer(t *testing.T) {
 	if u.SectionMarker == "" || n.SectionMarker == "" {
 		t.Error("SectionMarker icon must not be empty in either set")
 	}
+	if u.DraftMarker == "" || n.DraftMarker == "" {
+		t.Error("DraftMarker icon must not be empty in either set")
+	}
 }
 
 func TestIconsFor(t *testing.T) {

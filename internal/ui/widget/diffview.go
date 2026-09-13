@@ -49,6 +49,25 @@ type DiffFile struct {
 	// this file at all yet.
 	Loading bool
 	Err     error
+	// DraftLines marks which lines have a saved comment draft anchored to
+	// them, keyed by their (hunk, line) index into Hunks — internal/ui
+	// computes this once per file open/draft save/delete (never per Draw;
+	// see docs/DESIGN.md), by parsing its own draft anchors back into a
+	// location (see internal/ui's draft anchor helpers). Empty/nil means no
+	// drafts for this file.
+	DraftLines map[DraftAnchor]bool
+	// DraftMarker is the gutter glyph drawn on a DraftLines line, from the
+	// configured icon set (theme.Icons.DraftMarker). Empty disables the
+	// marker column's glyph, but the column itself is always reserved so
+	// every line's gutter stays the same width.
+	DraftMarker string
+}
+
+// DraftAnchor identifies one diff line (by its Hunk/Line index into
+// DiffFile.Hunks, the same index pair diffRow.hunk/diffRow.line use) that
+// has a saved comment draft, for DiffFile.DraftLines.
+type DraftAnchor struct {
+	Hunk, Line int
 }
 
 // FileStatusGlyph returns the single-character glyph DiffView's file header
@@ -174,6 +193,31 @@ type DiffView struct {
 	// cursor restore (diffRowKey) entirely, set by SetFile when the file's
 	// own path changes — see its doc comment.
 	resetCursor bool
+
+	// pendingCursorSet/Side/Line name a diff-side line the next (and, while
+	// the file is still loading, every following) rebuild should move the
+	// cursor to once it exists — see JumpToLine.
+	pendingCursorSet  bool
+	pendingCursorSide model.DiffSide
+	pendingCursorLine int
+}
+
+// JumpToLine arranges for the cursor to move to the line anchored at
+// (side, line) — the same anchor a diff.Anchor/diff.RangeAnchor call, or a
+// review thread's own Side/Line, would report — as soon as the current
+// file's hunks contain one. Unlike the identity-based cursor restore
+// rebuild otherwise performs, the target here survives across rebuilds
+// while DiffFile.Loading stays true (the file's data has not arrived yet:
+// used by the "p" pending-list dialog to resolve a line/range draft's
+// anchor once its file has loaded), and is dropped once loading finishes —
+// found or not, so a target that never resolves (an outdated draft whose
+// line no longer exists) does not keep retrying on every future,
+// unrelated rebuild.
+func (dv *DiffView) JumpToLine(side model.DiffSide, line int) {
+	dv.pendingCursorSet = true
+	dv.pendingCursorSide = side
+	dv.pendingCursorLine = line
+	dv.lastWidth = -1
 }
 
 // NewDiffView creates an empty DiffView.
@@ -594,15 +638,42 @@ func (dv *DiffView) rebuild(width int) {
 			}
 		}
 	}
+	dv.applyPendingCursor()
 	dv.ensureVisible()
 	dv.refreshLineTracking()
 }
 
+// applyPendingCursor resolves a JumpToLine target against the just-rebuilt
+// rows, if one is pending, taking priority over rebuild's own by-identity
+// restore above (a caller requesting a jump wants it honoured even when a
+// selectable row of the same identity as the old cursor also still exists).
+// See JumpToLine's own doc comment for why the target survives across
+// rebuilds while the file is still loading, and is dropped once it is not,
+// regardless of whether it was ever found.
+func (dv *DiffView) applyPendingCursor() {
+	if !dv.pendingCursorSet {
+		return
+	}
+	if hi, li, ok := diff.LocateLine(dv.file.Hunks, dv.pendingCursorSide, dv.pendingCursorLine); ok {
+		for i, idx := range dv.selectable {
+			r := dv.rows[idx]
+			if r.kind == rowKindLine && r.hunk == hi && r.line == li {
+				dv.cursor = i
+				dv.pendingCursorSet = false
+				break
+			}
+		}
+	}
+	if !dv.file.Loading {
+		dv.pendingCursorSet = false
+	}
+}
+
 // contentWidthFor returns the display width available for a diff line's
-// content once its fixed-width gutter (line numbers + marker + one
-// separating space) is subtracted, never less than 1.
+// content once its fixed-width gutter (line numbers + marker + the draft
+// marker column + one separating space) is subtracted, never less than 1.
 func contentWidthFor(width, gutterWidth int) int {
-	gutterTotal := gutterWidth*2 + 4 // "%*d %*d %s " layout, see gutterSpansFor
+	gutterTotal := gutterWidth*2 + 5 // "%*d %*d %s %s " layout, see gutterSpansFor
 	w := width - gutterTotal
 	if w < 1 {
 		w = 1
@@ -736,7 +807,11 @@ func (b *diffBuilder) hunkHeaderRow(h diff.Hunk) diffRow {
 
 func (b *diffBuilder) lineRow(f DiffFile, hunkIdx, lineIdx int, l diff.Line) diffRow {
 	row := diffRow{kind: rowKindLine, hunk: hunkIdx, line: lineIdx, lineKind: l.Kind}
-	row.gutter = gutterSpansFor(l, b.gutterWidth)
+	draftMark := ""
+	if f.DraftLines[DraftAnchor{Hunk: hunkIdx, Line: lineIdx}] {
+		draftMark = f.DraftMarker
+	}
+	row.gutter = gutterSpansFor(l, b.gutterWidth, draftMark)
 	row.content = contentSpansFor(f, hunkIdx, lineIdx, l)
 	if w := SpanWidth(row.content); w > b.longestContent {
 		b.longestContent = w
@@ -744,11 +819,13 @@ func (b *diffBuilder) lineRow(f DiffFile, hunkIdx, lineIdx int, l diff.Line) dif
 	return row
 }
 
-// gutterSpansFor renders one line's "old-no new-no marker " gutter, each
-// number right-aligned to width digits and blank on the side the line has
-// no number for (an Add line has no old number; a Del line has no new
-// one).
-func gutterSpansFor(l diff.Line, width int) []Span {
+// gutterSpansFor renders one line's "old-no new-no marker draft-mark "
+// gutter, each number right-aligned to width digits and blank on the side
+// the line has no number for (an Add line has no old number; a Del line has
+// no new one). draftMark is the draft-gutter glyph for this line ("" for
+// none — see DiffFile.DraftLines/DraftMarker); the column itself is always
+// reserved, blank otherwise, so every line's gutter stays the same width.
+func gutterSpansFor(l diff.Line, width int, draftMark string) []Span {
 	oldStr := blankOrNumber(l.Kind != diff.Add, l.OldNo, width)
 	newStr := blankOrNumber(l.Kind != diff.Del, l.NewNo, width)
 
@@ -760,12 +837,18 @@ func gutterSpansFor(l diff.Line, width int) []Span {
 		marker, markerStyle = "-", theme.Error
 	}
 
+	draftCol := " "
+	if draftMark != "" {
+		draftCol = draftMark
+	}
+
 	return []Span{
 		{Text: oldStr, Style: theme.Muted},
 		{Text: " ", Style: theme.Muted},
 		{Text: newStr, Style: theme.Muted},
 		{Text: " ", Style: theme.Muted},
 		{Text: marker, Style: markerStyle},
+		{Text: draftCol, Style: theme.Accent},
 		{Text: " ", Style: theme.Base},
 	}
 }
@@ -884,7 +967,14 @@ func commentLines(c model.ReviewComment, width int) [][]Span {
 		login = "unknown"
 	}
 	header := fmt.Sprintf("@%s · %s", login, relativeTimeShort(c.CreatedAt))
-	lines := [][]Span{{{Text: commentBorder, Style: theme.Muted}, {Text: header, Style: theme.Base}}}
+	headerLine := []Span{{Text: commentBorder, Style: theme.Muted}, {Text: header, Style: theme.Base}}
+	if c.State == model.ReviewCommentStatePending {
+		// Reuses theme.Pending, the style every other "not final yet"
+		// marker in gprt already uses (ReviewerStyle/RollupStyle's own
+		// pending states), rather than introducing a separate badge style.
+		headerLine = append(headerLine, Span{Text: " PENDING", Style: theme.Pending})
+	}
+	lines := [][]Span{headerLine}
 
 	for _, l := range WrapText(c.Body, bodyWidth) {
 		lines = append(lines, []Span{{Text: commentBorder, Style: theme.Muted}, {Text: l, Style: theme.Base}})

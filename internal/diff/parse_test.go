@@ -318,6 +318,27 @@ func TestLocateThread_FileSubjectNeverLocates(t *testing.T) {
 	}
 }
 
+func TestLocateLine_LeftMatchesDelOrContextByOldNo(t *testing.T) {
+	hunk, line, ok := LocateLine(testHunks(), model.DiffSideLeft, 2)
+	if !ok || hunk != 0 || line != 1 {
+		t.Errorf("LocateLine(LEFT,2) = (%d,%d,%v), want (0,1,true)", hunk, line, ok)
+	}
+}
+
+func TestLocateLine_RightMatchesAddOrContextByNewNo(t *testing.T) {
+	hunk, line, ok := LocateLine(testHunks(), model.DiffSideRight, 3)
+	if !ok || hunk != 0 || line != 3 {
+		t.Errorf("LocateLine(RIGHT,3) = (%d,%d,%v), want (0,3,true)", hunk, line, ok)
+	}
+}
+
+func TestLocateLine_NoMatchReturnsFalse(t *testing.T) {
+	_, _, ok := LocateLine(testHunks(), model.DiffSideRight, 99)
+	if ok {
+		t.Error("LocateLine() with no matching line, want false")
+	}
+}
+
 func TestLocateThread_NoMatchReturnsFalse(t *testing.T) {
 	_, _, ok := LocateThread(testHunks(), model.ReviewThread{
 		Line: 99, Side: model.DiffSideRight, SubjectType: model.ThreadSubjectLine,

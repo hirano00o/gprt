@@ -19,6 +19,7 @@ func TestNamedStylesAreDistinct(t *testing.T) {
 		"Success": Success,
 		"Warning": Warning,
 		"Pending": Pending,
+		"Info":    Info,
 	}
 	seen := map[tcell.Style]string{}
 	for name, style := range named {

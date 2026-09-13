@@ -730,3 +730,118 @@ func TestDiffViewEmptyPathWithErrShowsTheError(t *testing.T) {
 		t.Errorf("empty DiffFile with Err rendered %q, want the error message", text)
 	}
 }
+
+// TestDiffViewPendingCommentShowsBadge covers the PENDING badge next to a
+// review comment's author, distinguishing an unpublished (pending review)
+// comment from an already-submitted one on the same thread.
+func TestDiffViewPendingCommentShowsBadge(t *testing.T) {
+	f := twoHunkFile(t)
+	f.Threads = []model.ReviewThread{
+		{
+			ID: "t1", Path: f.Path, Line: 1, Side: model.DiffSideRight,
+			Comments: []model.ReviewComment{
+				{Author: model.User{Login: "alice"}, Body: "submitted", State: model.ReviewCommentStateSubmitted},
+				{Author: model.User{Login: "alice"}, Body: "still pending", State: model.ReviewCommentStatePending},
+			},
+		},
+	}
+	dv := NewDiffView()
+	dv.SetFile(f)
+	drawn(t, dv, 60, 30)
+
+	var sawPendingBadge, sawSubmittedRow bool
+	for _, r := range dv.rows {
+		if r.kind != rowKindThreadComment {
+			continue
+		}
+		text := rowText(r, 0)
+		if containsSubstr(text, "still pending") && !containsSubstr(text, "PENDING") {
+			t.Fatalf("comment row header %q for a PENDING comment must include the PENDING badge", rowText(r, 0))
+		}
+		if containsSubstr(rowText(r, 0), "PENDING") {
+			sawPendingBadge = true
+		}
+		if containsSubstr(rowText(r, 0), "@alice") && !containsSubstr(rowText(r, 0), "PENDING") {
+			sawSubmittedRow = true
+		}
+	}
+	if !sawPendingBadge {
+		t.Error("no comment row carried a PENDING badge")
+	}
+	if !sawSubmittedRow {
+		t.Error("the already-submitted comment's own header row must not carry a PENDING badge")
+	}
+}
+
+// TestDiffViewDraftMarkerRendersInGutter covers the "✎"-style gutter marker
+// on a line with a saved draft anchored to it (DiffFile.DraftLines), and its
+// absence on every other line.
+func TestDiffViewDraftMarkerRendersInGutter(t *testing.T) {
+	f := twoHunkFile(t)
+	f.DraftMarker = "M"
+	f.DraftLines = map[DraftAnchor]bool{{Hunk: 0, Line: 1}: true} // the "-old2" line
+	dv := NewDiffView()
+	dv.SetFile(f)
+	drawn(t, dv, 60, 30)
+
+	var markedRows int
+	for _, r := range dv.rows {
+		if r.kind != rowKindLine {
+			continue
+		}
+		marked := false
+		for _, s := range r.gutter {
+			if s.Text == "M" {
+				marked = true
+			}
+		}
+		if marked {
+			markedRows++
+			if r.hunk != 0 || r.line != 1 {
+				t.Errorf("draft marker rendered on row (hunk=%d, line=%d), want only (0, 1)", r.hunk, r.line)
+			}
+		}
+	}
+	if markedRows != 1 {
+		t.Errorf("draft marker rendered on %d rows, want exactly 1", markedRows)
+	}
+}
+
+// TestDiffViewJumpToLineMovesCursorOnceTheLineExists covers the pending-list
+// dialog's use of JumpToLine to resolve a draft's saved anchor once the
+// file's hunks have arrived: the target survives across a rebuild that
+// happens before the data does (Loading true) and is applied on the
+// rebuild after it lands.
+func TestDiffViewJumpToLineMovesCursorOnceTheLineExists(t *testing.T) {
+	dv := NewDiffView()
+	dv.SetFile(DiffFile{Path: "pkg/example.go", Loading: true})
+	dv.JumpToLine(model.DiffSideRight, 2)
+	drawn(t, dv, 60, 20) // rebuilds while still loading: nothing to land on yet
+
+	f := twoHunkFile(t)
+	dv.SetFile(f)
+	drawn(t, dv, 60, 20)
+
+	line, ok := dv.CursorLine()
+	if !ok {
+		t.Fatal("cursor is not on a line row after JumpToLine's target arrived")
+	}
+	if line.NewNo != 2 {
+		t.Errorf("cursor line NewNo = %d, want 2 (the anchor JumpToLine was given)", line.NewNo)
+	}
+}
+
+// TestDiffViewJumpToLineGivesUpOnceLoadingFinishesWithoutAMatch guards
+// against an anchor that never resolves (an outdated draft whose line no
+// longer exists) retrying forever on every future, unrelated rebuild.
+func TestDiffViewJumpToLineGivesUpOnceLoadingFinishesWithoutAMatch(t *testing.T) {
+	dv := NewDiffView()
+	f := twoHunkFile(t)
+	dv.JumpToLine(model.DiffSideRight, 9999) // no such line in f
+	dv.SetFile(f)                            // f.Loading is false: data has "arrived"
+	drawn(t, dv, 60, 20)
+
+	if dv.pendingCursorSet {
+		t.Error("pendingCursorSet still true after a rebuild with Loading false; an unresolved anchor must be dropped, not retried forever")
+	}
+}
