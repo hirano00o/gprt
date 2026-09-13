@@ -57,7 +57,58 @@ type fakeGitHub struct {
 	updateCommentCalls []struct{ id, body string }
 	deleteCommentErr   error
 	deleteCommentIDs   []string
+
+	createPendingReviewErr     error
+	createPendingReviewCalls   int
+	addReviewNowErr            error
+	addReviewNowCalls          []addReviewNowCall
+	addReviewNowWithEventErr   error
+	addReviewNowWithEventCalls []addReviewNowWithEventCall
+	addReviewThreadErr         error
+	addReviewThreadCalls       []gh.ThreadInput
+	addThreadReplyErr          error
+	addThreadReplyCalls        []addThreadReplyCall
+	submitReviewErr            error
+	submitReviewCalls          []submitReviewCall
+	deletePendingReviewErr     error
+	deletePendingReviewCalls   []string
+	updateReviewCommentErr     error
+	updateReviewCommentCalls   []updateReviewCommentCall
+	deleteReviewCommentErr     error
+	deleteReviewCommentIDs     []string
+	resolveThreadErr           error
+	resolveThreadIDs           []string
+	unresolveThreadErr         error
+	unresolveThreadIDs         []string
 }
+
+// The review-mutation recorder call shapes below are named types (rather
+// than the inline anonymous structs the rest of fakeGitHub's recorders
+// use) purely so their own accessor methods below have a return type to
+// name.
+type addReviewNowCall struct {
+	prID    string
+	threads []gh.DraftThread
+	body    string
+}
+
+type addReviewNowWithEventCall struct {
+	prID  string
+	event model.ReviewEvent
+	body  string
+}
+
+type addThreadReplyCall struct {
+	threadID, body, pendingReviewID string
+}
+
+type submitReviewCall struct {
+	reviewID string
+	event    model.ReviewEvent
+	body     string
+}
+
+type updateReviewCommentCall struct{ id, body string }
 
 func (f *fakeGitHub) Viewer(context.Context) (model.User, model.RateLimit, error) {
 	return f.viewer, model.RateLimit{}, nil
@@ -240,54 +291,207 @@ func (f *fakeGitHub) DeleteCommentIDs() []string {
 	return append([]string(nil), f.deleteCommentIDs...)
 }
 
-// Review mutations (see internal/store/review.go): no UI slice exercises
-// these yet (M3b lands the store/gh side only), so these are unarmed stubs
-// returning zero values with no error, kept here only so *fakeGitHub keeps
-// satisfying store.GitHub. A future UI slice that composes/reviews threads
-// will arm them the same way AddIssueComment/UpdateIssueComment above are
-// armed, not by adding parallel plumbing to this file.
+// Review mutations (see internal/store/review.go): each records its call
+// (mirroring AddIssueComment/UpdateIssueComment/DeleteIssueComment above)
+// and returns a synthesized, minimally-plausible result unless the
+// matching Set*Error was armed.
 func (f *fakeGitHub) CreatePendingReview(context.Context, string) (model.Review, model.RateLimit, error) {
-	return model.Review{}, model.RateLimit{}, nil
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.createPendingReviewCalls++
+	if f.createPendingReviewErr != nil {
+		return model.Review{}, model.RateLimit{}, f.createPendingReviewErr
+	}
+	return model.Review{ID: "PVR_new", State: model.ReviewStatePending}, model.RateLimit{}, nil
 }
 
-func (f *fakeGitHub) AddReviewNow(context.Context, string, []gh.DraftThread, string) (model.Review, model.RateLimit, error) {
-	return model.Review{}, model.RateLimit{}, nil
+func (f *fakeGitHub) AddReviewNow(_ context.Context, prID string, threads []gh.DraftThread, body string) (model.Review, model.RateLimit, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.addReviewNowCalls = append(f.addReviewNowCalls, addReviewNowCall{prID, threads, body})
+	if f.addReviewNowErr != nil {
+		return model.Review{}, model.RateLimit{}, f.addReviewNowErr
+	}
+	return model.Review{ID: "PVR_submitted", State: model.ReviewStateCommented}, model.RateLimit{}, nil
 }
 
-func (f *fakeGitHub) AddReviewNowWithEvent(context.Context, string, model.ReviewEvent, string) (model.Review, model.RateLimit, error) {
-	return model.Review{}, model.RateLimit{}, nil
+func (f *fakeGitHub) AddReviewNowWithEvent(_ context.Context, prID string, event model.ReviewEvent, body string) (model.Review, model.RateLimit, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.addReviewNowWithEventCalls = append(f.addReviewNowWithEventCalls, addReviewNowWithEventCall{prID, event, body})
+	if f.addReviewNowWithEventErr != nil {
+		return model.Review{}, model.RateLimit{}, f.addReviewNowWithEventErr
+	}
+	return model.Review{ID: "PVR_submitted"}, model.RateLimit{}, nil
 }
 
-func (f *fakeGitHub) AddReviewThread(context.Context, gh.ThreadInput) (model.ReviewThread, model.RateLimit, error) {
-	return model.ReviewThread{}, model.RateLimit{}, nil
+func (f *fakeGitHub) AddReviewThread(_ context.Context, in gh.ThreadInput) (model.ReviewThread, model.RateLimit, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.addReviewThreadCalls = append(f.addReviewThreadCalls, in)
+	if f.addReviewThreadErr != nil {
+		return model.ReviewThread{}, model.RateLimit{}, f.addReviewThreadErr
+	}
+	return model.ReviewThread{
+		ID: "RT_new", Path: in.Path, Line: in.Line, Side: in.Side,
+		StartLine: in.StartLine, StartSide: in.StartSide, SubjectType: in.SubjectType,
+		ViewerCanResolve: true,
+		Comments: []model.ReviewComment{{
+			ID: "RC_new", Author: model.User{Login: "octocat"}, Body: in.Body,
+			State: model.ReviewCommentStatePending, ViewerCanUpdate: true, ViewerCanDelete: true,
+		}},
+	}, model.RateLimit{}, nil
 }
 
-func (f *fakeGitHub) AddThreadReply(context.Context, string, string, string) (model.ReviewComment, model.RateLimit, error) {
-	return model.ReviewComment{}, model.RateLimit{}, nil
+func (f *fakeGitHub) AddThreadReply(_ context.Context, threadID, body, pendingReviewID string) (model.ReviewComment, model.RateLimit, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.addThreadReplyCalls = append(f.addThreadReplyCalls, addThreadReplyCall{threadID, body, pendingReviewID})
+	if f.addThreadReplyErr != nil {
+		return model.ReviewComment{}, model.RateLimit{}, f.addThreadReplyErr
+	}
+	state := model.ReviewCommentStateSubmitted
+	if pendingReviewID != "" {
+		state = model.ReviewCommentStatePending
+	}
+	return model.ReviewComment{ID: "RC_reply", Author: model.User{Login: "octocat"}, Body: body, State: state, ViewerCanUpdate: true, ViewerCanDelete: true}, model.RateLimit{}, nil
 }
 
-func (f *fakeGitHub) SubmitReview(context.Context, string, model.ReviewEvent, string) (model.Review, model.RateLimit, error) {
-	return model.Review{}, model.RateLimit{}, nil
+func (f *fakeGitHub) SubmitReview(_ context.Context, reviewID string, event model.ReviewEvent, body string) (model.Review, model.RateLimit, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.submitReviewCalls = append(f.submitReviewCalls, submitReviewCall{reviewID, event, body})
+	if f.submitReviewErr != nil {
+		return model.Review{}, model.RateLimit{}, f.submitReviewErr
+	}
+	return model.Review{ID: reviewID}, model.RateLimit{}, nil
 }
 
-func (f *fakeGitHub) DeletePendingReview(context.Context, string) (model.RateLimit, error) {
-	return model.RateLimit{}, nil
+func (f *fakeGitHub) DeletePendingReview(_ context.Context, reviewID string) (model.RateLimit, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.deletePendingReviewCalls = append(f.deletePendingReviewCalls, reviewID)
+	return model.RateLimit{}, f.deletePendingReviewErr
 }
 
-func (f *fakeGitHub) UpdateReviewComment(context.Context, string, string) (model.ReviewComment, model.RateLimit, error) {
-	return model.ReviewComment{}, model.RateLimit{}, nil
+func (f *fakeGitHub) UpdateReviewComment(_ context.Context, id, body string) (model.ReviewComment, model.RateLimit, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.updateReviewCommentCalls = append(f.updateReviewCommentCalls, updateReviewCommentCall{id, body})
+	if f.updateReviewCommentErr != nil {
+		return model.ReviewComment{}, model.RateLimit{}, f.updateReviewCommentErr
+	}
+	return model.ReviewComment{ID: id, Author: model.User{Login: "octocat"}, Body: body, ViewerCanUpdate: true, ViewerCanDelete: true}, model.RateLimit{}, nil
 }
 
-func (f *fakeGitHub) DeleteReviewComment(context.Context, string) (model.RateLimit, error) {
-	return model.RateLimit{}, nil
+// UpdateReviewCommentBodies returns every body UpdateReviewComment has been
+// called with so far, in call order.
+func (f *fakeGitHub) UpdateReviewCommentBodies() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]string, len(f.updateReviewCommentCalls))
+	for i, c := range f.updateReviewCommentCalls {
+		out[i] = c.body
+	}
+	return out
 }
 
-func (f *fakeGitHub) ResolveThread(context.Context, string) (model.ReviewThread, model.RateLimit, error) {
-	return model.ReviewThread{}, model.RateLimit{}, nil
+func (f *fakeGitHub) DeleteReviewComment(_ context.Context, id string) (model.RateLimit, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.deleteReviewCommentIDs = append(f.deleteReviewCommentIDs, id)
+	return model.RateLimit{}, f.deleteReviewCommentErr
 }
 
-func (f *fakeGitHub) UnresolveThread(context.Context, string) (model.ReviewThread, model.RateLimit, error) {
-	return model.ReviewThread{}, model.RateLimit{}, nil
+func (f *fakeGitHub) ResolveThread(_ context.Context, threadID string) (model.ReviewThread, model.RateLimit, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.resolveThreadIDs = append(f.resolveThreadIDs, threadID)
+	if f.resolveThreadErr != nil {
+		return model.ReviewThread{}, model.RateLimit{}, f.resolveThreadErr
+	}
+	return model.ReviewThread{ID: threadID, IsResolved: true, ViewerCanUnresolve: true}, model.RateLimit{}, nil
+}
+
+func (f *fakeGitHub) UnresolveThread(_ context.Context, threadID string) (model.ReviewThread, model.RateLimit, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.unresolveThreadIDs = append(f.unresolveThreadIDs, threadID)
+	if f.unresolveThreadErr != nil {
+		return model.ReviewThread{}, model.RateLimit{}, f.unresolveThreadErr
+	}
+	return model.ReviewThread{ID: threadID, IsResolved: false, ViewerCanResolve: true}, model.RateLimit{}, nil
+}
+
+// CreatePendingReviewCalls returns how many times CreatePendingReview has
+// been called so far.
+func (f *fakeGitHub) CreatePendingReviewCalls() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.createPendingReviewCalls
+}
+
+// AddReviewNowCalls returns every AddReviewNow call so far, in call order.
+func (f *fakeGitHub) AddReviewNowCalls() []addReviewNowCall {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]addReviewNowCall(nil), f.addReviewNowCalls...)
+}
+
+// AddReviewThreadCalls returns every AddReviewThread call's own input so
+// far, in call order.
+func (f *fakeGitHub) AddReviewThreadCalls() []gh.ThreadInput {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]gh.ThreadInput(nil), f.addReviewThreadCalls...)
+}
+
+// AddThreadReplyCalls returns every AddThreadReply call so far, in call
+// order.
+func (f *fakeGitHub) AddThreadReplyCalls() []addThreadReplyCall {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]addThreadReplyCall(nil), f.addThreadReplyCalls...)
+}
+
+// UpdateReviewCommentCalls returns every UpdateReviewComment call so far,
+// in call order.
+func (f *fakeGitHub) UpdateReviewCommentCalls() []updateReviewCommentCall {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]updateReviewCommentCall(nil), f.updateReviewCommentCalls...)
+}
+
+// DeleteReviewCommentIDs returns every ID DeleteReviewComment has been
+// called with so far, in call order.
+func (f *fakeGitHub) DeleteReviewCommentIDs() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.deleteReviewCommentIDs...)
+}
+
+// DeletePendingReviewCalls returns every ID DeletePendingReview has been
+// called with so far, in call order.
+func (f *fakeGitHub) DeletePendingReviewCalls() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.deletePendingReviewCalls...)
+}
+
+// ResolveThreadIDs returns every ID ResolveThread has been called with so
+// far, in call order.
+func (f *fakeGitHub) ResolveThreadIDs() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.resolveThreadIDs...)
+}
+
+// UnresolveThreadIDs returns every ID UnresolveThread has been called with
+// so far, in call order.
+func (f *fakeGitHub) UnresolveThreadIDs() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.unresolveThreadIDs...)
 }
 
 // SetFilesPages registers the sequence of REST pages ChangedFiles returns

@@ -159,6 +159,18 @@ type App struct {
 	// time and left untouched, still survives regardless, since not
 	// re-saving it is a no-op, not a deletion.
 	composerDirty bool
+	// composerDraftGutterMarked mirrors, for the currently open composer's
+	// own target, whether onComposerChange's own last write-through save
+	// left a draft on disk (text != "") — set from openComposer's own
+	// Drafts.Load result on open, updated on every onComposerChange call.
+	// refreshDraftGutterIfNeeded (files.go) is only actually called when
+	// this flips, not on every keystroke — see onComposerChange's own doc
+	// comment for why a call on every keystroke would be wasteful.
+	composerDraftGutterMarked bool
+	// refreshCurrentFileCalls counts refreshCurrentFile's own calls, for
+	// tests only (see its own doc comment in files.go) — never read
+	// outside one.
+	refreshCurrentFileCalls int
 	// pendingSend is set the instant a composer's Send closes it (the
 	// draft is deleted immediately — see composer.go's sendComposer) and
 	// cleared once the resulting mutation's own EventMutationChanged
@@ -169,8 +181,28 @@ type App struct {
 
 	seq *keys.Sequencer
 
-	overlay    string // "" | "help" | "messages"
+	overlay    string // "" | "help" | "messages" | "confirm" | "choice" | "pending" | "pendingConfirm"
 	savedFocus tview.Primitive
+
+	// choiceMenu/choiceOnChoose back the "choice" overlay (see
+	// dialogs.go's showChoiceMenu/closeChoiceMenu): the send-mode picker
+	// ("Add single comment" / "Add to review") and the "which comment?"
+	// picker when several review comments are editable/deletable on one
+	// thread.
+	choiceMenu     *tview.List
+	choiceOnChoose func(index int)
+
+	// pendingListView/pendingListEntries back the "p" pending-review/drafts
+	// list overlay (pendinglist.go): every pending review comment for the
+	// current pull request followed by every local draft for it, in that
+	// order, re-rendered on EventPRChanged/EventMutationChanged while open.
+	pendingListView    *tview.List
+	pendingListEntries []pendingListEntry
+	// pendingListDraftsWarned tracks whether rebuildPendingList's current
+	// Drafts.List error (if any) has already been toasted, mirroring
+	// filesWarned/warnedSections' own "warn once, reset once resolved"
+	// shape.
+	pendingListDraftsWarned bool
 
 	// rowIndex maps a ListRow.ID (a PR's PRRef.Key()) to the data needed
 	// to preview it and to decide whether reaching it should trigger
