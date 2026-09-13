@@ -1,0 +1,15 @@
+mutation RemoveReaction($subjectId: ID!, $content: ReactionContent!) {
+  removeReaction(input: { subjectId: $subjectId, content: $content }) {
+    reactionGroups {
+      content
+      viewerHasReacted
+      reactors {
+        totalCount
+      }
+    }
+  }
+  rateLimit {
+    remaining
+    resetAt
+  }
+}
