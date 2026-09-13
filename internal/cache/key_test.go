@@ -68,6 +68,58 @@ func TestPRKey_DoesNotAliasCallersPRRef(t *testing.T) {
 	}
 }
 
+func TestRepoKey(t *testing.T) {
+	repo := model.RepoRef{Host: "github.com", Owner: "hirano00o", Name: "gprt"}
+
+	tests := []struct {
+		name    string
+		host    string
+		login   string
+		repo    model.RepoRef
+		wantErr bool
+	}{
+		{"valid", "github.com", "octocat", repo, false},
+		{"empty host", "", "octocat", repo, true},
+		{"empty login", "github.com", "", repo, true},
+		{"empty owner", "github.com", "octocat", model.RepoRef{Owner: "", Name: "gprt"}, true},
+		{"empty name", "github.com", "octocat", model.RepoRef{Owner: "o", Name: ""}, true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			k, err := RepoKey(tc.host, tc.login, tc.repo, "mentionable-users")
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("RepoKey() error = nil, want error")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("RepoKey() error = %v", err)
+			}
+			if k.Host != tc.host || k.Login != tc.login || k.Repo == nil || *k.Repo != tc.repo || k.Rest != "mentionable-users" {
+				t.Errorf("RepoKey() = %+v, want Host=%q Login=%q Repo=%+v Rest=mentionable-users", k, tc.host, tc.login, tc.repo)
+			}
+			if k.PR != nil {
+				t.Errorf("RepoKey() PR = %+v, want nil", k.PR)
+			}
+		})
+	}
+}
+
+func TestRepoKey_DoesNotAliasCallersRepoRef(t *testing.T) {
+	repo := model.RepoRef{Host: "github.com", Owner: "o", Name: "n"}
+
+	k, err := RepoKey("github.com", "octocat", repo, "mentionable-users")
+	if err != nil {
+		t.Fatalf("RepoKey() error = %v", err)
+	}
+
+	repo.Name = "changed" // mutating the caller's copy must not affect k.Repo
+	if k.Repo.Name != "n" {
+		t.Errorf("k.Repo.Name = %q, want %q (RepoKey must copy repo, not alias it)", k.Repo.Name, "n")
+	}
+}
+
 func TestSearchKey(t *testing.T) {
 	tests := []struct {
 		name    string

@@ -36,6 +36,25 @@ func TestStore_Path_ExactOnDiskLayout(t *testing.T) {
 		}
 	})
 
+	t.Run("repo-scoped key", func(t *testing.T) {
+		repo := model.RepoRef{Host: "github.com", Owner: "hirano00o", Name: "gprt"}
+		key := Key{Host: "github.com", Login: "octocat", Repo: &repo, Rest: "mentionable-users"}
+
+		got := store.path(key)
+		hash := sha256.Sum256([]byte("mentionable-users"))
+		want := filepath.Join(
+			// Sibling of prDir's own "pr-<n>" subdirectories one level up
+			// (see repoDir's doc comment): a repository-scoped entry and
+			// that same repository's per-PR entries never collide, since a
+			// content hash never matches the "pr-<n>" name pattern.
+			"/cache", "v1", "github.com", "octocat", "repos", "hirano00o", "gprt",
+			hex.EncodeToString(hash[:])+".json",
+		)
+		if got != want {
+			t.Errorf("path() = %q, want %q", got, want)
+		}
+	})
+
 	t.Run("search key", func(t *testing.T) {
 		key := Key{Host: "github.com", Login: "octocat", Rest: "search:type:pr"}
 

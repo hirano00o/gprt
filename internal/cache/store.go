@@ -153,15 +153,21 @@ func readDiskEntry(path string) (Entry, bool, error) {
 }
 
 // path computes the on-disk location for k. Pull-request-scoped keys
-// (k.PR != nil) live under prDir(k.Host, k.Login, *k.PR); everything else
-// (search and list results) lives under searchDir(k.Host, k.Login).
+// (k.PR != nil) live under prDir(k.Host, k.Login, *k.PR); repository-scoped
+// keys (k.Repo != nil) live under repoDir(k.Host, k.Login, *k.Repo);
+// everything else (search and list results) lives under
+// searchDir(k.Host, k.Login).
 func (s *Store) path(k Key) string {
 	filename := hashHex(k.Rest) + ".json"
 
-	if k.PR != nil {
+	switch {
+	case k.PR != nil:
 		return filepath.Join(s.prDir(k.Host, k.Login, *k.PR), filename)
+	case k.Repo != nil:
+		return filepath.Join(s.repoDir(k.Host, k.Login, *k.Repo), filename)
+	default:
+		return filepath.Join(s.searchDir(k.Host, k.Login), filename)
 	}
-	return filepath.Join(s.searchDir(k.Host, k.Login), filename)
 }
 
 // prDir returns the on-disk directory holding every cached entry for one
@@ -178,6 +184,19 @@ func (s *Store) prDir(host, login string, ref model.PRRef) string {
 		s.dir, "v1", sanitize(host), sanitize(login), "repos",
 		sanitize(ref.Repo.Owner), sanitize(ref.Repo.Name), fmt.Sprintf("pr-%d", ref.Number),
 	)
+}
+
+// repoDir returns the on-disk directory holding every repository-scoped
+// cache entry (not tied to a specific pull request) for one repository:
+// <dir>/v1/<host>/<login>/repos/<owner>/<name>. It shares prDir's own
+// "repos" segment (see prDir's doc comment for why that segment exists) and
+// sits one level above prDir's own "pr-<n>" subdirectories for the same
+// repository — deliberate siblings, not conflicting: a repository-scoped
+// entry's SHA-256-hashed filename never collides with a "pr-<n>" directory
+// name. There is no InvalidateRepo today; nothing currently needs to purge
+// a repository-scoped entry independently of the whole cache directory.
+func (s *Store) repoDir(host, login string, repo model.RepoRef) string {
+	return filepath.Join(s.dir, "v1", sanitize(host), sanitize(login), "repos", sanitize(repo.Owner), sanitize(repo.Name))
 }
 
 // searchDir returns the on-disk directory holding every cached search/list
