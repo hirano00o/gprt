@@ -80,6 +80,8 @@ func (a *App) handleKey(ev *tcell.EventKey) *tcell.EventKey {
 			return a.routeEditLabelsKey(ev, normalized)
 		case "editreviewers":
 			return a.routeEditReviewersKey(ev, normalized)
+		case "createform":
+			return a.routeCreateFormKey(ev, normalized)
 		default:
 			return a.routeOverlayKey(ev, normalized)
 		}
@@ -334,10 +336,7 @@ func (a *App) focusedListPane() movablePane {
 	}
 }
 
-// dispatch runs the effect of a resolved Action. Actions not yet
-// implemented (list.new_pr) are silently ignored rather than surfacing a
-// toast for every exploratory keypress — docs/REQUIREMENTS.md tracks their
-// milestone.
+// dispatch runs the effect of a resolved Action.
 func (a *App) dispatch(action keys.Action, count int) {
 	switch action {
 	case keys.ActionListDown:
@@ -443,6 +442,8 @@ func (a *App) dispatch(action keys.Action, count int) {
 		a.openSubmitReviewDialog()
 	case keys.ActionPREdit:
 		a.openEditPRForm()
+	case keys.ActionListNewPR:
+		a.openCreatePRForm()
 	case keys.ActionCommentReact:
 		switch a.app.GetFocus() {
 		case a.prView:
@@ -488,13 +489,29 @@ func (a *App) routeComposerKey(ev *tcell.EventKey, normalized []keys.Key) *tcell
 	for _, k := range normalized {
 		if a.composerCtrlWPending {
 			a.composerCtrlWPending = false
-			switch {
-			case isPlainRune(k, 'h'):
-				a.focusPrevPane()
-			case isPlainRune(k, 'l'):
-				a.focusNextPane()
-			case isPlainRune(k, 'j'), isPlainRune(k, 'k'):
-				a.toggleComposerFocus()
+			// composerKindNewPRBody (the create-PR form's own body
+			// composer) is a no-op for every direction of this chord: its
+			// containing form's own root Pages page is removed while the
+			// composer is open (see createform.go's openCreatePRBodyComposer),
+			// so focusPrevPane/focusNextPane would hand focus to whatever
+			// the main list/detail layout has instead — leaving the
+			// composer's Flex mounted but unreachable (a.overlay still
+			// reads "createform", so the *next* key would then reach
+			// routeCreateFormKey instead, a real bug found in review: Ctrl-s
+			// from there fell through to the outer form's own Submit). j/k
+			// were already safe (toggleComposerFocus is a no-op when
+			// composerReturnFocus is nil, cleared for this kind on open),
+			// but h/l call the global pane-focus functions directly, with
+			// no such guard of their own.
+			if a.composerTarget == nil || a.composerTarget.kind != composerKindNewPRBody {
+				switch {
+				case isPlainRune(k, 'h'):
+					a.focusPrevPane()
+				case isPlainRune(k, 'l'):
+					a.focusNextPane()
+				case isPlainRune(k, 'j'), isPlainRune(k, 'k'):
+					a.toggleComposerFocus()
+				}
 			}
 			continue
 		}

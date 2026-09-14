@@ -94,12 +94,14 @@ type fakeGitHub struct {
 	repositoryInfo          map[model.RepoRef]model.RepositoryInfo
 	repositoryErr           map[model.RepoRef]error
 	repositoryBlock         chan struct{}
+	repositoryCalls         int
 	labels                  map[model.RepoRef][]model.Label
 	labelsErr               map[model.RepoRef]error
 	templates               map[model.RepoRef][]model.PullRequestTemplate
 	branchesResults         map[string][]model.Branch
 	branchesErr             error
 	branchesCalls           []branchesCall
+	branchesBlock           chan struct{}
 	teamsResults            map[string][]model.Team
 	teamsErr                error
 	teamsCalls              []teamsCall
@@ -117,6 +119,12 @@ type fakeGitHub struct {
 	closePullRequestErr     error
 	reopenPullRequestIDs    []string
 	reopenPullRequestErr    error
+
+	viewerRepositories      []model.RepositorySummary
+	viewerRepositoriesErr   error
+	createPullRequestCalls  []createPullRequestCall
+	createPullRequestErr    error
+	createPullRequestResult model.PullRequest
 }
 
 type branchesCall struct {
@@ -185,6 +193,10 @@ type mentionableUsersCall struct {
 	repo  model.RepoRef
 	query string
 	first int
+}
+
+type createPullRequestCall struct {
+	in gh.CreatePullRequestInput
 }
 
 func (f *fakeGitHub) Viewer(context.Context) (model.User, model.RateLimit, error) {
@@ -803,10 +815,9 @@ func (f *fakeGitHub) SetError(query string, err error) {
 	f.errs[query] = err
 }
 
-// M5 repository metadata / branch / team / edit-merge-create reads and
-// mutations (see internal/store's repository.go, viewer_repositories.go,
-// search.go, pr_edit.go). CreatePullRequest (pr_create.go) remains a plain
-// stub: the create-PR form is a later slice, not this one.
+// M5 repository metadata / branch / team / edit-merge-create/create reads
+// and mutations (see internal/store's repository.go, viewer_repositories.go,
+// search.go, pr_edit.go, pr_create.go).
 
 // SetRepositoryInfo registers the RepositoryInfo Repository returns for
 // repo, clearing any error previously armed for it via SetRepositoryError.
@@ -840,8 +851,18 @@ func (f *fakeGitHub) SetRepositoryBlock(ch chan struct{}) {
 	f.repositoryBlock = ch
 }
 
+// RepositoryCalls returns how many times Repository has been called so
+// far (across every repo), used to assert that a failed fetch is actually
+// retried rather than merely leaving a "still loading" state forever.
+func (f *fakeGitHub) RepositoryCalls() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.repositoryCalls
+}
+
 func (f *fakeGitHub) Repository(ctx context.Context, repo model.RepoRef) (model.RepositoryInfo, model.RateLimit, error) {
 	f.mu.Lock()
+	f.repositoryCalls++
 	block := f.repositoryBlock
 	f.mu.Unlock()
 	if block != nil {
@@ -905,8 +926,28 @@ func (f *fakeGitHub) PullRequestTemplates(_ context.Context, repo model.RepoRef)
 	return f.templates[repo], model.RateLimit{}, nil
 }
 
+// SetViewerRepositories makes ViewerRepositories return repos.
+func (f *fakeGitHub) SetViewerRepositories(repos []model.RepositorySummary) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.viewerRepositories = repos
+}
+
+// SetViewerRepositoriesError makes every ViewerRepositories call fail with
+// err.
+func (f *fakeGitHub) SetViewerRepositoriesError(err error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.viewerRepositoriesErr = err
+}
+
 func (f *fakeGitHub) ViewerRepositories(context.Context, int) ([]model.RepositorySummary, model.RateLimit, error) {
-	return nil, model.RateLimit{}, nil
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.viewerRepositoriesErr != nil {
+		return nil, model.RateLimit{}, f.viewerRepositoriesErr
+	}
+	return f.viewerRepositories, model.RateLimit{}, nil
 }
 
 // SetBranches registers the branches Branches returns for the given typed
@@ -934,7 +975,28 @@ func (f *fakeGitHub) BranchesCalls() []branchesCall {
 	return append([]branchesCall(nil), f.branchesCalls...)
 }
 
-func (f *fakeGitHub) Branches(_ context.Context, repo model.RepoRef, query string, first int) ([]model.Branch, model.RateLimit, error) {
+// SetBranchesBlock makes every subsequent Branches call wait until ch is
+// closed (or its context is cancelled) before returning — used to control
+// exactly when a stale SearchBranches call's own result becomes available,
+// so a test can assert it is dropped rather than merely hoping the real
+// goroutine scheduling happens to order two calls the way it needs.
+func (f *fakeGitHub) SetBranchesBlock(ch chan struct{}) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.branchesBlock = ch
+}
+
+func (f *fakeGitHub) Branches(ctx context.Context, repo model.RepoRef, query string, first int) ([]model.Branch, model.RateLimit, error) {
+	f.mu.Lock()
+	block := f.branchesBlock
+	f.mu.Unlock()
+	if block != nil {
+		select {
+		case <-block:
+		case <-ctx.Done():
+			return nil, model.RateLimit{}, ctx.Err()
+		}
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.branchesCalls = append(f.branchesCalls, branchesCall{repo: repo, query: query, first: first})
@@ -1202,8 +1264,40 @@ func (f *fakeGitHub) ReopenPullRequest(_ context.Context, id string) (model.PRSt
 	return model.PRStateOpen, model.RateLimit{}, nil
 }
 
-func (f *fakeGitHub) CreatePullRequest(context.Context, gh.CreatePullRequestInput) (model.PullRequest, model.RateLimit, error) {
-	return model.PullRequest{}, model.RateLimit{}, nil
+// SetCreatePullRequestResult makes CreatePullRequest succeed, returning pr.
+func (f *fakeGitHub) SetCreatePullRequestResult(pr model.PullRequest) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.createPullRequestResult = pr
+	f.createPullRequestErr = nil
+}
+
+// SetCreatePullRequestError makes every CreatePullRequest call fail with
+// err.
+func (f *fakeGitHub) SetCreatePullRequestError(err error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.createPullRequestErr = err
+}
+
+// CreatePullRequestCalls returns every CreatePullRequest call so far, in
+// call order.
+func (f *fakeGitHub) CreatePullRequestCalls() []createPullRequestCall {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]createPullRequestCall(nil), f.createPullRequestCalls...)
+}
+
+func (f *fakeGitHub) CreatePullRequest(_ context.Context, in gh.CreatePullRequestInput) (model.PullRequest, model.RateLimit, error) {
+	f.mu.Lock()
+	f.createPullRequestCalls = append(f.createPullRequestCalls, createPullRequestCall{in: in})
+	err := f.createPullRequestErr
+	result := f.createPullRequestResult
+	f.mu.Unlock()
+	if err != nil {
+		return model.PullRequest{}, model.RateLimit{}, err
+	}
+	return result, model.RateLimit{}, nil
 }
 
 func fixtureRef(number int) model.PRRef {

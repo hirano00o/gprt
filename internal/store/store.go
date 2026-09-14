@@ -560,6 +560,14 @@ func (s *Store) Viewer() model.User {
 	return s.viewer
 }
 
+// Host returns the GitHub host this Store's data is scoped to (Deps.Host,
+// already resolved by main before Start) — the create-PR form's own
+// repository field uses this to build a model.RepoRef for an exact
+// "owner/name" the viewer typed that is not among Store.ViewerRepositories().
+func (s *Store) Host() string {
+	return s.deps.Host
+}
+
 // RateLimit returns the GraphQL rate limit reported by the most recent
 // successful request.
 func (s *Store) RateLimit() model.RateLimit {

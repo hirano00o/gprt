@@ -19,6 +19,61 @@ func TestMentionableUsers_NoPullRequestOpen_ReturnsNil(t *testing.T) {
 	}
 }
 
+// TestStore_EnsureMentionableUsers_FetchesAndApplies covers the create-PR
+// form's own need (internal/ui/createform.go's reviewers overlay): a
+// repository's mentionable users, resolved without any pull request ever
+// having been opened in it at all.
+func TestStore_EnsureMentionableUsers_FetchesAndApplies(t *testing.T) {
+	gitHub := newFakeGitHub()
+	disp := newFakeDispatcher()
+	s := newTestStore(t, config.Default(), gitHub, disp)
+	repo := model.RepoRef{Host: "example.com", Owner: "acme", Name: "widgets"}
+	events := collectEvents(s)
+	gitHub.setMentionableUsersFunc(func(context.Context, model.RepoRef, string, int) ([]model.User, model.RateLimit, error) {
+		return []model.User{{Login: "octocat"}}, model.RateLimit{}, nil
+	})
+
+	if got := s.MentionableUsersOf(repo); got != nil {
+		t.Fatalf("MentionableUsersOf() before Ensure = %+v, want nil", got)
+	}
+
+	s.EnsureMentionableUsers(repo)
+	runUntilIdle(t, disp)
+
+	got := s.MentionableUsersOf(repo)
+	if len(got) != 1 || got[0].Login != "octocat" {
+		t.Errorf("MentionableUsersOf() = %+v, want [{octocat}]", got)
+	}
+	if n := countEventKind(*events, EventMentionableChanged); n == 0 {
+		t.Error("no EventMentionableChanged observed")
+	}
+}
+
+// TestStore_EnsureMentionableUsers_IndependentOfCurrentPullRequest covers
+// MentionableUsersOf's own independence from CurrentRef/CurrentPR, unlike
+// MentionableUsers(): the create-PR form has no "current pull request" to
+// key off at all, so it must be able to resolve a chosen repository's own
+// list regardless.
+func TestStore_EnsureMentionableUsers_IndependentOfCurrentPullRequest(t *testing.T) {
+	gitHub := newFakeGitHub()
+	disp := newFakeDispatcher()
+	s := newTestStore(t, config.Default(), gitHub, disp)
+	repo := model.RepoRef{Host: "example.com", Owner: "acme", Name: "widgets"}
+	gitHub.setMentionableUsersFunc(func(context.Context, model.RepoRef, string, int) ([]model.User, model.RateLimit, error) {
+		return []model.User{{Login: "octocat"}}, model.RateLimit{}, nil
+	})
+
+	s.EnsureMentionableUsers(repo)
+	runUntilIdle(t, disp)
+
+	if got := s.MentionableUsers(); got != nil {
+		t.Errorf("MentionableUsers() = %+v, want nil (no pull request open)", got)
+	}
+	if got := s.MentionableUsersOf(repo); len(got) != 1 {
+		t.Errorf("MentionableUsersOf() = %+v, want the fetched list", got)
+	}
+}
+
 func TestOpenPR_MentionableUsers_FirstOpenFetchesOnce(t *testing.T) {
 	gitHub := newFakeGitHub()
 	disp := newFakeDispatcher()

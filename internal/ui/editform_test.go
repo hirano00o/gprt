@@ -122,6 +122,34 @@ func TestEditFormSaveEnqueuesOnlyChangedTitle(t *testing.T) {
 	waitFor(t, app.app, func() bool { return app.overlay == "" })
 }
 
+// TestEditFormSaveTrimsTitleAndBase is a regression test found in review
+// (the create-PR form's own equivalent bug): Title/Base were sent
+// verbatim, so accidental leading/trailing whitespace reached GitHub
+// unchanged.
+func TestEditFormSaveTrimsTitleAndBase(t *testing.T) {
+	app, _, fake, _ := newTestApp(t, nil)
+	ref := fixtureRef(1)
+	openDetailForComposer(t, app, fake, editablePR(ref))
+
+	sendRune(app.app, 'E')
+	waitFor(t, app.app, func() bool { return app.editForm != nil })
+	act(app.app, func() {
+		app.editFormTitleField.SetText("  New title  ")
+		app.editFormBaseField.SetText("  develop  ")
+	})
+
+	act(app.app, func() { app.saveEditForm() })
+
+	waitFor(t, app.app, func() bool { return len(fake.UpdatePullRequestCalls()) == 1 })
+	call := fake.UpdatePullRequestCalls()[0]
+	if call.in.Title == nil || *call.in.Title != "New title" {
+		t.Errorf("UpdatePullRequest Title = %v, want trimmed %q", call.in.Title, "New title")
+	}
+	if call.in.BaseRefName == nil || *call.in.BaseRefName != "develop" {
+		t.Errorf("UpdatePullRequest BaseRefName = %v, want trimmed %q", call.in.BaseRefName, "develop")
+	}
+}
+
 // TestEditFormSaveEnqueuesMetaReviewersDraftInOrder covers title+base+
 // labels, reviewers, and draft all changing at once: Save enqueues
 // UpdatePullRequestMeta, then SetReviewers, then SetDraft, in that fixed

@@ -250,11 +250,18 @@ type App struct {
 	editLabelsView    *tview.List
 	editLabelsWorking map[string]bool
 
-	// Edit-reviewers overlay (editreviewers.go, stacked over "editform"):
-	// editReviewersWorking is a copy of editFormSelectedReviewers mutated
-	// by Space/team search, applied back only on Enter (Esc/q discard
-	// it). editReviewersTeams is the latest Store.SearchTeams result for
-	// the typed query.
+	// Edit-reviewers overlay (editreviewers.go, stacked over "editform" or
+	// "createform" — see openReviewersOverlay's own doc comment):
+	// reviewersOwner names which of the two opened it ("editform" or
+	// "createform") and reviewersRepo names whose mentionable users/teams
+	// to search; both are set by openReviewersOverlay and read back by
+	// closeEditReviewersOverlay to know where to write the result and
+	// which form to refocus. editReviewersWorking is a copy of that form's
+	// own selected-reviewers set mutated by Space/team search, applied
+	// back only on Enter (Esc/q discard it). editReviewersTeams is the
+	// latest Store.SearchTeams result for the typed query.
+	reviewersOwner           string
+	reviewersRepo            model.RepoRef
 	editReviewersFlex        *tview.Flex
 	editReviewersSearch      *tview.InputField
 	editReviewersView        *tview.List
@@ -286,6 +293,58 @@ type App struct {
 	// fixed order mergeMethodDropDown offers them (its own current
 	// selection index into this slice).
 	mergeMethods []model.MergeMethod
+
+	// Create-PR form (createform.go, "n"/list.new_pr, only bound in
+	// ContextList): createForm is nil while closed. Unlike every other
+	// overlay, it is not bound to Store.CurrentRef() at all — an unrelated
+	// pull request switch must never close it (see
+	// composerKindNewPRBody's own doc comment for the body composer's
+	// matching rule) — so there is no closeCreateFormIfWrongPR wired into
+	// EventPRChanged.
+	createForm            *tview.Form
+	createFormReturnFocus tview.Primitive
+	createFormRepoField   *tview.InputField
+	createFormHeadField   *tview.InputField
+	createFormBaseField   *tview.InputField
+	createFormTitleField  *tview.InputField
+	createFormDraftBox    *tview.Checkbox
+	// createFormRepo/createFormRepoChosen are set the moment the
+	// repository field's own text parses as a syntactically valid
+	// "owner/name" (onCreateFormRepoChanged) — chosen, not merely typed:
+	// an in-progress, incomplete string leaves createFormRepoChosen false.
+	// createFormBaseApplied/createFormBodyApplied each latch true the
+	// first time RepositoryInfo/Templates resolve for the currently chosen
+	// repository, so a later, unrelated metadata refresh for the same
+	// repository never re-stomps a base branch or body the user has since
+	// edited themselves.
+	createFormRepo              model.RepoRef
+	createFormRepoChosen        bool
+	createFormBaseApplied       bool
+	createFormBodyApplied       bool
+	createFormSelectedReviewers map[string]model.Reviewer // keyed by ID
+	// createFormBody is the create-PR form's own body text, round-tripped
+	// through the vim composer (openCreatePRBodyComposer/
+	// sendNewPRBodyComposer, composerKindNewPRBody) rather than living in
+	// a form field of its own.
+	createFormBody string
+	// createFormHeadSuggestions/createFormHeadLastQuery/createFormHeadTimer
+	// and their createFormBase* counterparts mirror editFormBranchSuggestions/
+	// editFormBranchLastQuery/editFormBranchTimer exactly (see
+	// editFormBranchAutocomplete's own doc comment for the lastQuery guard
+	// against InputField.Autocomplete()'s own self-recursion) — one
+	// independent set per field, since the create form has two
+	// autocompleted branch fields where the edit form has only one.
+	createFormHeadSuggestions []string
+	createFormHeadLastQuery   string
+	createFormHeadTimer       *time.Timer
+	createFormBaseSuggestions []string
+	createFormBaseLastQuery   string
+	createFormBaseTimer       *time.Timer
+	// createFormPending tracks Submit's own single, unscoped
+	// CreatePullRequest mutation from enqueue to its EventMutationChanged
+	// resolution — see onCreateFormMutationChanged's own doc comment for
+	// why created must be read, not assumed, at that point.
+	createFormPending *createFormPending
 
 	// choiceMenu/choiceOnChoose back the "choice" overlay (see
 	// dialogs.go's showChoiceMenu/closeChoiceMenu): the send-mode picker
