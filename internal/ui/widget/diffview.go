@@ -980,26 +980,35 @@ func commentLines(c model.ReviewComment, width int) [][]Span {
 		lines = append(lines, []Span{{Text: commentBorder, Style: theme.Muted}, {Text: l, Style: theme.Base}})
 	}
 
-	if r := reactionSummary(c.ReactionGroups); r != "" {
-		lines = append(lines, []Span{{Text: commentBorder, Style: theme.Muted}, {Text: r, Style: theme.Muted}})
+	if r := reactionSummary(c.ReactionGroups); len(r) > 0 {
+		lines = append(lines, append([]Span{{Text: commentBorder, Style: theme.Muted}}, r...))
 	}
 	return lines
 }
 
-// reactionSummary renders groups as a single line (for example "👍 2  🎉 1"),
-// or "" when there is nothing to show. Kept local to this package (rather
+// reactionSummary renders groups as a line of Spans (for example "👍 2  🎉
+// 1"), bolding any group the viewer has themselves reacted with
+// (ViewerHasReacted) so it is distinguishable from one they have not, or
+// nil when there is nothing to show. Kept local to this package (rather
 // than shared with internal/ui's near-identical reactionLine) since widget
 // must not depend on internal/ui, and the two renderers are small enough
 // that the duplication is cheaper than introducing a shared package for it.
-func reactionSummary(groups []model.ReactionGroup) string {
-	var parts []string
+func reactionSummary(groups []model.ReactionGroup) []Span {
+	var spans []Span
 	for _, g := range groups {
 		if g.Count <= 0 {
 			continue
 		}
-		parts = append(parts, fmt.Sprintf("%s %d", g.Content.Emoji(), g.Count))
+		if len(spans) > 0 {
+			spans = append(spans, Span{Text: "  ", Style: theme.Muted})
+		}
+		style := theme.Muted
+		if g.ViewerHasReacted {
+			style = style.Bold(true)
+		}
+		spans = append(spans, Span{Text: fmt.Sprintf("%s %d", g.Content.Emoji(), g.Count), Style: style})
 	}
-	return strings.Join(parts, "  ")
+	return spans
 }
 
 // relativeTimeShort renders t as a short "Ns"/"Nm"/"Nh"/"Nd" duration

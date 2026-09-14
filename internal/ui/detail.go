@@ -9,7 +9,6 @@ package ui
 import (
 	"fmt"
 	"log/slog"
-	"strings"
 
 	"github.com/gdamore/tcell/v2"
 
@@ -222,18 +221,24 @@ func chopChars(text string, width int) [][]widget.Span {
 	return lines
 }
 
-// reactionLine renders a single muted line summarising groups (for example
-// "👍 2  🎉 1"), or nil when there is nothing to show.
+// reactionLine renders a single line summarising groups (for example "👍 2
+// 🎉 1"), bolding any group the viewer has themselves reacted with
+// (ViewerHasReacted) so it is distinguishable from one they have not, or
+// nil when there is nothing to show.
 func reactionLine(groups []model.ReactionGroup) []widget.Span {
-	var parts []string
+	var spans []widget.Span
 	for _, g := range groups {
 		if g.Count <= 0 {
 			continue
 		}
-		parts = append(parts, fmt.Sprintf("%s %d", g.Content.Emoji(), g.Count))
+		if len(spans) > 0 {
+			spans = append(spans, widget.Span{Text: "  ", Style: theme.Muted})
+		}
+		style := theme.Muted
+		if g.ViewerHasReacted {
+			style = style.Bold(true)
+		}
+		spans = append(spans, widget.Span{Text: fmt.Sprintf("%s %d", g.Content.Emoji(), g.Count), Style: style})
 	}
-	if len(parts) == 0 {
-		return nil
-	}
-	return []widget.Span{{Text: strings.Join(parts, "  "), Style: theme.Muted}}
+	return spans
 }

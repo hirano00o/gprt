@@ -37,18 +37,19 @@ import (
 // requested ref, gated by a separate prBlock so a test can observe the PR
 // detail fetch's own loading/stale window independently of the list's.
 type fakeGitHub struct {
-	mu         sync.Mutex
-	viewer     model.User
-	results    map[string]gh.SearchResult
-	errs       map[string]error
-	block      chan struct{}
-	prResult   map[string]gh.DetailResult
-	prErr      map[string]error
-	prBlock    chan struct{}
-	prCalls    int
-	filesPages map[string][]gh.FilesResult
-	filesErrs  map[string]map[int]error
-	filesBlock chan struct{}
+	mu          sync.Mutex
+	viewer      model.User
+	results     map[string]gh.SearchResult
+	errs        map[string]error
+	block       chan struct{}
+	searchCalls int
+	prResult    map[string]gh.DetailResult
+	prErr       map[string]error
+	prBlock     chan struct{}
+	prCalls     int
+	filesPages  map[string][]gh.FilesResult
+	filesErrs   map[string]map[int]error
+	filesBlock  chan struct{}
 
 	addCommentErr      error
 	addCommentBodies   []string
@@ -80,6 +81,14 @@ type fakeGitHub struct {
 	resolveThreadIDs           []string
 	unresolveThreadErr         error
 	unresolveThreadIDs         []string
+
+	addReactionErr        error
+	addReactionCalls      []reactionCall
+	removeReactionErr     error
+	removeReactionCalls   []reactionCall
+	mentionableUsers      map[model.RepoRef][]model.User
+	mentionableUsersErr   error
+	mentionableUsersCalls []mentionableUsersCall
 }
 
 // The review-mutation recorder call shapes below are named types (rather
@@ -109,6 +118,17 @@ type submitReviewCall struct {
 }
 
 type updateReviewCommentCall struct{ id, body string }
+
+type reactionCall struct {
+	subjectID string
+	content   model.ReactionContent
+}
+
+type mentionableUsersCall struct {
+	repo  model.RepoRef
+	query string
+	first int
+}
 
 func (f *fakeGitHub) Viewer(context.Context) (model.User, model.RateLimit, error) {
 	return f.viewer, model.RateLimit{}, nil
@@ -325,6 +345,21 @@ func (f *fakeGitHub) AddReviewNowWithEvent(_ context.Context, prID string, event
 	return model.Review{ID: "PVR_submitted"}, model.RateLimit{}, nil
 }
 
+// SetAddReviewNowWithEventError makes AddReviewNowWithEvent fail with err.
+func (f *fakeGitHub) SetAddReviewNowWithEventError(err error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.addReviewNowWithEventErr = err
+}
+
+// AddReviewNowWithEventCalls returns every AddReviewNowWithEvent call so
+// far, in call order.
+func (f *fakeGitHub) AddReviewNowWithEventCalls() []addReviewNowWithEventCall {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]addReviewNowWithEventCall(nil), f.addReviewNowWithEventCalls...)
+}
+
 func (f *fakeGitHub) AddReviewThread(_ context.Context, in gh.ThreadInput) (model.ReviewThread, model.RateLimit, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -365,6 +400,20 @@ func (f *fakeGitHub) SubmitReview(_ context.Context, reviewID string, event mode
 		return model.Review{}, model.RateLimit{}, f.submitReviewErr
 	}
 	return model.Review{ID: reviewID}, model.RateLimit{}, nil
+}
+
+// SetSubmitReviewError makes SubmitReview fail with err.
+func (f *fakeGitHub) SetSubmitReviewError(err error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.submitReviewErr = err
+}
+
+// SubmitReviewCalls returns every SubmitReview call so far, in call order.
+func (f *fakeGitHub) SubmitReviewCalls() []submitReviewCall {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]submitReviewCall(nil), f.submitReviewCalls...)
 }
 
 func (f *fakeGitHub) DeletePendingReview(_ context.Context, reviewID string) (model.RateLimit, error) {
@@ -423,20 +472,84 @@ func (f *fakeGitHub) UnresolveThread(_ context.Context, threadID string) (model.
 	return model.ReviewThread{ID: threadID, IsResolved: false, ViewerCanResolve: true}, model.RateLimit{}, nil
 }
 
-// AddReaction/RemoveReaction/MentionableUsers are not yet exercised by any
-// UI test (the M4 UI slice - reaction picker, mention completion from
-// mentionableUsers - is not implemented yet): these minimal stubs exist
-// only so *fakeGitHub keeps satisfying store.GitHub.
-func (f *fakeGitHub) AddReaction(context.Context, string, model.ReactionContent) ([]model.ReactionGroup, model.RateLimit, error) {
+// AddReaction records subjectID/content and returns a synthesized,
+// minimally-plausible result unless SetAddReactionError was armed: a
+// single-group result for content with ViewerHasReacted true, matching
+// what Store.applyReactionGroups needs to reflect a successful toggle.
+func (f *fakeGitHub) AddReaction(_ context.Context, subjectID string, content model.ReactionContent) ([]model.ReactionGroup, model.RateLimit, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.addReactionCalls = append(f.addReactionCalls, reactionCall{subjectID, content})
+	if f.addReactionErr != nil {
+		return nil, model.RateLimit{}, f.addReactionErr
+	}
+	return []model.ReactionGroup{{Content: content, Count: 1, ViewerHasReacted: true}}, model.RateLimit{}, nil
+}
+
+// RemoveReaction records subjectID/content and returns a synthesized,
+// minimally-plausible result (the group removed entirely, mirroring
+// GitHub's own behaviour once a reaction's count reaches zero) unless
+// SetRemoveReactionError was armed.
+func (f *fakeGitHub) RemoveReaction(_ context.Context, subjectID string, content model.ReactionContent) ([]model.ReactionGroup, model.RateLimit, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.removeReactionCalls = append(f.removeReactionCalls, reactionCall{subjectID, content})
+	if f.removeReactionErr != nil {
+		return nil, model.RateLimit{}, f.removeReactionErr
+	}
 	return nil, model.RateLimit{}, nil
 }
 
-func (f *fakeGitHub) RemoveReaction(context.Context, string, model.ReactionContent) ([]model.ReactionGroup, model.RateLimit, error) {
-	return nil, model.RateLimit{}, nil
+// SetMentionableUsers registers the users MentionableUsers returns for
+// repo (an unregistered repo returns nil, matching a repository with no
+// mentionable-users fetch configured for this test).
+func (f *fakeGitHub) SetMentionableUsers(repo model.RepoRef, users []model.User) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.mentionableUsers == nil {
+		f.mentionableUsers = map[model.RepoRef][]model.User{}
+	}
+	f.mentionableUsers[repo] = users
 }
 
-func (f *fakeGitHub) MentionableUsers(context.Context, model.RepoRef, string, int) ([]model.User, model.RateLimit, error) {
-	return nil, model.RateLimit{}, nil
+// SetMentionableUsersError makes every MentionableUsers call fail with err.
+func (f *fakeGitHub) SetMentionableUsersError(err error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.mentionableUsersErr = err
+}
+
+func (f *fakeGitHub) MentionableUsers(_ context.Context, repo model.RepoRef, query string, first int) ([]model.User, model.RateLimit, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.mentionableUsersCalls = append(f.mentionableUsersCalls, mentionableUsersCall{repo, query, first})
+	if f.mentionableUsersErr != nil {
+		return nil, model.RateLimit{}, f.mentionableUsersErr
+	}
+	return f.mentionableUsers[repo], model.RateLimit{}, nil
+}
+
+// AddReactionCalls returns every AddReaction call so far, in call order.
+func (f *fakeGitHub) AddReactionCalls() []reactionCall {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]reactionCall(nil), f.addReactionCalls...)
+}
+
+// RemoveReactionCalls returns every RemoveReaction call so far, in call
+// order.
+func (f *fakeGitHub) RemoveReactionCalls() []reactionCall {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]reactionCall(nil), f.removeReactionCalls...)
+}
+
+// MentionableUsersCalls returns every MentionableUsers call so far, in
+// call order.
+func (f *fakeGitHub) MentionableUsersCalls() []mentionableUsersCall {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]mentionableUsersCall(nil), f.mentionableUsersCalls...)
 }
 
 // CreatePendingReviewCalls returns how many times CreatePendingReview has
@@ -550,8 +663,18 @@ func (f *fakeGitHub) PRCalls() int {
 	return f.prCalls
 }
 
+// SearchCalls returns how many times SearchPullRequests has been called so
+// far (across every section/query), used to detect a fresh list refresh
+// (Store.Refresh) without needing a query-scoped counter.
+func (f *fakeGitHub) SearchCalls() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.searchCalls
+}
+
 func (f *fakeGitHub) SearchPullRequests(ctx context.Context, query, cursor string) (gh.SearchResult, error) {
 	f.mu.Lock()
+	f.searchCalls++
 	block := f.block
 	f.mu.Unlock()
 	if block != nil {

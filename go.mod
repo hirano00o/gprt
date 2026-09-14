@@ -11,6 +11,7 @@ require (
 	github.com/google/shlex v0.0.0-20191202100458-e7afc7fbc510
 	github.com/rivo/tview v0.42.0
 	github.com/rivo/uniseg v0.4.7
+	github.com/sahilm/fuzzy v0.1.3
 )
 
 require (

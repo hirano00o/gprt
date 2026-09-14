@@ -773,6 +773,56 @@ func TestDiffViewPendingCommentShowsBadge(t *testing.T) {
 	}
 }
 
+// TestDiffViewCommentReactionLineBoldsViewerReaction covers commentLines'
+// own reaction summary line: a group the viewer has reacted with
+// (ViewerHasReacted) renders bold, one they have not does not.
+func TestDiffViewCommentReactionLineBoldsViewerReaction(t *testing.T) {
+	f := twoHunkFile(t)
+	f.Threads = []model.ReviewThread{
+		{
+			ID: "t1", Path: f.Path, Line: 1, Side: model.DiffSideRight,
+			Comments: []model.ReviewComment{
+				{
+					Author: model.User{Login: "alice"}, Body: "nice", State: model.ReviewCommentStateSubmitted,
+					ReactionGroups: []model.ReactionGroup{
+						{Content: model.ReactionThumbsUp, Count: 2, ViewerHasReacted: true},
+						{Content: model.ReactionHooray, Count: 1},
+					},
+				},
+			},
+		},
+	}
+	dv := NewDiffView()
+	dv.SetFile(f)
+	drawn(t, dv, 60, 30)
+
+	var gotThumbsUp, gotHooray bool
+	for _, r := range dv.rows {
+		if r.kind != rowKindThreadComment {
+			continue
+		}
+		for _, line := range r.lines {
+			for _, s := range line {
+				switch {
+				case strings.Contains(s.Text, model.ReactionThumbsUp.Emoji()):
+					gotThumbsUp = true
+					if s.Style != theme.Muted.Bold(true) {
+						t.Errorf("thumbs-up reaction span style = %+v, want theme.Muted.Bold(true)", s.Style)
+					}
+				case strings.Contains(s.Text, model.ReactionHooray.Emoji()):
+					gotHooray = true
+					if s.Style != theme.Muted {
+						t.Errorf("hooray reaction span style = %+v, want plain theme.Muted", s.Style)
+					}
+				}
+			}
+		}
+	}
+	if !gotThumbsUp || !gotHooray {
+		t.Fatal("did not find both reaction spans in the comment's rendered lines")
+	}
+}
+
 // TestDiffViewDraftMarkerRendersInGutter covers the "✎"-style gutter marker
 // on a line with a saved draft anchored to it (DiffFile.DraftLines), and its
 // absence on every other line.

@@ -107,7 +107,7 @@ var defaultTable = []defaultEntry{
 	// list is just as useful while looking at the diff, or with the tree
 	// focused.
 	{[]Context{ContextPR, ContextFiles, ContextDiff}, "p", ActionPRPending},
-	{[]Context{ContextPR}, "S", ActionPRSubmit},
+	{[]Context{ContextPR, ContextFiles, ContextDiff}, "S", ActionPRSubmit},
 	{[]Context{ContextPR}, "E", ActionPREdit},
 
 	{[]Context{ContextGlobal}, "o", ActionGlobalOpenBrowser},

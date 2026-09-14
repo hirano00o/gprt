@@ -277,6 +277,43 @@ func TestDescriptionBlockReactions(t *testing.T) {
 	}
 }
 
+// TestReactionLineBoldsAGroupTheViewerReactedTo covers reactionLine
+// distinguishing a reaction the viewer has themselves added from one they
+// have not, via style rather than extra text (blockText's own
+// text-only join cannot see that): the viewer's own group renders bold,
+// every other group does not.
+func TestReactionLineBoldsAGroupTheViewerReactedTo(t *testing.T) {
+	spans := reactionLine([]model.ReactionGroup{
+		{Content: model.ReactionThumbsUp, Count: 2, ViewerHasReacted: true},
+		{Content: model.ReactionHooray, Count: 1},
+	})
+
+	var gotThumbsUp, gotHooray bool
+	for _, s := range spans {
+		switch {
+		case strings.Contains(s.Text, model.ReactionThumbsUp.Emoji()):
+			gotThumbsUp = true
+			if s.Style != theme.Muted.Bold(true) {
+				t.Errorf("thumbs-up span style = %+v, want theme.Muted.Bold(true) (ViewerHasReacted)", s.Style)
+			}
+		case strings.Contains(s.Text, model.ReactionHooray.Emoji()):
+			gotHooray = true
+			if s.Style != theme.Muted {
+				t.Errorf("hooray span style = %+v, want plain theme.Muted (not the viewer's own reaction)", s.Style)
+			}
+		}
+	}
+	if !gotThumbsUp || !gotHooray {
+		t.Fatalf("reactionLine spans = %+v, want both a thumbs-up and a hooray span", spans)
+	}
+}
+
+func TestReactionLineOmitsZeroCountGroups(t *testing.T) {
+	if spans := reactionLine([]model.ReactionGroup{{Content: model.ReactionEyes, Count: 0}}); spans != nil {
+		t.Errorf("reactionLine with only a zero-count group = %+v, want nil", spans)
+	}
+}
+
 func TestChecksBlocksSummaryLine(t *testing.T) {
 	pr := &model.PullRequest{Checks: []model.Check{
 		{Name: "build", Status: model.CheckStatusCompleted, Conclusion: model.CheckConclusionSuccess},
