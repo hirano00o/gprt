@@ -12,6 +12,7 @@ var mentionableUsersQuery = sync.OnceValue(func() string { return mustLoadQuery(
 // mentionableUserNode mirrors one node of a "mentionableUsers { nodes {...}
 // }" selection.
 type mentionableUserNode struct {
+	ID    string `json:"id"`
 	Login string `json:"login"`
 	Name  string `json:"name"`
 }
@@ -29,13 +30,16 @@ type mentionableUsersResponse struct {
 
 // MentionableUsers returns repo's mentionable users (GraphQL's
 // repository.mentionableUsers connection), used as the store's `@`-mention
-// autocomplete candidate source. query filters by login/name prefix on
-// GitHub's side; an empty query is sent as an explicit null variable (via
-// stringVariable, the same convention review.go's AddThreadReply uses for
-// its optional pendingReviewID), matching an unfiltered request rather than
-// a literal empty-string search. first bounds the page size; gprt does not
-// paginate this connection further (see the store's own doc comments for
-// why one page is an accepted limitation).
+// autocomplete candidate source and (M5) the edit-PR form's reviewers
+// picker, which needs each user's own node ID (model.User.ID) to add a
+// brand-new individual reviewer via RequestReviewers. query filters by
+// login/name prefix on GitHub's side; an empty query is sent as an
+// explicit null variable (via stringVariable, the same convention
+// review.go's AddThreadReply uses for its optional pendingReviewID),
+// matching an unfiltered request rather than a literal empty-string
+// search. first bounds the page size; gprt does not paginate this
+// connection further (see the store's own doc comments for why one page
+// is an accepted limitation).
 func (c *Client) MentionableUsers(
 	ctx context.Context, repo model.RepoRef, query string, first int,
 ) ([]model.User, model.RateLimit, error) {
@@ -53,7 +57,7 @@ func (c *Client) MentionableUsers(
 	nodes := resp.Repository.MentionableUsers.Nodes
 	users := make([]model.User, 0, len(nodes))
 	for _, n := range nodes {
-		users = append(users, model.User{Login: n.Login, Name: n.Name})
+		users = append(users, model.User{ID: n.ID, Login: n.Login, Name: n.Name})
 	}
 	return users, resp.RateLimit.toModel(), nil
 }

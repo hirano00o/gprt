@@ -1,7 +1,15 @@
 package model
 
-// User is a GitHub account: an author, reviewer, commenter, or actor.
+// User is a GitHub account: an author, reviewer, commenter, or actor. ID is
+// the GraphQL node ID, populated only where a query actually selects it —
+// today, MentionableUsers (needed to build a RequestReviewersInput's
+// userIds when adding a brand-new individual reviewer, M5) and Viewer (for
+// consistency with MentionableUsers, though nothing currently needs the
+// viewer's own ID); every other User-producing query (an author, a
+// commenter, an actor, …) leaves it empty, since none of those contexts
+// ever sends a User back to a mutation that needs its ID.
 type User struct {
+	ID    string
 	Login string
 	Name  string
 }

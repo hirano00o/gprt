@@ -47,9 +47,9 @@ func TestClient_Viewer(t *testing.T) {
 		t.Error("request carried an empty GraphQL query")
 	}
 
-	wantUser := model.User{Login: "octocat", Name: "The Octocat"}
+	wantUser := model.User{ID: "U_octocat", Login: "octocat", Name: "The Octocat"}
 	if user != wantUser {
-		t.Errorf("Viewer() user = %+v, want %+v", user, wantUser)
+		t.Errorf("Viewer() user = %+v, want %+v (ID decoded from the response)", user, wantUser)
 	}
 
 	wantResetAt, _ := time.Parse(time.RFC3339, "2026-09-11T12:00:00Z")

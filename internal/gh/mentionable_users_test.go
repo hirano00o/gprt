@@ -21,8 +21,8 @@ func TestClient_MentionableUsers_NullQueryWhenEmpty(t *testing.T) {
 			"repository": {
 				"mentionableUsers": {
 					"nodes": [
-						{"login": "octocat", "name": "The Octocat"},
-						{"login": "monalisa", "name": ""}
+						{"id": "U_octocat", "login": "octocat", "name": "The Octocat"},
+						{"id": "U_monalisa", "login": "monalisa", "name": ""}
 					]
 				}
 			},
@@ -50,8 +50,10 @@ func TestClient_MentionableUsers_NullQueryWhenEmpty(t *testing.T) {
 	if v, ok := gotVars["query"]; !ok || v != nil {
 		t.Errorf("request variables[query] = %v, want an explicit null for an empty query", v)
 	}
-	if len(users) != 2 || users[0] != (model.User{Login: "octocat", Name: "The Octocat"}) || users[1] != (model.User{Login: "monalisa", Name: ""}) {
-		t.Errorf("MentionableUsers() users = %+v", users)
+	if len(users) != 2 ||
+		users[0] != (model.User{ID: "U_octocat", Login: "octocat", Name: "The Octocat"}) ||
+		users[1] != (model.User{ID: "U_monalisa", Login: "monalisa", Name: ""}) {
+		t.Errorf("MentionableUsers() users = %+v, want IDs decoded from the response", users)
 	}
 	if !rl.Known || rl.Remaining != 4999 {
 		t.Errorf("MentionableUsers() rate limit = %+v, want Remaining=4999, Known=true", rl)

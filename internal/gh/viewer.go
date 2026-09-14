@@ -31,6 +31,7 @@ var viewerQuery = sync.OnceValue(func() string {
 // viewerResponse is the decoded shape of queries/viewer.graphql.
 type viewerResponse struct {
 	Viewer struct {
+		ID    string `json:"id"`
 		Login string `json:"login"`
 		Name  string `json:"name"`
 	} `json:"viewer"`
@@ -38,12 +39,14 @@ type viewerResponse struct {
 }
 
 // Viewer returns the authenticated user and the current GraphQL rate limit.
+// ID is selected for consistency with MentionableUsers' own model.User.ID
+// (M5), though nothing currently needs the viewer's own node ID.
 func (c *Client) Viewer(ctx context.Context) (model.User, model.RateLimit, error) {
 	var resp viewerResponse
 	if err := c.gql.DoWithContext(ctx, viewerQuery(), nil, &resp); err != nil {
 		return model.User{}, model.RateLimit{}, classify(err)
 	}
 
-	user := model.User{Login: resp.Viewer.Login, Name: resp.Viewer.Name}
+	user := model.User{ID: resp.Viewer.ID, Login: resp.Viewer.Login, Name: resp.Viewer.Name}
 	return user, resp.RateLimit.toModel(), nil
 }
