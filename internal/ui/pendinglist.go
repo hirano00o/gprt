@@ -228,10 +228,16 @@ func (a *App) routePendingKey(_ *tcell.EventKey, normalized []keys.Key) *tcell.E
 // comment): the router treats "pendingConfirm" exactly like "confirm"
 // (return the event unchanged, letting the Modal's own InputHandler run),
 // and the done func pops back to "pending" and refocuses the list either
-// way, running onConfirm only when the user picked "Delete".
+// way, running onConfirm only when the user picked "Delete". "Cancel"
+// (button index 1) defaults focus, mirroring showConfirm's own
+// SetFocus(1) — this modal is built directly, not through showConfirm, so
+// it needs the identical fix applied independently (see showConfirm's own
+// doc comment for why a bare Enter must never default to the destructive
+// choice).
 func (a *App) confirmWithinPendingList(message string, onConfirm func()) {
 	a.overlay = "pendingConfirm"
 	modal := tview.NewModal().SetText(message).AddButtons([]string{"Delete", "Cancel"})
+	modal.SetFocus(1)
 	modal.SetDoneFunc(func(_ int, label string) {
 		a.root.RemovePage("pendingConfirm")
 		a.overlay = "pending"

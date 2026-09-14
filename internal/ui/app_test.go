@@ -88,7 +88,64 @@ type fakeGitHub struct {
 	removeReactionCalls   []reactionCall
 	mentionableUsers      map[model.RepoRef][]model.User
 	mentionableUsersErr   error
+	mentionableUsersBlock chan struct{}
 	mentionableUsersCalls []mentionableUsersCall
+
+	repositoryInfo          map[model.RepoRef]model.RepositoryInfo
+	repositoryErr           map[model.RepoRef]error
+	repositoryBlock         chan struct{}
+	labels                  map[model.RepoRef][]model.Label
+	labelsErr               map[model.RepoRef]error
+	templates               map[model.RepoRef][]model.PullRequestTemplate
+	branchesResults         map[string][]model.Branch
+	branchesErr             error
+	branchesCalls           []branchesCall
+	teamsResults            map[string][]model.Team
+	teamsErr                error
+	teamsCalls              []teamsCall
+	updatePullRequestCalls  []updatePullRequestCall
+	updatePullRequestErr    error
+	requestReviewersCalls   []requestReviewersCall
+	requestReviewersErr     error
+	markReadyForReviewCalls []string
+	markReadyForReviewErr   error
+	convertToDraftCalls     []string
+	convertToDraftErr       error
+	mergePullRequestCalls   []mergePullRequestCall
+	mergePullRequestErr     error
+	closePullRequestIDs     []string
+	closePullRequestErr     error
+	reopenPullRequestIDs    []string
+	reopenPullRequestErr    error
+}
+
+type branchesCall struct {
+	repo  model.RepoRef
+	query string
+	first int
+}
+
+type teamsCall struct {
+	org, query string
+	first      int
+}
+
+type updatePullRequestCall struct {
+	id string
+	in gh.UpdatePullRequestInput
+}
+
+type requestReviewersCall struct {
+	id               string
+	userIDs, teamIDs []string
+	union            bool
+}
+
+type mergePullRequestCall struct {
+	id              string
+	method          model.MergeMethod
+	headline, body  *string
+	expectedHeadOID string
 }
 
 // The review-mutation recorder call shapes below are named types (rather
@@ -519,10 +576,31 @@ func (f *fakeGitHub) SetMentionableUsersError(err error) {
 	f.mentionableUsersErr = err
 }
 
-func (f *fakeGitHub) MentionableUsers(_ context.Context, repo model.RepoRef, query string, first int) ([]model.User, model.RateLimit, error) {
+// SetMentionableUsersBlock arms (or, passed nil, disarms) a gate every
+// subsequent MentionableUsers call waits on before returning — used to
+// hold the fetch "in flight" long enough for a test to observe a
+// consumer's own loading state (for example the edit-reviewers overlay's
+// "(loading users…)" row) before it resolves.
+func (f *fakeGitHub) SetMentionableUsersBlock(ch chan struct{}) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.mentionableUsersBlock = ch
+}
+
+func (f *fakeGitHub) MentionableUsers(ctx context.Context, repo model.RepoRef, query string, first int) ([]model.User, model.RateLimit, error) {
+	f.mu.Lock()
 	f.mentionableUsersCalls = append(f.mentionableUsersCalls, mentionableUsersCall{repo, query, first})
+	block := f.mentionableUsersBlock
+	f.mu.Unlock()
+	if block != nil {
+		select {
+		case <-block:
+		case <-ctx.Done():
+			return nil, model.RateLimit{}, ctx.Err()
+		}
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	if f.mentionableUsersErr != nil {
 		return nil, model.RateLimit{}, f.mentionableUsersErr
 	}
@@ -727,61 +805,400 @@ func (f *fakeGitHub) SetError(query string, err error) {
 
 // M5 repository metadata / branch / team / edit-merge-create reads and
 // mutations (see internal/store's repository.go, viewer_repositories.go,
-// search.go, pr_edit.go, pr_create.go). No UI code drives these yet (the
-// M5 UI slice is a later milestone), so these stubs exist only to satisfy
-// store.GitHub; they return the interface's zero values unconditionally.
+// search.go, pr_edit.go). CreatePullRequest (pr_create.go) remains a plain
+// stub: the create-PR form is a later slice, not this one.
 
-func (f *fakeGitHub) Repository(context.Context, model.RepoRef) (model.RepositoryInfo, model.RateLimit, error) {
-	return model.RepositoryInfo{}, model.RateLimit{}, nil
+// SetRepositoryInfo registers the RepositoryInfo Repository returns for
+// repo, clearing any error previously armed for it via SetRepositoryError.
+func (f *fakeGitHub) SetRepositoryInfo(repo model.RepoRef, info model.RepositoryInfo) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.repositoryInfo == nil {
+		f.repositoryInfo = map[model.RepoRef]model.RepositoryInfo{}
+	}
+	f.repositoryInfo[repo] = info
+	delete(f.repositoryErr, repo)
 }
 
-func (f *fakeGitHub) Labels(context.Context, model.RepoRef) ([]model.Label, model.RateLimit, error) {
-	return nil, model.RateLimit{}, nil
+// SetRepositoryError makes Repository fail with err for repo.
+func (f *fakeGitHub) SetRepositoryError(repo model.RepoRef, err error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.repositoryErr == nil {
+		f.repositoryErr = map[model.RepoRef]error{}
+	}
+	f.repositoryErr[repo] = err
 }
 
-func (f *fakeGitHub) PullRequestTemplates(context.Context, model.RepoRef) ([]model.PullRequestTemplate, model.RateLimit, error) {
-	return nil, model.RateLimit{}, nil
+// SetRepositoryBlock arms (or, passed nil, disarms) a gate every
+// subsequent Repository call waits on before returning — used to hold a
+// repository-metadata fetch "in flight" long enough for a test to observe
+// the merge dialog's own loading placeholder before it resolves.
+func (f *fakeGitHub) SetRepositoryBlock(ch chan struct{}) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.repositoryBlock = ch
+}
+
+func (f *fakeGitHub) Repository(ctx context.Context, repo model.RepoRef) (model.RepositoryInfo, model.RateLimit, error) {
+	f.mu.Lock()
+	block := f.repositoryBlock
+	f.mu.Unlock()
+	if block != nil {
+		select {
+		case <-block:
+		case <-ctx.Done():
+			return model.RepositoryInfo{}, model.RateLimit{}, ctx.Err()
+		}
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err, ok := f.repositoryErr[repo]; ok {
+		return model.RepositoryInfo{}, model.RateLimit{}, err
+	}
+	return f.repositoryInfo[repo], model.RateLimit{}, nil
+}
+
+// SetLabels registers the labels Labels returns for repo.
+func (f *fakeGitHub) SetLabels(repo model.RepoRef, labels []model.Label) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.labels == nil {
+		f.labels = map[model.RepoRef][]model.Label{}
+	}
+	f.labels[repo] = labels
+}
+
+// SetLabelsError makes Labels fail with err for repo.
+func (f *fakeGitHub) SetLabelsError(repo model.RepoRef, err error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.labelsErr == nil {
+		f.labelsErr = map[model.RepoRef]error{}
+	}
+	f.labelsErr[repo] = err
+}
+
+func (f *fakeGitHub) Labels(_ context.Context, repo model.RepoRef) ([]model.Label, model.RateLimit, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err, ok := f.labelsErr[repo]; ok {
+		return nil, model.RateLimit{}, err
+	}
+	return f.labels[repo], model.RateLimit{}, nil
+}
+
+// SetTemplates registers the templates PullRequestTemplates returns for
+// repo.
+func (f *fakeGitHub) SetTemplates(repo model.RepoRef, templates []model.PullRequestTemplate) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.templates == nil {
+		f.templates = map[model.RepoRef][]model.PullRequestTemplate{}
+	}
+	f.templates[repo] = templates
+}
+
+func (f *fakeGitHub) PullRequestTemplates(_ context.Context, repo model.RepoRef) ([]model.PullRequestTemplate, model.RateLimit, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.templates[repo], model.RateLimit{}, nil
 }
 
 func (f *fakeGitHub) ViewerRepositories(context.Context, int) ([]model.RepositorySummary, model.RateLimit, error) {
 	return nil, model.RateLimit{}, nil
 }
 
-func (f *fakeGitHub) Branches(context.Context, model.RepoRef, string, int) ([]model.Branch, model.RateLimit, error) {
-	return nil, model.RateLimit{}, nil
+// SetBranches registers the branches Branches returns for the given typed
+// query (an empty query is the unfiltered case).
+func (f *fakeGitHub) SetBranches(query string, branches []model.Branch) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.branchesResults == nil {
+		f.branchesResults = map[string][]model.Branch{}
+	}
+	f.branchesResults[query] = branches
 }
 
-func (f *fakeGitHub) Teams(context.Context, string, string, int) ([]model.Team, model.RateLimit, error) {
-	return nil, model.RateLimit{}, nil
+// SetBranchesError makes every Branches call fail with err.
+func (f *fakeGitHub) SetBranchesError(err error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.branchesErr = err
 }
 
-func (f *fakeGitHub) UpdatePullRequest(context.Context, string, gh.UpdatePullRequestInput) (model.PullRequest, model.RateLimit, error) {
-	return model.PullRequest{}, model.RateLimit{}, nil
+// BranchesCalls returns every Branches call so far, in call order.
+func (f *fakeGitHub) BranchesCalls() []branchesCall {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]branchesCall(nil), f.branchesCalls...)
 }
 
-func (f *fakeGitHub) RequestReviewers(context.Context, string, []string, []string, bool) ([]model.Reviewer, model.RateLimit, error) {
-	return nil, model.RateLimit{}, nil
+func (f *fakeGitHub) Branches(_ context.Context, repo model.RepoRef, query string, first int) ([]model.Branch, model.RateLimit, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.branchesCalls = append(f.branchesCalls, branchesCall{repo: repo, query: query, first: first})
+	if f.branchesErr != nil {
+		return nil, model.RateLimit{}, f.branchesErr
+	}
+	return f.branchesResults[query], model.RateLimit{}, nil
 }
 
-func (f *fakeGitHub) MarkReadyForReview(context.Context, string) (bool, model.RateLimit, error) {
+// SetTeams registers the teams Teams returns for the given typed query (an
+// empty query is the unfiltered case).
+func (f *fakeGitHub) SetTeams(query string, teams []model.Team) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.teamsResults == nil {
+		f.teamsResults = map[string][]model.Team{}
+	}
+	f.teamsResults[query] = teams
+}
+
+// SetTeamsError makes every Teams call fail with err.
+func (f *fakeGitHub) SetTeamsError(err error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.teamsErr = err
+}
+
+// TeamsCalls returns every Teams call so far, in call order.
+func (f *fakeGitHub) TeamsCalls() []teamsCall {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]teamsCall(nil), f.teamsCalls...)
+}
+
+func (f *fakeGitHub) Teams(_ context.Context, org, query string, first int) ([]model.Team, model.RateLimit, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.teamsCalls = append(f.teamsCalls, teamsCall{org: org, query: query, first: first})
+	if f.teamsErr != nil {
+		return nil, model.RateLimit{}, f.teamsErr
+	}
+	return f.teamsResults[query], model.RateLimit{}, nil
+}
+
+// SetUpdatePullRequestError makes every UpdatePullRequest call fail with
+// err.
+func (f *fakeGitHub) SetUpdatePullRequestError(err error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.updatePullRequestErr = err
+}
+
+// UpdatePullRequestCalls returns every UpdatePullRequest call so far, in
+// call order.
+func (f *fakeGitHub) UpdatePullRequestCalls() []updatePullRequestCall {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]updatePullRequestCall(nil), f.updatePullRequestCalls...)
+}
+
+// UpdatePullRequest records the call and synthesizes a minimally-plausible
+// result, echoing back whichever fields in were actually set (nil means
+// "leave unchanged", mirroring UpdatePullRequestInput's own convention —
+// see gh.UpdatePullRequestInput's doc comment) — good enough for a test to
+// assert on Store's own optimistic apply without needing the fake to track
+// each pull request's full, evolving state.
+func (f *fakeGitHub) UpdatePullRequest(
+	_ context.Context, id string, in gh.UpdatePullRequestInput,
+) (model.PullRequest, model.RateLimit, error) {
+	f.mu.Lock()
+	f.updatePullRequestCalls = append(f.updatePullRequestCalls, updatePullRequestCall{id: id, in: in})
+	err := f.updatePullRequestErr
+	f.mu.Unlock()
+	if err != nil {
+		return model.PullRequest{}, model.RateLimit{}, err
+	}
+	result := model.PullRequest{ID: id, UpdatedAt: time.Now()}
+	if in.Title != nil {
+		result.Title = *in.Title
+	}
+	if in.Body != nil {
+		result.Body = *in.Body
+	}
+	if in.BaseRefName != nil {
+		result.BaseRefName = *in.BaseRefName
+	}
+	if in.LabelIDs != nil {
+		for _, labelID := range *in.LabelIDs {
+			result.Labels = append(result.Labels, model.Label{ID: labelID})
+		}
+	}
+	return result, model.RateLimit{}, nil
+}
+
+// SetRequestReviewersError makes every RequestReviewers call fail with err.
+func (f *fakeGitHub) SetRequestReviewersError(err error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.requestReviewersErr = err
+}
+
+// RequestReviewersCalls returns every RequestReviewers call so far, in
+// call order.
+func (f *fakeGitHub) RequestReviewersCalls() []requestReviewersCall {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]requestReviewersCall(nil), f.requestReviewersCalls...)
+}
+
+func (f *fakeGitHub) RequestReviewers(
+	_ context.Context, id string, userIDs, teamIDs []string, union bool,
+) ([]model.Reviewer, model.RateLimit, error) {
+	f.mu.Lock()
+	f.requestReviewersCalls = append(
+		f.requestReviewersCalls, requestReviewersCall{id: id, userIDs: userIDs, teamIDs: teamIDs, union: union},
+	)
+	err := f.requestReviewersErr
+	f.mu.Unlock()
+	if err != nil {
+		return nil, model.RateLimit{}, err
+	}
+	reviewers := make([]model.Reviewer, 0, len(userIDs)+len(teamIDs))
+	for _, uid := range userIDs {
+		reviewers = append(reviewers, model.Reviewer{ID: uid, Kind: model.ReviewerKindUser})
+	}
+	for _, tid := range teamIDs {
+		reviewers = append(reviewers, model.Reviewer{ID: tid, Kind: model.ReviewerKindTeam})
+	}
+	return reviewers, model.RateLimit{}, nil
+}
+
+// SetMarkReadyForReviewError makes every MarkReadyForReview call fail with
+// err.
+func (f *fakeGitHub) SetMarkReadyForReviewError(err error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.markReadyForReviewErr = err
+}
+
+// MarkReadyForReviewCalls returns every ID MarkReadyForReview has been
+// called with so far, in call order.
+func (f *fakeGitHub) MarkReadyForReviewCalls() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.markReadyForReviewCalls...)
+}
+
+func (f *fakeGitHub) MarkReadyForReview(_ context.Context, id string) (bool, model.RateLimit, error) {
+	f.mu.Lock()
+	f.markReadyForReviewCalls = append(f.markReadyForReviewCalls, id)
+	err := f.markReadyForReviewErr
+	f.mu.Unlock()
+	if err != nil {
+		return false, model.RateLimit{}, err
+	}
 	return false, model.RateLimit{}, nil
 }
 
-func (f *fakeGitHub) ConvertToDraft(context.Context, string) (bool, model.RateLimit, error) {
+// SetConvertToDraftError makes every ConvertToDraft call fail with err.
+func (f *fakeGitHub) SetConvertToDraftError(err error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.convertToDraftErr = err
+}
+
+// ConvertToDraftCalls returns every ID ConvertToDraft has been called with
+// so far, in call order.
+func (f *fakeGitHub) ConvertToDraftCalls() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.convertToDraftCalls...)
+}
+
+func (f *fakeGitHub) ConvertToDraft(_ context.Context, id string) (bool, model.RateLimit, error) {
+	f.mu.Lock()
+	f.convertToDraftCalls = append(f.convertToDraftCalls, id)
+	err := f.convertToDraftErr
+	f.mu.Unlock()
+	if err != nil {
+		return false, model.RateLimit{}, err
+	}
 	return true, model.RateLimit{}, nil
 }
 
-func (f *fakeGitHub) MergePullRequest(
-	context.Context, string, model.MergeMethod, *string, *string, string,
-) (model.PullRequest, model.RateLimit, error) {
-	return model.PullRequest{}, model.RateLimit{}, nil
+// SetMergePullRequestError makes every MergePullRequest call fail with err.
+func (f *fakeGitHub) SetMergePullRequestError(err error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.mergePullRequestErr = err
 }
 
-func (f *fakeGitHub) ClosePullRequest(context.Context, string) (model.PRState, model.RateLimit, error) {
+// MergePullRequestCalls returns every MergePullRequest call so far, in
+// call order.
+func (f *fakeGitHub) MergePullRequestCalls() []mergePullRequestCall {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]mergePullRequestCall(nil), f.mergePullRequestCalls...)
+}
+
+func (f *fakeGitHub) MergePullRequest(
+	_ context.Context, id string, method model.MergeMethod, commitHeadline, commitBody *string, expectedHeadOID string,
+) (model.PullRequest, model.RateLimit, error) {
+	f.mu.Lock()
+	f.mergePullRequestCalls = append(f.mergePullRequestCalls, mergePullRequestCall{
+		id: id, method: method, headline: commitHeadline, body: commitBody, expectedHeadOID: expectedHeadOID,
+	})
+	err := f.mergePullRequestErr
+	f.mu.Unlock()
+	if err != nil {
+		return model.PullRequest{}, model.RateLimit{}, err
+	}
+	return model.PullRequest{ID: id, State: model.PRStateMerged, Merged: true, MergedAt: time.Now()}, model.RateLimit{}, nil
+}
+
+// SetClosePullRequestError makes every ClosePullRequest call fail with err.
+func (f *fakeGitHub) SetClosePullRequestError(err error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.closePullRequestErr = err
+}
+
+// ClosePullRequestIDs returns every ID ClosePullRequest has been called
+// with so far, in call order.
+func (f *fakeGitHub) ClosePullRequestIDs() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.closePullRequestIDs...)
+}
+
+func (f *fakeGitHub) ClosePullRequest(_ context.Context, id string) (model.PRState, model.RateLimit, error) {
+	f.mu.Lock()
+	f.closePullRequestIDs = append(f.closePullRequestIDs, id)
+	err := f.closePullRequestErr
+	f.mu.Unlock()
+	if err != nil {
+		return "", model.RateLimit{}, err
+	}
 	return model.PRStateClosed, model.RateLimit{}, nil
 }
 
-func (f *fakeGitHub) ReopenPullRequest(context.Context, string) (model.PRState, model.RateLimit, error) {
+// SetReopenPullRequestError makes every ReopenPullRequest call fail with
+// err.
+func (f *fakeGitHub) SetReopenPullRequestError(err error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.reopenPullRequestErr = err
+}
+
+// ReopenPullRequestIDs returns every ID ReopenPullRequest has been called
+// with so far, in call order.
+func (f *fakeGitHub) ReopenPullRequestIDs() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.reopenPullRequestIDs...)
+}
+
+func (f *fakeGitHub) ReopenPullRequest(_ context.Context, id string) (model.PRState, model.RateLimit, error) {
+	f.mu.Lock()
+	f.reopenPullRequestIDs = append(f.reopenPullRequestIDs, id)
+	err := f.reopenPullRequestErr
+	f.mu.Unlock()
+	if err != nil {
+		return "", model.RateLimit{}, err
+	}
 	return model.PRStateOpen, model.RateLimit{}, nil
 }
 
@@ -1091,6 +1508,19 @@ func sendRune(app *tview.Application, r rune) {
 
 func sendSpecial(app *tview.Application, key tcell.Key) {
 	sendKey(app, tcell.NewEventKey(key, 0, tcell.ModNone))
+}
+
+// confirmYes navigates a showConfirm-style *tview.Modal (or the
+// pendingConfirm/merge/close/reopen dialogs, which share its shape) from
+// its default-focused "Cancel" button to the confirm button and selects
+// it. Tab wraps a two-button Modal's Form around from the last button
+// (Cancel, index 1, the default focus — see showConfirm's own doc comment
+// for why) back to the first (the confirm button, index 0), so a single
+// Tab then Enter reaches it regardless of which of the two is currently
+// focused.
+func confirmYes(app *tview.Application) {
+	sendSpecial(app, tcell.KeyTab)
+	sendSpecial(app, tcell.KeyEnter)
 }
 
 func TestAppInitialRenderShowsSectionsAndRows(t *testing.T) {

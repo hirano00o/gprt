@@ -179,10 +179,113 @@ type App struct {
 	// already in flight.
 	pendingSend *pendingSend
 
+	// pendingMutation tracks a non-composer, single mutation triggered from
+	// a command or dialog (:close, :reopen, :merge) whose outcome should
+	// show a success/failure toast — pendingSend's own counterpart
+	// (prcommands.go) for a mutation with no composer text of its own. At
+	// most one can ever be outstanding, mirroring pendingSend's own
+	// single-flight invariant.
+	pendingMutation *pendingSimpleMutation
+
 	seq *keys.Sequencer
 
-	overlay    string // "" | "help" | "messages" | "confirm" | "choice" | "pending" | "pendingConfirm" | "reaction"
+	overlay    string // "" | "help" | "messages" | "confirm" | "choice" | "pending" | "pendingConfirm" | "reaction" | "merge" | "editform" | "editlabels" | "editreviewers"
 	savedFocus tview.Primitive
+
+	// Edit PR form (editform.go, "E"/pr.edit): editForm is nil while
+	// closed. editFormOriginal snapshots the pull request's field values
+	// at open time; Save/Esc both compute the live diff against it
+	// on demand (editFormComputeDiff) rather than tracking a separate
+	// "dirty" boolean. editFormSelectedLabelIDs/editFormSelectedReviewers
+	// hold the form's own current selection, written by the stacked
+	// editlabels.go/editreviewers.go overlays on confirm.
+	//
+	// editFormReturnFocus is a dedicated field — App.savedFocus/
+	// restoreFocus() is deliberately not reused here, mirroring
+	// composerReturnFocus's own doc comment: cancelEditForm's "Discard
+	// changes?" confirm (showConfirm) already consumes the shared
+	// savedFocus/restoreFocus() pair once for its own open/close (and
+	// restoreFocus() nils savedFocus after using it — see its own doc
+	// comment), so closeEditForm calling restoreFocus() a *second* time
+	// when reached via that confirm's onConfirm would find savedFocus
+	// already nil and fall through to its generic list-focused default,
+	// not the pane the edit form itself was actually opened from — a real
+	// bug the second M5 review round's own regression test caught.
+	editForm                  *tview.Form
+	editFormReturnFocus       tview.Primitive
+	editFormRef               model.PRRef
+	editFormRepo              model.RepoRef
+	editFormOriginal          editFormSnapshot
+	editFormTitleField        *tview.InputField
+	editFormBaseField         *tview.InputField
+	editFormDraftBox          *tview.Checkbox
+	editFormSelectedLabelIDs  map[string]bool
+	editFormSelectedReviewers map[string]model.Reviewer // keyed by ID
+	// editFormBranchSuggestions is what editFormBaseField's own
+	// SetAutocompleteFunc callback returns synchronously on every
+	// keystroke; editFormBranchTimer debounces the actual
+	// Store.SearchBranches call by 300ms (docs/DESIGN.md's timer-callback
+	// concurrency rule: it only ever dispatches into a store call).
+	editFormBranchSuggestions []string
+	// editFormBranchLastQuery is the text editFormBranchSuggestions was
+	// actually resolved for — see editFormBranchAutocomplete's own doc
+	// comment for why this guards against InputField.Autocomplete()'s own
+	// call back into that same function re-arming a fresh debounce timer
+	// forever.
+	editFormBranchLastQuery string
+	editFormBranchTimer     *time.Timer
+	// editFormSteps is the FIFO of Save's own in-flight mutation steps —
+	// pendingMutation's single slot is not enough for a batch of more than
+	// one mutation (see pendingSimpleMutation's own doc comment): each
+	// entry's successVerb toasts once that specific mutation finishes;
+	// editFormAnyFailed latches once any of them fails, so the form is
+	// kept open (its own error toast already shown) rather than closed
+	// once the last step finishes.
+	editFormSteps     []editFormStep
+	editFormAnyFailed bool
+
+	// Edit-labels overlay (editlabels.go, stacked over "editform"):
+	// editLabelsWorking is a copy of editFormSelectedLabelIDs mutated by
+	// Space, applied back only on Enter (Esc/q discard it).
+	editLabelsView    *tview.List
+	editLabelsWorking map[string]bool
+
+	// Edit-reviewers overlay (editreviewers.go, stacked over "editform"):
+	// editReviewersWorking is a copy of editFormSelectedReviewers mutated
+	// by Space/team search, applied back only on Enter (Esc/q discard
+	// it). editReviewersTeams is the latest Store.SearchTeams result for
+	// the typed query.
+	editReviewersFlex        *tview.Flex
+	editReviewersSearch      *tview.InputField
+	editReviewersView        *tview.List
+	editReviewersWorking     map[string]model.Reviewer
+	editReviewersTeams       []model.Team
+	editReviewersSearchTimer *time.Timer
+
+	// Merge dialog (mergedialog.go, ":merge"): mergeForm is nil while only
+	// the "loading repository settings…" placeholder is showing
+	// (mergeLoading true), rebuilt into the real *tview.Form once
+	// RepositoryInfo resolves. mergeRef/mergeRepo name the pull request/
+	// repository it was opened for, so a repository-metadata event for an
+	// unrelated repository (onRepositoryMetadataChangedForMerge) is
+	// ignored and Submit's own confirm re-checks mergeRef
+	// (runSimpleMutation) before ever calling Store.Merge.
+	mergeForm           *tview.Form
+	mergeMethodDropDown *tview.DropDown
+	mergeHeadlineField  *tview.InputField
+	mergeBodyArea       *tview.TextArea
+	// mergeSummaryView is nil until openMergeForm builds the real form
+	// (the loading placeholder has no summary line at all); refreshed by
+	// refreshMergeSummaryIfOpen on EventPRChanged so it never freezes at
+	// whatever it read when the dialog first opened.
+	mergeSummaryView *tview.TextView
+	mergeRef         model.PRRef
+	mergeRepo        model.RepoRef
+	mergeLoading     bool
+	// mergeMethods are the repository's allowed merge methods, in the
+	// fixed order mergeMethodDropDown offers them (its own current
+	// selection index into this slice).
+	mergeMethods []model.MergeMethod
 
 	// choiceMenu/choiceOnChoose back the "choice" overlay (see
 	// dialogs.go's showChoiceMenu/closeChoiceMenu): the send-mode picker

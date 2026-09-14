@@ -671,7 +671,7 @@ func TestDeleteReviewCommentSingleCandidateConfirmsThenDeletes(t *testing.T) {
 	sendRune(app.app, 'd')
 	waitFor(t, app.app, func() bool { return app.overlay == "confirm" })
 
-	sendSpecial(app.app, tcell.KeyEnter) // "Delete" is the Modal's default button
+	confirmYes(app.app) // "Cancel" is the Modal's default button; Tab then Enter reaches "Delete"
 	waitFor(t, app.app, func() bool { return len(fake.DeleteReviewCommentIDs()) == 1 })
 	if got := fake.DeleteReviewCommentIDs()[0]; got != "RC_own" {
 		t.Fatalf("DeleteReviewComment id = %q, want %q", got, "RC_own")
@@ -763,7 +763,7 @@ func TestPendingListDDiscardsWholeReviewAfterConfirm(t *testing.T) {
 
 	sendRune(app.app, 'D')
 	waitFor(t, app.app, func() bool { return app.overlay == "pendingConfirm" })
-	sendSpecial(app.app, tcell.KeyEnter) // "Delete" is the Modal's default button
+	confirmYes(app.app) // "Cancel" is the Modal's default button; Tab then Enter reaches "Delete"
 
 	waitFor(t, app.app, func() bool { return len(fake.DeletePendingReviewCalls()) == 1 })
 	if got := fake.DeletePendingReviewCalls()[0]; got != "PVR_1" {
@@ -791,7 +791,7 @@ func TestPendingListDDeletesADraftAfterConfirm(t *testing.T) {
 	sendRune(app.app, 'j')
 	sendRune(app.app, 'd')
 	waitFor(t, app.app, func() bool { return app.overlay == "pendingConfirm" })
-	sendSpecial(app.app, tcell.KeyEnter)
+	confirmYes(app.app) // "Cancel" is the Modal's default button; Tab then Enter reaches "Delete"
 
 	waitFor(t, app.app, func() bool { return app.overlay == "pending" && len(app.pendingListEntries) == 1 })
 	if _, ok, err := app.deps.Drafts.Load(draftKey); ok || err != nil {
@@ -850,7 +850,7 @@ func TestPendingListDeletingALineCommentDraftRefreshesTheGutterMarker(t *testing
 	})
 	sendRune(app.app, 'd')
 	waitFor(t, app.app, func() bool { return app.overlay == "pendingConfirm" })
-	sendSpecial(app.app, tcell.KeyEnter)
+	confirmYes(app.app) // "Cancel" is the Modal's default button; Tab then Enter reaches "Delete"
 	waitFor(t, app.app, func() bool { return app.overlay == "pending" })
 	sendRune(app.app, 'q')
 	waitFor(t, app.app, func() bool { return app.overlay == "" })

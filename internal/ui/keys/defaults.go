@@ -108,7 +108,7 @@ var defaultTable = []defaultEntry{
 	// focused.
 	{[]Context{ContextPR, ContextFiles, ContextDiff}, "p", ActionPRPending},
 	{[]Context{ContextPR, ContextFiles, ContextDiff}, "S", ActionPRSubmit},
-	{[]Context{ContextPR}, "E", ActionPREdit},
+	{[]Context{ContextPR, ContextFiles, ContextDiff}, "E", ActionPREdit},
 
 	{[]Context{ContextGlobal}, "o", ActionGlobalOpenBrowser},
 

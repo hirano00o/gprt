@@ -11,6 +11,15 @@ import "github.com/rivo/tview"
 // a.overlay field, is closed first instead of also blocking this —
 // Ctrl-C while a mutation is in flight must always get a confirm dialog,
 // not silently do nothing merely because "?" happened to be open.
+//
+// "Cancel" (button index 1) is the default focus (SetFocus(1)): tview's
+// own Form (which Modal wraps its buttons in) otherwise defaults to
+// focusIndex 0 — the *first* AddButtons argument, confirmLabel, the
+// destructive/executing choice — so a bare Enter right after the dialog
+// appears, with no navigation at all, would immediately run onConfirm. A
+// confirmation dialog whose own default action is "confirm" defeats the
+// point of asking; every caller (delete/discard, :merge/:close/:reopen,
+// Ctrl-C-while-mutating) relies on this shared default, not its own.
 func (a *App) showConfirm(message, confirmLabel string, onConfirm func()) {
 	if a.overlay == "confirm" {
 		return
@@ -24,6 +33,7 @@ func (a *App) showConfirm(message, confirmLabel string, onConfirm func()) {
 	modal := tview.NewModal().
 		SetText(message).
 		AddButtons([]string{confirmLabel, "Cancel"})
+	modal.SetFocus(1)
 	modal.SetDoneFunc(func(_ int, label string) {
 		a.root.RemovePage("confirm")
 		a.overlay = ""

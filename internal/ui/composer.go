@@ -14,6 +14,7 @@ import (
 
 	"github.com/hirano00o/gprt/internal/diff"
 	"github.com/hirano00o/gprt/internal/drafts"
+	"github.com/hirano00o/gprt/internal/gh"
 	"github.com/hirano00o/gprt/internal/model"
 	"github.com/hirano00o/gprt/internal/store"
 	"github.com/hirano00o/gprt/internal/ui/editor"
@@ -45,6 +46,9 @@ const (
 	// composerKindReviewBody submits (or creates and submits) the current
 	// pull request's review with target.reviewEvent (submitreview.go).
 	composerKindReviewBody
+	// composerKindPRBody updates the current pull request's own body
+	// (prbody.go), sending Store.UpdatePullRequestMeta with only Body set.
+	composerKindPRBody
 )
 
 // composerTarget identifies what the currently open composer is editing.
@@ -187,8 +191,15 @@ func (a *App) openReviewCommentEditComposer(c model.ReviewComment) {
 
 // editCurrentComment opens an edit composer for the issue comment block
 // under the PR tab's cursor (comment.edit, "e"), or toasts why it cannot:
-// no comment is under the cursor, or the viewer does not own it.
+// no comment is under the cursor, or the viewer does not own it. On the
+// description block (the pull request's own body), it opens the PR-body
+// composer instead (prbody.go) — see openPRBodyEditComposer's own doc
+// comment for its ViewerCanUpdate check.
 func (a *App) editCurrentComment() {
+	if a.app.GetFocus() == a.prView && a.prView.CurrentID() == "description" {
+		a.openPRBodyEditComposer()
+		return
+	}
 	c, ok := a.currentIssueComment()
 	if !ok {
 		return
@@ -210,7 +221,13 @@ func (a *App) editCurrentComment() {
 // deleteCurrentComment confirms, then deletes, the issue comment block
 // under the PR tab's cursor (comment.delete, "d"), or toasts why it
 // cannot: no comment is under the cursor, or the viewer does not own it.
+// On the description block, "d" is a no-op toast — a pull request's own
+// body cannot be deleted, only edited (see editCurrentComment).
 func (a *App) deleteCurrentComment() {
+	if a.app.GetFocus() == a.prView && a.prView.CurrentID() == "description" {
+		a.showToast("cannot delete the pull request body; edit it with \"e\" instead", theme.Warning)
+		return
+	}
 	c, ok := a.currentIssueComment()
 	if !ok {
 		return
@@ -492,8 +509,12 @@ func (a *App) sendComposer() {
 	// A review-body send has its own body/pending-comments validation
 	// (sendReviewBodyComposer): APPROVE never requires a body, so the
 	// generic "cannot send an empty comment" rule below must not apply to
-	// this target kind at all.
-	if target.kind != composerKindReviewBody && strings.TrimSpace(text) == "" {
+	// this target kind at all. A PR-body edit is exempt for a different
+	// reason: an empty description is a legitimate, intentional state (the
+	// user clearing it out), not "nothing to send" — composerKindPRBody's
+	// own sendComposer case below sends target's (possibly empty) text as
+	// Body: &text either way, found missing in the second M5 review round.
+	if target.kind != composerKindReviewBody && target.kind != composerKindPRBody && strings.TrimSpace(text) == "" {
 		a.showToast("cannot send an empty comment", theme.Warning)
 		return
 	}
@@ -507,6 +528,8 @@ func (a *App) sendComposer() {
 		a.sendReviewComposer(target, text)
 	case composerKindReviewBody:
 		a.sendReviewBodyComposer(target, text)
+	case composerKindPRBody:
+		a.finishSend(target, text, a.deps.Store.UpdatePullRequestMeta(gh.UpdatePullRequestInput{Body: &text}))
 	default:
 		a.finishSend(target, text, a.deps.Store.AddComment(text))
 	}
@@ -658,7 +681,7 @@ func (a *App) onMutationChanged() {
 	}
 	verb := "posted"
 	switch ps.target.kind {
-	case composerKindEdit, composerKindReviewEdit:
+	case composerKindEdit, composerKindReviewEdit, composerKindPRBody:
 		verb = "updated"
 	}
 	a.showToast("comment "+verb, theme.Success)

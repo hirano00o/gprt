@@ -30,6 +30,8 @@ func (a *App) subscribeStore() {
 			// "whichever one happens to be open" — see
 			// closeComposerIfWrongPR's own doc comment.
 			a.closeComposerIfWrongPR()
+			a.closeEditFormIfWrongPR()
+			a.closeMergeDialogIfWrongPR()
 			a.renderPRTab()
 			a.onPRChangedForFiles()
 			// The status bar's "✎ N" draft count is scoped to whichever
@@ -40,6 +42,9 @@ func (a *App) subscribeStore() {
 			}
 			if a.overlay == "reaction" {
 				a.rebuildReactionPicker()
+			}
+			if a.overlay == "merge" {
+				a.refreshMergeSummaryIfOpen()
 			}
 		case store.EventPRLoadingChanged:
 			a.renderStatusBar(0)
@@ -66,8 +71,14 @@ func (a *App) subscribeStore() {
 			}
 		case store.EventFilesLoadingChanged:
 			a.renderStatusBar(0)
+		case store.EventMentionableChanged:
+			if a.overlay == "editreviewers" {
+				a.rebuildEditReviewersList()
+			}
 		case store.EventMutationChanged:
 			a.onMutationChanged()
+			a.onSimpleMutationChanged()
+			a.onEditFormMutationChanged()
 			if a.overlay == "pending" {
 				a.rebuildPendingList()
 			}
@@ -99,6 +110,14 @@ func (a *App) subscribeStore() {
 			// header row both need to reflect the new error state.
 			a.renderStatusBar(0)
 			a.refreshList()
+			a.closeMergeDialogOnError()
+		case store.EventRepositoryMetadataChanged:
+			if ev.Repo != nil {
+				a.onRepositoryMetadataChangedForMerge(*ev.Repo)
+			}
+			if a.overlay == "editlabels" && ev.Repo != nil && *ev.Repo == a.editFormRepo {
+				a.rebuildEditLabelsList()
+			}
 		}
 	})
 }
