@@ -1,0 +1,22 @@
+query ViewerRepositories($first: Int!) {
+  viewer {
+    repositories(
+      first: $first
+      affiliations: [OWNER, COLLABORATOR, ORGANIZATION_MEMBER]
+      orderBy: { field: PUSHED_AT, direction: DESC }
+    ) {
+      nodes {
+        id
+        nameWithOwner
+        isArchived
+        defaultBranchRef {
+          name
+        }
+      }
+    }
+  }
+  rateLimit {
+    remaining
+    resetAt
+  }
+}

@@ -1,0 +1,11 @@
+mutation ReopenPullRequest($id: ID!) {
+  reopenPullRequest(input: { pullRequestId: $id }) {
+    pullRequest {
+      state
+    }
+  }
+  rateLimit {
+    remaining
+    resetAt
+  }
+}

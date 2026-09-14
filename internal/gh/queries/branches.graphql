@@ -1,0 +1,16 @@
+query Branches($owner: String!, $name: String!, $query: String, $first: Int!) {
+  repository(owner: $owner, name: $name) {
+    refs(refPrefix: "refs/heads/", query: $query, first: $first) {
+      nodes {
+        name
+        target {
+          oid
+        }
+      }
+    }
+  }
+  rateLimit {
+    remaining
+    resetAt
+  }
+}

@@ -1,0 +1,27 @@
+mutation MergePullRequest(
+  $id: ID!
+  $mergeMethod: PullRequestMergeMethod
+  $commitHeadline: String
+  $commitBody: String
+  $expectedHeadOid: GitObjectID
+) {
+  mergePullRequest(
+    input: {
+      pullRequestId: $id
+      mergeMethod: $mergeMethod
+      commitHeadline: $commitHeadline
+      commitBody: $commitBody
+      expectedHeadOid: $expectedHeadOid
+    }
+  ) {
+    pullRequest {
+      state
+      merged
+      mergedAt
+    }
+  }
+  rateLimit {
+    remaining
+    resetAt
+  }
+}

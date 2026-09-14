@@ -1,0 +1,11 @@
+mutation ClosePullRequest($id: ID!) {
+  closePullRequest(input: { pullRequestId: $id }) {
+    pullRequest {
+      state
+    }
+  }
+  rateLimit {
+    remaining
+    resetAt
+  }
+}

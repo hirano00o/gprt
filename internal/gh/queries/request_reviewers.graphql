@@ -1,0 +1,36 @@
+mutation RequestReviewers($id: ID!, $userIds: [ID!], $teamIds: [ID!], $union: Boolean) {
+  requestReviews(input: { pullRequestId: $id, userIds: $userIds, teamIds: $teamIds, union: $union }) {
+    pullRequest {
+      reviewRequests(first: 20) {
+        nodes {
+          asCodeOwner
+          requestedReviewer {
+            __typename
+            ... on User {
+              id
+              login
+            }
+            ... on Team {
+              id
+              slug
+            }
+            ... on Bot {
+              login
+            }
+            ... on Mannequin {
+              login
+            }
+            # No fragment for EnterpriseTeam: see queries/search.graphql for why
+            # (that type does not exist on GitHub Enterprise Server, and an
+            # inline fragment on a type absent from the schema is a query
+            # validation error there).
+          }
+        }
+      }
+    }
+  }
+  rateLimit {
+    remaining
+    resetAt
+  }
+}

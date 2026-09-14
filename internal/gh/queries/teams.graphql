@@ -1,0 +1,15 @@
+query Teams($login: String!, $query: String, $first: Int!) {
+  organization(login: $login) {
+    teams(query: $query, first: $first) {
+      nodes {
+        id
+        slug
+        name
+      }
+    }
+  }
+  rateLimit {
+    remaining
+    resetAt
+  }
+}

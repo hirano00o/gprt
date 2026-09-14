@@ -1,0 +1,12 @@
+query PullRequestTemplates($owner: String!, $name: String!) {
+  repository(owner: $owner, name: $name) {
+    pullRequestTemplates {
+      filename
+      body
+    }
+  }
+  rateLimit {
+    remaining
+    resetAt
+  }
+}
