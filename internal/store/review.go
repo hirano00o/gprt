@@ -652,7 +652,12 @@ func (s *Store) SubmitReview(event model.ReviewEvent, body string) bool {
 		}, nil
 	}
 
-	s.enqueuePreparedMutation("submit_review", prepare, run)
+	// M5: also refreshes the list on success (enqueuePreparedMutationWithListRefresh,
+	// not the plain enqueuePreparedMutation every other review operation in
+	// this file uses) — a submitted review can flip ReviewDecision, which
+	// the list itself displays; see mutations.go's mutation.refreshList doc
+	// comment.
+	s.enqueuePreparedMutationWithListRefresh("submit_review", prepare, run)
 	return true
 }
 

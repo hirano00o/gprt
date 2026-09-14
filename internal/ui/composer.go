@@ -647,11 +647,12 @@ func (a *App) onMutationChanged() {
 		return
 	}
 	if ps.target.kind == composerKindReviewBody {
-		// The list's own review-decision/state columns must reflect the
-		// just-submitted review without waiting for the next auto-refresh
-		// tick — Refresh() is the same non-forced entry point that ticker
-		// already uses (see docs/DESIGN.md's Store section).
-		a.deps.Store.Refresh()
+		// The list's own review-decision/state columns are refreshed by
+		// Store itself (finishMutation's mutation.refreshList, since M5 —
+		// see docs/DESIGN.md's Store section): SubmitReview's mutation
+		// already calls Store.Refresh() on success, so calling it again
+		// here would start a second, redundant list generation on top of
+		// the store's own for no benefit.
 		a.showToast("review submitted", theme.Success)
 		return
 	}
