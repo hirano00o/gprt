@@ -336,10 +336,9 @@ func (s *Store) applyDetailResult(gen int, res gh.DetailResult, err error, cance
 	s.detailFetchedAt = s.deps.Now()
 	s.recomputeLastErr()
 	s.cacheDetail(pr)
-	s.rateLimit = res.RateLimit
+	s.setRateLimit(res.RateLimit)
 
 	s.emit(Event{Kind: EventPRChanged})
-	s.emit(Event{Kind: EventRateLimitChanged})
 	s.emitLoadingChanged()
 
 	// LoadFiles was called before this pull request's detail (and so its

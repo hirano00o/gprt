@@ -28,6 +28,9 @@ type GitHub interface {
 	SearchPullRequests(ctx context.Context, query, cursor string) (gh.SearchResult, error)
 	PullRequest(ctx context.Context, ref model.PRRef, viewerLogin string) (gh.DetailResult, error)
 	ChangedFiles(ctx context.Context, ref model.PRRef, page int, etag string) (gh.FilesResult, error)
+	AddIssueComment(ctx context.Context, subjectID, body string) (model.IssueComment, model.RateLimit, error)
+	UpdateIssueComment(ctx context.Context, id, body string) (model.IssueComment, model.RateLimit, error)
+	DeleteIssueComment(ctx context.Context, id string) (model.RateLimit, error)
 }
 
 // lineHighlighter is the subset of *highlight.Highlighter the store depends
@@ -317,6 +320,24 @@ type Store struct {
 	// disturbing its replacement's identically-pathed, freshly started one.
 	filesPendingByID map[int]int
 
+	// Mutations (see mutations.go): a single-flight FIFO queue of
+	// comment mutations. mutationQueue holds every not-yet-started
+	// mutation; at most one ever runs at a time (mutating tracks that),
+	// and finishMutation starts the next queued one once the current
+	// one's result has been applied. mutationCtx/mutationCancel are
+	// created lazily (on the first enqueue) from baseCtx and shared by
+	// every mutation for the lifetime of the Store: unlike the list's or
+	// the current pull request's fetches, a mutation has no "generation"
+	// of its own to supersede - only Stop cancels it, silently (see
+	// finishMutation). mutationErr is this subsystem's own standing
+	// error, folded into recomputeLastErr like viewerLastErr/detailErr/
+	// filesErr.
+	mutationQueue  []mutation
+	mutating       bool
+	mutationCtx    context.Context
+	mutationCancel context.CancelFunc
+	mutationErr    error
+
 	subscribers []func(Event)
 }
 
@@ -437,6 +458,21 @@ func (s *Store) Viewer() model.User {
 // successful request.
 func (s *Store) RateLimit() model.RateLimit {
 	return s.rateLimit
+}
+
+// setRateLimit records rl as the current rate limit and emits
+// EventRateLimitChanged, returning true, unless rl is unknown (GitHub
+// Enterprise Server with rate limiting disabled reports null), in which
+// case the standing value is kept and false is returned: every fetch and
+// mutation goes through here so no path can replace a known value with
+// "unknown".
+func (s *Store) setRateLimit(rl model.RateLimit) bool {
+	if !rl.Known {
+		return false
+	}
+	s.rateLimit = rl
+	s.emit(Event{Kind: EventRateLimitChanged})
+	return true
 }
 
 // LastRefresh returns when every section last had its page-1 fetch

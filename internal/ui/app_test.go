@@ -133,6 +133,22 @@ func (f *fakeGitHub) ChangedFiles(ctx context.Context, ref model.PRRef, page int
 	return pages[page-1], nil
 }
 
+// AddIssueComment, UpdateIssueComment, and DeleteIssueComment are no-ops:
+// the UI's comment/mutation wiring lands in M3a's second slice, but
+// store.GitHub already requires all three (see internal/store/mutations.go),
+// so fakeGitHub must implement them for this package to compile.
+func (f *fakeGitHub) AddIssueComment(context.Context, string, string) (model.IssueComment, model.RateLimit, error) {
+	return model.IssueComment{}, model.RateLimit{}, nil
+}
+
+func (f *fakeGitHub) UpdateIssueComment(context.Context, string, string) (model.IssueComment, model.RateLimit, error) {
+	return model.IssueComment{}, model.RateLimit{}, nil
+}
+
+func (f *fakeGitHub) DeleteIssueComment(context.Context, string) (model.RateLimit, error) {
+	return model.RateLimit{}, nil
+}
+
 // SetFilesPages registers the sequence of REST pages ChangedFiles returns
 // for ref, in page order (pages[0] is page 1, and so on).
 func (f *fakeGitHub) SetFilesPages(ref model.PRRef, pages []gh.FilesResult) {

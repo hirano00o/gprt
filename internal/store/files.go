@@ -429,9 +429,7 @@ func (s *Store) applyFilesPageResult(
 	s.filesErr = nil
 	s.recomputeLastErr()
 
-	if res.RateLimit.Known {
-		s.rateLimit = res.RateLimit
-		s.emit(Event{Kind: EventRateLimitChanged})
+	if s.setRateLimit(res.RateLimit) {
 		if gen != s.filesGen {
 			return
 		}

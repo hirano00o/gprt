@@ -76,14 +76,39 @@ type filesCall struct {
 type fakeGitHub struct {
 	mu sync.Mutex
 
-	viewerFunc func(ctx context.Context) (model.User, model.RateLimit, error)
-	searchFunc func(ctx context.Context, query, cursor string) (gh.SearchResult, error)
-	detailFunc func(ctx context.Context, ref model.PRRef, viewerLogin string) (gh.DetailResult, error)
-	filesFunc  func(ctx context.Context, ref model.PRRef, page int, etag string) (gh.FilesResult, error)
+	viewerFunc        func(ctx context.Context) (model.User, model.RateLimit, error)
+	searchFunc        func(ctx context.Context, query, cursor string) (gh.SearchResult, error)
+	detailFunc        func(ctx context.Context, ref model.PRRef, viewerLogin string) (gh.DetailResult, error)
+	filesFunc         func(ctx context.Context, ref model.PRRef, page int, etag string) (gh.FilesResult, error)
+	addCommentFunc    func(ctx context.Context, subjectID, body string) (model.IssueComment, model.RateLimit, error)
+	updateCommentFunc func(ctx context.Context, id, body string) (model.IssueComment, model.RateLimit, error)
+	deleteCommentFunc func(ctx context.Context, id string) (model.RateLimit, error)
 
-	calls       []searchCall
-	detailCalls []detailCall
-	filesCalls  []filesCall
+	calls              []searchCall
+	detailCalls        []detailCall
+	filesCalls         []filesCall
+	addCommentCalls    []addCommentCall
+	updateCommentCalls []updateCommentCall
+	deleteCommentCalls []deleteCommentCall
+}
+
+// addCommentCall records one AddIssueComment invocation for assertions.
+type addCommentCall struct {
+	subjectID string
+	body      string
+}
+
+// updateCommentCall records one UpdateIssueComment invocation for
+// assertions.
+type updateCommentCall struct {
+	id   string
+	body string
+}
+
+// deleteCommentCall records one DeleteIssueComment invocation for
+// assertions.
+type deleteCommentCall struct {
+	id string
 }
 
 func newFakeGitHub() *fakeGitHub {
@@ -99,6 +124,15 @@ func newFakeGitHub() *fakeGitHub {
 		},
 		filesFunc: func(context.Context, model.PRRef, int, string) (gh.FilesResult, error) {
 			return gh.FilesResult{}, nil
+		},
+		addCommentFunc: func(context.Context, string, string) (model.IssueComment, model.RateLimit, error) {
+			return model.IssueComment{}, model.RateLimit{}, nil
+		},
+		updateCommentFunc: func(context.Context, string, string) (model.IssueComment, model.RateLimit, error) {
+			return model.IssueComment{}, model.RateLimit{}, nil
+		},
+		deleteCommentFunc: func(context.Context, string) (model.RateLimit, error) {
+			return model.RateLimit{}, nil
 		},
 	}
 }
@@ -139,6 +173,30 @@ func (f *fakeGitHub) ChangedFiles(ctx context.Context, ref model.PRRef, page int
 	return fn(ctx, ref, page, etag)
 }
 
+func (f *fakeGitHub) AddIssueComment(ctx context.Context, subjectID, body string) (model.IssueComment, model.RateLimit, error) {
+	f.mu.Lock()
+	f.addCommentCalls = append(f.addCommentCalls, addCommentCall{subjectID: subjectID, body: body})
+	fn := f.addCommentFunc
+	f.mu.Unlock()
+	return fn(ctx, subjectID, body)
+}
+
+func (f *fakeGitHub) UpdateIssueComment(ctx context.Context, id, body string) (model.IssueComment, model.RateLimit, error) {
+	f.mu.Lock()
+	f.updateCommentCalls = append(f.updateCommentCalls, updateCommentCall{id: id, body: body})
+	fn := f.updateCommentFunc
+	f.mu.Unlock()
+	return fn(ctx, id, body)
+}
+
+func (f *fakeGitHub) DeleteIssueComment(ctx context.Context, id string) (model.RateLimit, error) {
+	f.mu.Lock()
+	f.deleteCommentCalls = append(f.deleteCommentCalls, deleteCommentCall{id: id})
+	fn := f.deleteCommentFunc
+	f.mu.Unlock()
+	return fn(ctx, id)
+}
+
 func (f *fakeGitHub) searchCalls() []searchCall {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -151,6 +209,54 @@ func (f *fakeGitHub) detailCallCount() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return len(f.detailCalls)
+}
+
+func (f *fakeGitHub) addCommentCallsSnapshot() []addCommentCall {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]addCommentCall, len(f.addCommentCalls))
+	copy(out, f.addCommentCalls)
+	return out
+}
+
+func (f *fakeGitHub) updateCommentCallsSnapshot() []updateCommentCall {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]updateCommentCall, len(f.updateCommentCalls))
+	copy(out, f.updateCommentCalls)
+	return out
+}
+
+func (f *fakeGitHub) deleteCommentCallsSnapshot() []deleteCommentCall {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]deleteCommentCall, len(f.deleteCommentCalls))
+	copy(out, f.deleteCommentCalls)
+	return out
+}
+
+// setAddCommentFunc reassigns addCommentFunc under the lock, for the same
+// reason setSearchFunc does.
+func (f *fakeGitHub) setAddCommentFunc(fn func(ctx context.Context, subjectID, body string) (model.IssueComment, model.RateLimit, error)) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.addCommentFunc = fn
+}
+
+// setUpdateCommentFunc reassigns updateCommentFunc under the lock, for the
+// same reason setSearchFunc does.
+func (f *fakeGitHub) setUpdateCommentFunc(fn func(ctx context.Context, id, body string) (model.IssueComment, model.RateLimit, error)) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.updateCommentFunc = fn
+}
+
+// setDeleteCommentFunc reassigns deleteCommentFunc under the lock, for the
+// same reason setSearchFunc does.
+func (f *fakeGitHub) setDeleteCommentFunc(fn func(ctx context.Context, id string) (model.RateLimit, error)) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.deleteCommentFunc = fn
 }
 
 // setSearchFunc reassigns searchFunc under the lock. Most tests reassign
