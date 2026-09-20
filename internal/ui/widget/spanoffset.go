@@ -1,8 +1,9 @@
 package widget
 
 import (
+	"github.com/clipperhouse/displaywidth"
+	"github.com/clipperhouse/uax29/v2/graphemes"
 	"github.com/gdamore/tcell/v2"
-	"github.com/rivo/uniseg"
 )
 
 // DrawSpansOffset draws spans onto screen starting at (x, y) like DrawSpans,
@@ -45,9 +46,10 @@ func DrawSpansOffset(screen tcell.Screen, x, y, maxWidth, offset int, spans []Sp
 spans:
 	for _, s := range spans {
 		lastStyle = s.Style
-		g := uniseg.NewGraphemes(s.Text)
-		for g.Next() {
-			width := g.Width()
+		it := graphemes.FromString(s.Text)
+		for it.Next() {
+			cluster := it.Value()
+			width := displaywidth.String(cluster)
 
 			if skipped+width <= offset {
 				// Fully within the skipped region: drop it entirely.
@@ -74,7 +76,7 @@ spans:
 			if width > 0 && cursor+width > limit {
 				break spans
 			}
-			runes := g.Runes()
+			runes := []rune(cluster)
 			screen.SetContent(cursor, y, runes[0], runes[1:], s.Style)
 			cursor += width
 		}

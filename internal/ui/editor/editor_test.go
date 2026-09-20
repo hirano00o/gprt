@@ -275,6 +275,34 @@ func TestEditorExternalEditorAbortsWhenSuspendFails(t *testing.T) {
 // exist): the failure must reach OnError/the status line, not be
 // swallowed, and the buffer must stay unchanged rather than being wiped
 // by an empty/garbage result.
+// TestEditorExternalEditorRejectsACommandThatExpandsToNothing covers an
+// editor setting made of a quoted, unset variable: shell expansion yields
+// one empty field, which must be reported as an invalid command rather
+// than handed to exec as an empty program name.
+func TestEditorExternalEditorRejectsACommandThatExpandsToNothing(t *testing.T) {
+	t.Setenv("GPRT_TEST_UNSET_EDITOR", "")
+	var errs []string
+	e, screen := newTestEditor(t, Options{
+		ExternalEditor: `"$GPRT_TEST_UNSET_EDITOR"`,
+		Suspend:        func(f func()) bool { f(); return true },
+		OnError:        func(msg string) { errs = append(errs, msg) },
+	})
+	sendEditorRune(e, screen, 'i')
+	typeEditorText(e, screen, "original")
+	sendEditorKey(e, screen, tcell.NewEventKey(tcell.KeyEsc, 0, tcell.ModNone))
+
+	sendEditorRune(e, screen, ':')
+	typeEditorText(e, screen, "e")
+	sendEditorKey(e, screen, tcell.NewEventKey(tcell.KeyEnter, 0, tcell.ModNone))
+
+	if got, want := e.Text(), "original"; got != want {
+		t.Fatalf("text = %q, want %q (buffer must be untouched)", got, want)
+	}
+	if len(errs) != 1 || !strings.Contains(errs[0], "invalid command") {
+		t.Fatalf("OnError calls = %q, want exactly one mentioning an invalid command", errs)
+	}
+}
+
 func TestEditorExternalEditorFailureReportsErrorAndKeepsBuffer(t *testing.T) {
 	var errs []string
 	e, screen := newTestEditor(t, Options{

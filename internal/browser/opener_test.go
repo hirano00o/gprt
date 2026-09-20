@@ -82,6 +82,33 @@ func TestOpener_Open_FallbackWhenNoLauncherConfigured(t *testing.T) {
 	}
 }
 
+// TestOpener_Open_FallbackWhenLauncherExpandsToAnEmptyCommand covers a
+// launcher made of a quoted, unset variable: shell expansion turns it into
+// one empty field rather than no fields, which must still count as "no
+// launcher configured" instead of an attempt to run an empty command.
+func TestOpener_Open_FallbackWhenLauncherExpandsToAnEmptyCommand(t *testing.T) {
+	t.Setenv("GPRT_TEST_UNSET_LAUNCHER", "")
+	var gotURL string
+	o := &Opener{
+		Config: `"$GPRT_TEST_UNSET_LAUNCHER"`,
+		Env:    func(string) string { return "" },
+		Run: func(name string, args ...string) error {
+			t.Fatalf("Run(%q) called, want Fallback to be used", name)
+			return nil
+		},
+		Fallback: func(url string) error {
+			gotURL = url
+			return nil
+		},
+	}
+	if err := o.Open("https://example.com"); err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	if gotURL != "https://example.com" {
+		t.Errorf("Fallback url = %q, want %q", gotURL, "https://example.com")
+	}
+}
+
 func TestOpener_Open_RejectsUnsupportedURLs(t *testing.T) {
 	tests := []struct {
 		name string

@@ -54,6 +54,35 @@ func TestSpanWidth(t *testing.T) {
 	}
 }
 
+// TestSpanWidthMatchesTerminalDisplayWidths pins SpanWidth's values for a
+// set of characters where displaywidth (used internally, replacing the
+// unmaintained uniseg dependency — see decisis #169) must agree with what
+// tcell (which still uses uniseg itself) actually draws each cell as; a
+// mismatch here would desynchronize gprt's own cursor/gutter math from the
+// terminal's real layout.
+func TestSpanWidthMatchesTerminalDisplayWidths(t *testing.T) {
+	tests := []struct {
+		name string
+		text string
+		want int
+	}{
+		{"CJK ideographs are double-width", "日本語", 6},
+		{"a ZWJ family emoji sequence is one double-width cluster", "👨‍👩‍👧", 2},
+		{"a regional-indicator flag sequence is one double-width cluster", "🇯🇵", 2},
+		{"a base letter plus a combining mark is one single-width cluster", "é", 1},
+		{"narrow punctuation (ellipsis, middle dot, box drawing) is single-width", "…·─│", 4},
+		{"halfwidth katakana is single-width per character", "ｱｲ", 2},
+		{"a tab is zero-width", "\t", 0},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := SpanWidth([]Span{{Text: tc.text}}); got != tc.want {
+				t.Errorf("SpanWidth(%q) = %d, want %d", tc.text, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestDrawSpansFitsWithinWidth(t *testing.T) {
 	screen := newTestScreen(t, 20, 3)
 	style := tcell.StyleDefault.Foreground(tcell.ColorRed)

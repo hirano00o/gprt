@@ -3,7 +3,8 @@ package widget
 import (
 	"strings"
 
-	"github.com/rivo/uniseg"
+	"github.com/clipperhouse/displaywidth"
+	"github.com/clipperhouse/uax29/v2/graphemes"
 )
 
 // WrapText word-wraps text to fit within width display columns, breaking
@@ -49,7 +50,7 @@ func WrapText(text string, width int) []string {
 // happens to fall inside it.
 func wrapParagraph(text string, width int) []string {
 	indent, rest := splitIndent(text)
-	indentWidth := uniseg.StringWidth(indent)
+	indentWidth := displaywidth.String(indent)
 	effectiveWidth := width - indentWidth
 	if effectiveWidth <= 0 {
 		// The indent alone already consumes the whole target width (or
@@ -72,7 +73,7 @@ func wrapParagraph(text string, width int) []string {
 		current, currentWidth = nil, 0
 	}
 	for _, tok := range tokens {
-		tokWidth := uniseg.StringWidth(tok)
+		tokWidth := displaywidth.String(tok)
 		if tokWidth > effectiveWidth {
 			if len(current) > 0 {
 				flush()
@@ -118,15 +119,16 @@ func hardBreak(word string, width int) []string {
 	var lines []string
 	var b strings.Builder
 	lineWidth := 0
-	g := uniseg.NewGraphemes(word)
-	for g.Next() {
-		cw := g.Width()
+	it := graphemes.FromString(word)
+	for it.Next() {
+		cluster := it.Value()
+		cw := displaywidth.String(cluster)
 		if lineWidth > 0 && lineWidth+cw > width {
 			lines = append(lines, b.String())
 			b.Reset()
 			lineWidth = 0
 		}
-		b.WriteString(string(g.Runes()))
+		b.WriteString(cluster)
 		lineWidth += cw
 	}
 	if b.Len() > 0 {

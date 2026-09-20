@@ -81,8 +81,11 @@ func TestNew_Run_CapsCapturedStderr(t *testing.T) {
 	// trailing redirection like "cmd 1>&2" on the left side of a pipe is
 	// applied after the pipe is wired up and silently breaks it, which
 	// would leave "yes" writing to our stderr capture forever instead of
-	// terminating.
-	o.Config = `/bin/sh -c "i=0; while [ $i -lt 2000 ]; do echo line-$i-boom 1>&2; i=$((i+1)); done; exit 3"`
+	// terminating. Single-quoted (not double-quoted) so internal/shellwords'
+	// own $VAR expansion leaves "$i" and "$((i+1))" untouched for the
+	// spawned /bin/sh -c to interpret itself, exactly like a real shell
+	// would treat this Config value.
+	o.Config = `/bin/sh -c 'i=0; while [ $i -lt 2000 ]; do echo line-$i-boom 1>&2; i=$((i+1)); done; exit 3'`
 
 	if err := o.Open("https://example.com"); err != nil {
 		t.Fatalf("Open() error = %v", err)

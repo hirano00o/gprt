@@ -7,9 +7,9 @@ import (
 	"strings"
 
 	"github.com/gdamore/tcell/v2"
-	"github.com/google/shlex"
 	"github.com/rivo/tview"
 
+	"github.com/hirano00o/gprt/internal/shellwords"
 	"github.com/hirano00o/gprt/internal/ui/keys"
 )
 
@@ -39,9 +39,9 @@ type Options struct {
 	// back into the buffer.
 	Suspend func(func()) bool
 	// ExternalEditor is the command ":e" runs, split with shell-like
-	// quoting rules (google/shlex) before the buffer's temp file path is
-	// appended as its final argument. Empty falls back to $EDITOR, then
-	// "vim".
+	// quoting rules (internal/shellwords) before the buffer's temp file
+	// path is appended as its final argument. Empty falls back to
+	// $EDITOR, then "vim".
 	ExternalEditor string
 	// OnChange is called with the buffer's current text after every
 	// edit (typing, an operator, undo/redo, a mention accepted, ":e"'s
@@ -525,9 +525,9 @@ func (e *Editor) reportExternalEditorError(msg string) {
 }
 
 // runExternalEditorProcess writes text to a temp file, runs cmdLine
-// (split with shell-like quoting via google/shlex) on it with the file's
-// path appended as the final argument, and returns the file's content
-// after the command exits.
+// (split with shell-like quoting via internal/shellwords) on it with the
+// file's path appended as the final argument, and returns the file's
+// content after the command exits.
 func runExternalEditorProcess(cmdLine, text string) (string, error) {
 	f, err := os.CreateTemp("", "gprt-comment-*.md")
 	if err != nil {
@@ -544,8 +544,11 @@ func runExternalEditorProcess(cmdLine, text string) (string, error) {
 		return "", fmt.Errorf("editor: close temp file: %w", err)
 	}
 
-	parts, err := shlex.Split(cmdLine)
-	if err != nil || len(parts) == 0 {
+	parts, err := shellwords.Split(cmdLine)
+	// A quoted, unset variable ("$MYEDITOR") expands to one empty field
+	// rather than to nothing, so the command name itself must be checked,
+	// not just the field count.
+	if err != nil || len(parts) == 0 || parts[0] == "" {
 		return "", fmt.Errorf("editor: invalid command %q", cmdLine)
 	}
 	cmd := exec.Command(parts[0], append(parts[1:], path)...)

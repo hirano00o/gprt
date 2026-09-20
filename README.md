@@ -73,8 +73,8 @@ The configuration file is `config.yaml` inside that directory, for example `~/.c
 host: github.com          # default: gh's default host
 refresh_interval: 5m
 icons: unicode            # unicode | nerd
-editor: ""                # overrides $EDITOR for :e
-browser: ""               # overrides $BROWSER
+editor: ""                # overrides $EDITOR for :e; split with shell quoting, $VAR/~ expand, globs don't
+browser: ""               # overrides $BROWSER; split with shell quoting, $VAR/~ expand, globs don't
 highlight_style: github-dark  # "" or any name from chroma's styles.Names(); rejected at startup if unknown
 tab_width: 4
 list:

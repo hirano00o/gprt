@@ -14,7 +14,8 @@ import (
 	"time"
 
 	clibrowser "github.com/cli/browser"
-	"github.com/google/shlex"
+
+	"github.com/hirano00o/gprt/internal/shellwords"
 )
 
 // launcherWaitDelay bounds how long Run's background Wait waits for the
@@ -151,11 +152,14 @@ func (o *Opener) Open(rawURL string) error {
 		return o.Fallback(rawURL)
 	}
 
-	fields, err := shlex.Split(launcher)
+	fields, err := shellwords.Split(launcher)
 	if err != nil {
 		return fmt.Errorf("browser: parse launcher %q: %w", launcher, err)
 	}
-	if len(fields) == 0 {
+	// A launcher that expands to nothing — or to an empty command name,
+	// which is what a quoted, unset variable like "$BROWSER_CMD" yields —
+	// means no launcher was really configured.
+	if len(fields) == 0 || fields[0] == "" {
 		return o.Fallback(rawURL)
 	}
 
