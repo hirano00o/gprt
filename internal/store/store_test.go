@@ -99,6 +99,24 @@ type fakeGitHub struct {
 	removeReactionFunc        func(ctx context.Context, subjectID string, content model.ReactionContent) ([]model.ReactionGroup, model.RateLimit, error)
 	mentionableUsersFunc      func(ctx context.Context, repo model.RepoRef, query string, first int) ([]model.User, model.RateLimit, error)
 
+	// M5 repository metadata / branch / team / edit-merge-create reads and
+	// mutations (see repository.go, viewer_repositories.go, search.go,
+	// pr_edit.go, pr_create.go).
+	repositoryFunc           func(ctx context.Context, repo model.RepoRef) (model.RepositoryInfo, model.RateLimit, error)
+	labelsFunc               func(ctx context.Context, repo model.RepoRef) ([]model.Label, model.RateLimit, error)
+	pullRequestTemplatesFunc func(ctx context.Context, repo model.RepoRef) ([]model.PullRequestTemplate, model.RateLimit, error)
+	viewerRepositoriesFunc   func(ctx context.Context, first int) ([]model.RepositorySummary, model.RateLimit, error)
+	branchesFunc             func(ctx context.Context, repo model.RepoRef, query string, first int) ([]model.Branch, model.RateLimit, error)
+	teamsFunc                func(ctx context.Context, org, query string, first int) ([]model.Team, model.RateLimit, error)
+	updatePullRequestFunc    func(ctx context.Context, id string, in gh.UpdatePullRequestInput) (model.PullRequest, model.RateLimit, error)
+	requestReviewersFunc     func(ctx context.Context, id string, userIDs, teamIDs []string, union bool) ([]model.Reviewer, model.RateLimit, error)
+	markReadyForReviewFunc   func(ctx context.Context, id string) (bool, model.RateLimit, error)
+	convertToDraftFunc       func(ctx context.Context, id string) (bool, model.RateLimit, error)
+	mergePullRequestFunc     func(ctx context.Context, id string, method model.MergeMethod, commitHeadline, commitBody *string, expectedHeadOID string) (model.PullRequest, model.RateLimit, error)
+	closePullRequestFunc     func(ctx context.Context, id string) (model.PRState, model.RateLimit, error)
+	reopenPullRequestFunc    func(ctx context.Context, id string) (model.PRState, model.RateLimit, error)
+	createPullRequestFunc    func(ctx context.Context, in gh.CreatePullRequestInput) (model.PullRequest, model.RateLimit, error)
+
 	calls              []searchCall
 	detailCalls        []detailCall
 	filesCalls         []filesCall
@@ -120,6 +138,55 @@ type fakeGitHub struct {
 	addReactionCalls           []addReactionCall
 	removeReactionCalls        []removeReactionCall
 	mentionableUsersCalls      []mentionableUsersCall
+
+	repositoryCalls           []model.RepoRef
+	labelsCalls               []model.RepoRef
+	pullRequestTemplatesCalls []model.RepoRef
+	viewerRepositoriesCalls   []int
+	branchesCalls             []branchesCall
+	teamsCalls                []teamsCall
+	updatePullRequestCalls    []updatePullRequestCall
+	requestReviewersCalls     []requestReviewersCall
+	markReadyForReviewCalls   []string
+	convertToDraftCalls       []string
+	mergePullRequestCalls     []mergePullRequestCall
+	closePullRequestCalls     []string
+	reopenPullRequestCalls    []string
+	createPullRequestCalls    []gh.CreatePullRequestInput
+}
+
+// branchesCall records one Branches invocation.
+type branchesCall struct {
+	repo  model.RepoRef
+	query string
+	first int
+}
+
+// teamsCall records one Teams invocation.
+type teamsCall struct {
+	org, query string
+	first      int
+}
+
+// updatePullRequestCall records one UpdatePullRequest invocation.
+type updatePullRequestCall struct {
+	id string
+	in gh.UpdatePullRequestInput
+}
+
+// requestReviewersCall records one RequestReviewers invocation.
+type requestReviewersCall struct {
+	id               string
+	userIDs, teamIDs []string
+	union            bool
+}
+
+// mergePullRequestCall records one MergePullRequest invocation.
+type mergePullRequestCall struct {
+	id                         string
+	method                     model.MergeMethod
+	commitHeadline, commitBody *string
+	expectedHeadOID            string
 }
 
 // createPendingReviewCall records one CreatePendingReview invocation.
@@ -271,6 +338,48 @@ func newFakeGitHub() *fakeGitHub {
 		},
 		mentionableUsersFunc: func(context.Context, model.RepoRef, string, int) ([]model.User, model.RateLimit, error) {
 			return nil, model.RateLimit{}, nil
+		},
+		repositoryFunc: func(context.Context, model.RepoRef) (model.RepositoryInfo, model.RateLimit, error) {
+			return model.RepositoryInfo{}, model.RateLimit{}, nil
+		},
+		labelsFunc: func(context.Context, model.RepoRef) ([]model.Label, model.RateLimit, error) {
+			return nil, model.RateLimit{}, nil
+		},
+		pullRequestTemplatesFunc: func(context.Context, model.RepoRef) ([]model.PullRequestTemplate, model.RateLimit, error) {
+			return nil, model.RateLimit{}, nil
+		},
+		viewerRepositoriesFunc: func(context.Context, int) ([]model.RepositorySummary, model.RateLimit, error) {
+			return nil, model.RateLimit{}, nil
+		},
+		branchesFunc: func(context.Context, model.RepoRef, string, int) ([]model.Branch, model.RateLimit, error) {
+			return nil, model.RateLimit{}, nil
+		},
+		teamsFunc: func(context.Context, string, string, int) ([]model.Team, model.RateLimit, error) {
+			return nil, model.RateLimit{}, nil
+		},
+		updatePullRequestFunc: func(context.Context, string, gh.UpdatePullRequestInput) (model.PullRequest, model.RateLimit, error) {
+			return model.PullRequest{}, model.RateLimit{}, nil
+		},
+		requestReviewersFunc: func(context.Context, string, []string, []string, bool) ([]model.Reviewer, model.RateLimit, error) {
+			return nil, model.RateLimit{}, nil
+		},
+		markReadyForReviewFunc: func(context.Context, string) (bool, model.RateLimit, error) {
+			return false, model.RateLimit{}, nil
+		},
+		convertToDraftFunc: func(context.Context, string) (bool, model.RateLimit, error) {
+			return true, model.RateLimit{}, nil
+		},
+		mergePullRequestFunc: func(context.Context, string, model.MergeMethod, *string, *string, string) (model.PullRequest, model.RateLimit, error) {
+			return model.PullRequest{}, model.RateLimit{}, nil
+		},
+		closePullRequestFunc: func(context.Context, string) (model.PRState, model.RateLimit, error) {
+			return model.PRStateClosed, model.RateLimit{}, nil
+		},
+		reopenPullRequestFunc: func(context.Context, string) (model.PRState, model.RateLimit, error) {
+			return model.PRStateOpen, model.RateLimit{}, nil
+		},
+		createPullRequestFunc: func(context.Context, gh.CreatePullRequestInput) (model.PullRequest, model.RateLimit, error) {
+			return model.PullRequest{}, model.RateLimit{}, nil
 		},
 	}
 }
@@ -461,6 +570,130 @@ func (f *fakeGitHub) MentionableUsers(
 	fn := f.mentionableUsersFunc
 	f.mu.Unlock()
 	return fn(ctx, repo, query, first)
+}
+
+func (f *fakeGitHub) Repository(ctx context.Context, repo model.RepoRef) (model.RepositoryInfo, model.RateLimit, error) {
+	f.mu.Lock()
+	f.repositoryCalls = append(f.repositoryCalls, repo)
+	fn := f.repositoryFunc
+	f.mu.Unlock()
+	return fn(ctx, repo)
+}
+
+func (f *fakeGitHub) Labels(ctx context.Context, repo model.RepoRef) ([]model.Label, model.RateLimit, error) {
+	f.mu.Lock()
+	f.labelsCalls = append(f.labelsCalls, repo)
+	fn := f.labelsFunc
+	f.mu.Unlock()
+	return fn(ctx, repo)
+}
+
+func (f *fakeGitHub) PullRequestTemplates(ctx context.Context, repo model.RepoRef) ([]model.PullRequestTemplate, model.RateLimit, error) {
+	f.mu.Lock()
+	f.pullRequestTemplatesCalls = append(f.pullRequestTemplatesCalls, repo)
+	fn := f.pullRequestTemplatesFunc
+	f.mu.Unlock()
+	return fn(ctx, repo)
+}
+
+func (f *fakeGitHub) ViewerRepositories(ctx context.Context, first int) ([]model.RepositorySummary, model.RateLimit, error) {
+	f.mu.Lock()
+	f.viewerRepositoriesCalls = append(f.viewerRepositoriesCalls, first)
+	fn := f.viewerRepositoriesFunc
+	f.mu.Unlock()
+	return fn(ctx, first)
+}
+
+func (f *fakeGitHub) Branches(
+	ctx context.Context, repo model.RepoRef, query string, first int,
+) ([]model.Branch, model.RateLimit, error) {
+	f.mu.Lock()
+	f.branchesCalls = append(f.branchesCalls, branchesCall{repo: repo, query: query, first: first})
+	fn := f.branchesFunc
+	f.mu.Unlock()
+	return fn(ctx, repo, query, first)
+}
+
+func (f *fakeGitHub) Teams(ctx context.Context, org, query string, first int) ([]model.Team, model.RateLimit, error) {
+	f.mu.Lock()
+	f.teamsCalls = append(f.teamsCalls, teamsCall{org: org, query: query, first: first})
+	fn := f.teamsFunc
+	f.mu.Unlock()
+	return fn(ctx, org, query, first)
+}
+
+func (f *fakeGitHub) UpdatePullRequest(
+	ctx context.Context, id string, in gh.UpdatePullRequestInput,
+) (model.PullRequest, model.RateLimit, error) {
+	f.mu.Lock()
+	f.updatePullRequestCalls = append(f.updatePullRequestCalls, updatePullRequestCall{id: id, in: in})
+	fn := f.updatePullRequestFunc
+	f.mu.Unlock()
+	return fn(ctx, id, in)
+}
+
+func (f *fakeGitHub) RequestReviewers(
+	ctx context.Context, id string, userIDs, teamIDs []string, union bool,
+) ([]model.Reviewer, model.RateLimit, error) {
+	f.mu.Lock()
+	f.requestReviewersCalls = append(
+		f.requestReviewersCalls, requestReviewersCall{id: id, userIDs: userIDs, teamIDs: teamIDs, union: union},
+	)
+	fn := f.requestReviewersFunc
+	f.mu.Unlock()
+	return fn(ctx, id, userIDs, teamIDs, union)
+}
+
+func (f *fakeGitHub) MarkReadyForReview(ctx context.Context, id string) (bool, model.RateLimit, error) {
+	f.mu.Lock()
+	f.markReadyForReviewCalls = append(f.markReadyForReviewCalls, id)
+	fn := f.markReadyForReviewFunc
+	f.mu.Unlock()
+	return fn(ctx, id)
+}
+
+func (f *fakeGitHub) ConvertToDraft(ctx context.Context, id string) (bool, model.RateLimit, error) {
+	f.mu.Lock()
+	f.convertToDraftCalls = append(f.convertToDraftCalls, id)
+	fn := f.convertToDraftFunc
+	f.mu.Unlock()
+	return fn(ctx, id)
+}
+
+func (f *fakeGitHub) MergePullRequest(
+	ctx context.Context, id string, method model.MergeMethod, commitHeadline, commitBody *string, expectedHeadOID string,
+) (model.PullRequest, model.RateLimit, error) {
+	f.mu.Lock()
+	f.mergePullRequestCalls = append(f.mergePullRequestCalls, mergePullRequestCall{
+		id: id, method: method, commitHeadline: commitHeadline, commitBody: commitBody, expectedHeadOID: expectedHeadOID,
+	})
+	fn := f.mergePullRequestFunc
+	f.mu.Unlock()
+	return fn(ctx, id, method, commitHeadline, commitBody, expectedHeadOID)
+}
+
+func (f *fakeGitHub) ClosePullRequest(ctx context.Context, id string) (model.PRState, model.RateLimit, error) {
+	f.mu.Lock()
+	f.closePullRequestCalls = append(f.closePullRequestCalls, id)
+	fn := f.closePullRequestFunc
+	f.mu.Unlock()
+	return fn(ctx, id)
+}
+
+func (f *fakeGitHub) ReopenPullRequest(ctx context.Context, id string) (model.PRState, model.RateLimit, error) {
+	f.mu.Lock()
+	f.reopenPullRequestCalls = append(f.reopenPullRequestCalls, id)
+	fn := f.reopenPullRequestFunc
+	f.mu.Unlock()
+	return fn(ctx, id)
+}
+
+func (f *fakeGitHub) CreatePullRequest(ctx context.Context, in gh.CreatePullRequestInput) (model.PullRequest, model.RateLimit, error) {
+	f.mu.Lock()
+	f.createPullRequestCalls = append(f.createPullRequestCalls, in)
+	fn := f.createPullRequestFunc
+	f.mu.Unlock()
+	return fn(ctx, in)
 }
 
 // createPendingReviewCallsSnapshot returns a copy of every
@@ -735,6 +968,192 @@ func (f *fakeGitHub) setMentionableUsersFunc(
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.mentionableUsersFunc = fn
+}
+
+// setRepositoryFunc reassigns repositoryFunc under the lock, for the same
+// reason setSearchFunc does.
+func (f *fakeGitHub) setRepositoryFunc(fn func(ctx context.Context, repo model.RepoRef) (model.RepositoryInfo, model.RateLimit, error)) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.repositoryFunc = fn
+}
+
+// setLabelsFunc reassigns labelsFunc under the lock, for the same reason
+// setSearchFunc does.
+func (f *fakeGitHub) setLabelsFunc(fn func(ctx context.Context, repo model.RepoRef) ([]model.Label, model.RateLimit, error)) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.labelsFunc = fn
+}
+
+// setPullRequestTemplatesFunc reassigns pullRequestTemplatesFunc under the
+// lock, for the same reason setSearchFunc does.
+func (f *fakeGitHub) setPullRequestTemplatesFunc(
+	fn func(ctx context.Context, repo model.RepoRef) ([]model.PullRequestTemplate, model.RateLimit, error),
+) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.pullRequestTemplatesFunc = fn
+}
+
+// setViewerRepositoriesFunc reassigns viewerRepositoriesFunc under the
+// lock, for the same reason setSearchFunc does.
+func (f *fakeGitHub) setViewerRepositoriesFunc(
+	fn func(ctx context.Context, first int) ([]model.RepositorySummary, model.RateLimit, error),
+) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.viewerRepositoriesFunc = fn
+}
+
+// setBranchesFunc reassigns branchesFunc under the lock, for the same
+// reason setSearchFunc does.
+func (f *fakeGitHub) setBranchesFunc(
+	fn func(ctx context.Context, repo model.RepoRef, query string, first int) ([]model.Branch, model.RateLimit, error),
+) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.branchesFunc = fn
+}
+
+// setTeamsFunc reassigns teamsFunc under the lock, for the same reason
+// setSearchFunc does.
+func (f *fakeGitHub) setTeamsFunc(fn func(ctx context.Context, org, query string, first int) ([]model.Team, model.RateLimit, error)) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.teamsFunc = fn
+}
+
+// setUpdatePullRequestFunc reassigns updatePullRequestFunc under the lock,
+// for the same reason setSearchFunc does.
+func (f *fakeGitHub) setUpdatePullRequestFunc(
+	fn func(ctx context.Context, id string, in gh.UpdatePullRequestInput) (model.PullRequest, model.RateLimit, error),
+) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.updatePullRequestFunc = fn
+}
+
+// setRequestReviewersFunc reassigns requestReviewersFunc under the lock,
+// for the same reason setSearchFunc does.
+func (f *fakeGitHub) setRequestReviewersFunc(
+	fn func(ctx context.Context, id string, userIDs, teamIDs []string, union bool) ([]model.Reviewer, model.RateLimit, error),
+) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.requestReviewersFunc = fn
+}
+
+// setMarkReadyForReviewFunc reassigns markReadyForReviewFunc under the
+// lock, for the same reason setSearchFunc does.
+func (f *fakeGitHub) setMarkReadyForReviewFunc(fn func(ctx context.Context, id string) (bool, model.RateLimit, error)) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.markReadyForReviewFunc = fn
+}
+
+// setConvertToDraftFunc reassigns convertToDraftFunc under the lock, for
+// the same reason setSearchFunc does.
+func (f *fakeGitHub) setConvertToDraftFunc(fn func(ctx context.Context, id string) (bool, model.RateLimit, error)) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.convertToDraftFunc = fn
+}
+
+// setMergePullRequestFunc reassigns mergePullRequestFunc under the lock,
+// for the same reason setSearchFunc does.
+func (f *fakeGitHub) setMergePullRequestFunc(
+	fn func(ctx context.Context, id string, method model.MergeMethod, commitHeadline, commitBody *string, expectedHeadOID string) (model.PullRequest, model.RateLimit, error),
+) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.mergePullRequestFunc = fn
+}
+
+// setClosePullRequestFunc reassigns closePullRequestFunc under the lock,
+// for the same reason setSearchFunc does.
+func (f *fakeGitHub) setClosePullRequestFunc(fn func(ctx context.Context, id string) (model.PRState, model.RateLimit, error)) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.closePullRequestFunc = fn
+}
+
+// setReopenPullRequestFunc reassigns reopenPullRequestFunc under the lock,
+// for the same reason setSearchFunc does.
+func (f *fakeGitHub) setReopenPullRequestFunc(fn func(ctx context.Context, id string) (model.PRState, model.RateLimit, error)) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.reopenPullRequestFunc = fn
+}
+
+// setCreatePullRequestFunc reassigns createPullRequestFunc under the lock,
+// for the same reason setSearchFunc does.
+func (f *fakeGitHub) setCreatePullRequestFunc(
+	fn func(ctx context.Context, in gh.CreatePullRequestInput) (model.PullRequest, model.RateLimit, error),
+) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.createPullRequestFunc = fn
+}
+
+// repositoryCallsSnapshot returns a copy of every Repository call recorded
+// so far, for assertions.
+func (f *fakeGitHub) repositoryCallsSnapshot() []model.RepoRef {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]model.RepoRef, len(f.repositoryCalls))
+	copy(out, f.repositoryCalls)
+	return out
+}
+
+// viewerRepositoriesCallsSnapshot returns a copy of every
+// ViewerRepositories call recorded so far, for assertions.
+func (f *fakeGitHub) viewerRepositoriesCallsSnapshot() []int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]int, len(f.viewerRepositoriesCalls))
+	copy(out, f.viewerRepositoriesCalls)
+	return out
+}
+
+// requestReviewersCallsSnapshot returns a copy of every RequestReviewers
+// call recorded so far, for assertions.
+func (f *fakeGitHub) requestReviewersCallsSnapshot() []requestReviewersCall {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]requestReviewersCall, len(f.requestReviewersCalls))
+	copy(out, f.requestReviewersCalls)
+	return out
+}
+
+// markReadyForReviewCallsSnapshot returns a copy of every
+// MarkReadyForReview call recorded so far, for assertions.
+func (f *fakeGitHub) markReadyForReviewCallsSnapshot() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]string, len(f.markReadyForReviewCalls))
+	copy(out, f.markReadyForReviewCalls)
+	return out
+}
+
+// convertToDraftCallsSnapshot returns a copy of every ConvertToDraft call
+// recorded so far, for assertions.
+func (f *fakeGitHub) convertToDraftCallsSnapshot() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]string, len(f.convertToDraftCalls))
+	copy(out, f.convertToDraftCalls)
+	return out
+}
+
+// mergePullRequestCallsSnapshot returns a copy of every MergePullRequest
+// call recorded so far, for assertions.
+func (f *fakeGitHub) mergePullRequestCallsSnapshot() []mergePullRequestCall {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]mergePullRequestCall, len(f.mergePullRequestCalls))
+	copy(out, f.mergePullRequestCalls)
+	return out
 }
 
 func (f *fakeGitHub) searchCalls() []searchCall {

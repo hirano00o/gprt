@@ -107,17 +107,18 @@ func TestClient_PullRequest_FullMappingWithPagination(t *testing.T) {
 		t.Errorf("ReactionGroups = %+v", pr.ReactionGroups)
 	}
 
-	if len(pr.Labels) != 2 || pr.Labels[0].Name != "bug" || pr.Labels[1].Name != "enhancement" {
+	if len(pr.Labels) != 2 || pr.Labels[0].ID != "LA_bug" || pr.Labels[0].Name != "bug" || pr.Labels[1].ID != "LA_enh" || pr.Labels[1].Name != "enhancement" {
 		t.Errorf("Labels = %+v", pr.Labels)
 	}
 
 	if len(pr.ReviewRequests) != 2 {
 		t.Fatalf("ReviewRequests = %+v, want 2 entries", pr.ReviewRequests)
 	}
-	if pr.ReviewRequests[0].Kind != model.ReviewerKindUser || pr.ReviewRequests[0].Login != "reviewer1" || !pr.ReviewRequests[0].AsCodeOwner {
+	if pr.ReviewRequests[0].ID != "U_reviewer1" || pr.ReviewRequests[0].Kind != model.ReviewerKindUser ||
+		pr.ReviewRequests[0].Login != "reviewer1" || !pr.ReviewRequests[0].AsCodeOwner {
 		t.Errorf("ReviewRequests[0] = %+v", pr.ReviewRequests[0])
 	}
-	if pr.ReviewRequests[1].Kind != model.ReviewerKindTeam || pr.ReviewRequests[1].Login != "core-team" {
+	if pr.ReviewRequests[1].ID != "T_core" || pr.ReviewRequests[1].Kind != model.ReviewerKindTeam || pr.ReviewRequests[1].Login != "core-team" {
 		t.Errorf("ReviewRequests[1] = %+v", pr.ReviewRequests[1])
 	}
 

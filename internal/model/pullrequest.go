@@ -55,13 +55,19 @@ const (
 // PullRequest is the full detail of a single GitHub pull request, combining
 // metadata, review state, checks, and conversation.
 type PullRequest struct {
-	ID               string
-	Ref              PRRef
-	RepositoryID     string
-	Title            string
-	Body             string
-	Author           User
-	State            PRState
+	ID           string
+	Ref          PRRef
+	RepositoryID string
+	Title        string
+	Body         string
+	Author       User
+	State        PRState
+	// Merged and MergedAt are populated by MergePullRequest's payload (M5):
+	// Merged is GitHub's own explicit boolean (redundant with, but more
+	// direct to check than, State == PRStateMerged) and MergedAt is the
+	// merge commit's timestamp, zero until merged.
+	Merged           bool
+	MergedAt         time.Time
 	IsDraft          bool
 	ReviewDecision   ReviewDecision
 	Mergeable        MergeableState

@@ -60,6 +60,35 @@ type GitHub interface {
 	// mentionable.go), the store's `@`-mention autocomplete candidate
 	// source.
 	MentionableUsers(ctx context.Context, repo model.RepoRef, query string, first int) ([]model.User, model.RateLimit, error)
+
+	// Repository metadata reads (see repository.go): loaded together by
+	// EnsureRepositoryMetadata to drive the edit/merge/create-PR forms.
+	Repository(ctx context.Context, repo model.RepoRef) (model.RepositoryInfo, model.RateLimit, error)
+	Labels(ctx context.Context, repo model.RepoRef) ([]model.Label, model.RateLimit, error)
+	PullRequestTemplates(ctx context.Context, repo model.RepoRef) ([]model.PullRequestTemplate, model.RateLimit, error)
+
+	// ViewerRepositories returns the viewer's own repositories (see
+	// viewer_repositories.go), the create-pull-request repository picker's
+	// candidate list.
+	ViewerRepositories(ctx context.Context, first int) ([]model.RepositorySummary, model.RateLimit, error)
+
+	// Branches/Teams are on-demand, query-filtered reads (see search.go's
+	// SearchBranches/SearchTeams) backing the base/head branch picker and
+	// the reviewer picker's team candidates.
+	Branches(ctx context.Context, repo model.RepoRef, query string, first int) ([]model.Branch, model.RateLimit, error)
+	Teams(ctx context.Context, org, query string, first int) ([]model.Team, model.RateLimit, error)
+
+	// Pull request edit/merge/create mutations (see pr_edit.go, pr_create.go).
+	UpdatePullRequest(ctx context.Context, id string, in gh.UpdatePullRequestInput) (model.PullRequest, model.RateLimit, error)
+	RequestReviewers(ctx context.Context, id string, userIDs, teamIDs []string, union bool) ([]model.Reviewer, model.RateLimit, error)
+	MarkReadyForReview(ctx context.Context, id string) (bool, model.RateLimit, error)
+	ConvertToDraft(ctx context.Context, id string) (bool, model.RateLimit, error)
+	MergePullRequest(
+		ctx context.Context, id string, method model.MergeMethod, commitHeadline, commitBody *string, expectedHeadOID string,
+	) (model.PullRequest, model.RateLimit, error)
+	ClosePullRequest(ctx context.Context, id string) (model.PRState, model.RateLimit, error)
+	ReopenPullRequest(ctx context.Context, id string) (model.PRState, model.RateLimit, error)
+	CreatePullRequest(ctx context.Context, in gh.CreatePullRequestInput) (model.PullRequest, model.RateLimit, error)
 }
 
 // lineHighlighter is the subset of *highlight.Highlighter the store depends
@@ -383,6 +412,36 @@ type Store struct {
 	// is enough.
 	mentionable map[model.RepoRef]mentionableEntry
 
+	// Repository metadata (see repository.go): a repository's
+	// RepositoryInfo/Labels/PullRequestTemplates, loaded together, lazily,
+	// only when EnsureRepositoryMetadata(repo) is explicitly called (the
+	// UI calls it when an edit/merge/create-PR form opens — never
+	// automatically on OpenPR, to avoid three extra queries on every PR
+	// switch). Kept per repository for the Store's lifetime, following
+	// mentionable's freshness+in-flight pattern.
+	repoMetadata map[model.RepoRef]repoMetadataEntry
+
+	// Viewer's own repositories (see viewer_repositories.go): the
+	// create-pull-request repository picker's candidate list, loaded
+	// lazily by EnsureViewerRepositories, following the same
+	// freshness+in-flight pattern as repository metadata (a single,
+	// non-keyed entry: there is only one viewer).
+	viewerRepos          []model.RepositorySummary
+	viewerReposFetchedAt time.Time
+	viewerReposLoading   bool
+	viewerReposPersisted bool
+
+	// On-demand branch/team search (see search.go): SearchBranches/
+	// SearchTeams back a query-filtered picker (base/head branch, review
+	// team), delivering each result only to the caller's own callback
+	// (not a Store-held result field or Event — see the package's own doc
+	// comment for why). Each has its own generation token so a stale
+	// answer for an abandoned keystroke's query is dropped rather than
+	// applied over a newer one; results are not cached (see the same doc
+	// comment).
+	branchSearchGen int
+	teamSearchGen   int
+
 	subscribers []func(Event)
 }
 
@@ -419,6 +478,7 @@ func New(deps Deps) *Store {
 		baseCtx:        context.Background(),
 		highlighter:    highlight.New(highlight.Options{}),
 		mentionable:    make(map[model.RepoRef]mentionableEntry),
+		repoMetadata:   make(map[model.RepoRef]repoMetadataEntry),
 	}
 	return s
 }

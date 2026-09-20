@@ -48,6 +48,7 @@ query PullRequestDetail(
       }
       labels(first: 20) {
         nodes {
+          id
           name
           color
         }
@@ -58,9 +59,11 @@ query PullRequestDetail(
           requestedReviewer {
             __typename
             ... on User {
+              id
               login
             }
             ... on Team {
+              id
               slug
             }
             ... on Bot {

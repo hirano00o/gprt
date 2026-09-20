@@ -30,8 +30,12 @@ func (f *rateLimitFragment) toModel() model.RateLimit {
 	return model.RateLimit{Remaining: f.Remaining, ResetAt: f.ResetAt, Known: true}
 }
 
-// labelNode mirrors one node of a pull request's "labels" connection.
+// labelNode mirrors one node of a pull request's "labels" connection. ID
+// is selected only by pull_request.graphql (not search.graphql), so a
+// label mapped from a search result decodes with ID left empty — see
+// model.Label's own doc comment for why only the detail query needs it.
 type labelNode struct {
+	ID    string `json:"id"`
 	Name  string `json:"name"`
 	Color string `json:"color"`
 }
@@ -39,13 +43,18 @@ type labelNode struct {
 // requestedReviewerFragment mirrors the "requestedReviewer" union on a
 // review request: __typename discriminates which of the other fields is
 // meaningful. Login carries the login for User, Bot, and Mannequin; Slug
-// carries the slug for Team. EnterpriseTeam is deliberately not given a
-// matching inline fragment in the query (see queries/search.graphql), so
-// it always decodes with Slug (and Login) empty even though __typename
+// carries the slug for Team; ID carries the node ID for User and Team only
+// (selected only by pull_request.graphql's reviewRequests connection, not
+// search.graphql or the timeline events' own requestedReviewer selections,
+// none of which need it — see model.Reviewer's own doc comment for why
+// only that one connection does). EnterpriseTeam is deliberately not given
+// a matching inline fragment in the query (see queries/search.graphql), so
+// it always decodes with Slug (and Login, ID) empty even though __typename
 // still correctly reports "EnterpriseTeam". A removed (null) reviewer
 // decodes with an empty TypeName and every other field zero too.
 type requestedReviewerFragment struct {
 	TypeName string `json:"__typename"`
+	ID       string `json:"id"`
 	Login    string `json:"login"`
 	Slug     string `json:"slug"`
 }
@@ -134,7 +143,7 @@ func mapPullRequest(host string, node searchPullRequestNode) model.PullRequest {
 
 	labels := make([]model.Label, 0, len(node.Labels.Nodes))
 	for _, l := range node.Labels.Nodes {
-		labels = append(labels, model.Label{Name: l.Name, Color: l.Color})
+		labels = append(labels, model.Label{ID: l.ID, Name: l.Name, Color: l.Color})
 	}
 
 	reviewers := make([]model.Reviewer, 0, len(node.ReviewRequests.Nodes))
@@ -189,12 +198,14 @@ func mapReviewer(rr reviewRequestNode) model.Reviewer {
 	switch rr.RequestedReviewer.TypeName {
 	case "User":
 		return model.Reviewer{
+			ID:          rr.RequestedReviewer.ID,
 			Login:       rr.RequestedReviewer.Login,
 			Kind:        model.ReviewerKindUser,
 			AsCodeOwner: rr.AsCodeOwner,
 		}
 	case "Team":
 		return model.Reviewer{
+			ID:          rr.RequestedReviewer.ID,
 			Login:       rr.RequestedReviewer.Slug,
 			Kind:        model.ReviewerKindTeam,
 			AsCodeOwner: rr.AsCodeOwner,

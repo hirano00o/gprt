@@ -58,6 +58,22 @@ const (
 	// cached or network result applied, or a switch to a pull request in a
 	// different repository whose own list has not resolved yet.
 	EventMentionableChanged
+	// EventRepositoryMetadataChanged fires whenever RepositoryInfo/Labels/
+	// Templates would return different data for Event.Repo: a cached or
+	// network result applied for that repository (see repository.go).
+	EventRepositoryMetadataChanged
+	// EventViewerRepositoriesChanged fires whenever ViewerRepositories()
+	// would return different data: a cached or network result applied
+	// (see viewer_repositories.go).
+	EventViewerRepositoriesChanged
+	// EventPullRequestCreated fires once CreatePullRequest's mutation
+	// succeeds in creating the pull request server-side (see
+	// pr_create.go). Event.Ref names the new pull request; the UI is
+	// expected to open it in response. Fired even when a follow-up
+	// RequestReviewers call for the same mutation then fails (see
+	// pr_create.go's own doc comment) - the pull request itself was still
+	// created, and its ref must not be lost.
+	EventPullRequestCreated
 )
 
 // Event is published synchronously, on the UI goroutine, by Subscribe
@@ -72,6 +88,12 @@ type Event struct {
 	Path string
 	// Message carries an EventNotice's informational text.
 	Message string
+	// Repo names the repository an EventRepositoryMetadataChanged result
+	// belongs to.
+	Repo *model.RepoRef
+	// Ref names the pull request an EventPullRequestCreated result
+	// belongs to.
+	Ref *model.PRRef
 }
 
 // Subscribe registers fn to be called for every Event published from now

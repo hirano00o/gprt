@@ -725,6 +725,70 @@ func (f *fakeGitHub) SetError(query string, err error) {
 	f.errs[query] = err
 }
 
+// M5 repository metadata / branch / team / edit-merge-create reads and
+// mutations (see internal/store's repository.go, viewer_repositories.go,
+// search.go, pr_edit.go, pr_create.go). No UI code drives these yet (the
+// M5 UI slice is a later milestone), so these stubs exist only to satisfy
+// store.GitHub; they return the interface's zero values unconditionally.
+
+func (f *fakeGitHub) Repository(context.Context, model.RepoRef) (model.RepositoryInfo, model.RateLimit, error) {
+	return model.RepositoryInfo{}, model.RateLimit{}, nil
+}
+
+func (f *fakeGitHub) Labels(context.Context, model.RepoRef) ([]model.Label, model.RateLimit, error) {
+	return nil, model.RateLimit{}, nil
+}
+
+func (f *fakeGitHub) PullRequestTemplates(context.Context, model.RepoRef) ([]model.PullRequestTemplate, model.RateLimit, error) {
+	return nil, model.RateLimit{}, nil
+}
+
+func (f *fakeGitHub) ViewerRepositories(context.Context, int) ([]model.RepositorySummary, model.RateLimit, error) {
+	return nil, model.RateLimit{}, nil
+}
+
+func (f *fakeGitHub) Branches(context.Context, model.RepoRef, string, int) ([]model.Branch, model.RateLimit, error) {
+	return nil, model.RateLimit{}, nil
+}
+
+func (f *fakeGitHub) Teams(context.Context, string, string, int) ([]model.Team, model.RateLimit, error) {
+	return nil, model.RateLimit{}, nil
+}
+
+func (f *fakeGitHub) UpdatePullRequest(context.Context, string, gh.UpdatePullRequestInput) (model.PullRequest, model.RateLimit, error) {
+	return model.PullRequest{}, model.RateLimit{}, nil
+}
+
+func (f *fakeGitHub) RequestReviewers(context.Context, string, []string, []string, bool) ([]model.Reviewer, model.RateLimit, error) {
+	return nil, model.RateLimit{}, nil
+}
+
+func (f *fakeGitHub) MarkReadyForReview(context.Context, string) (bool, model.RateLimit, error) {
+	return false, model.RateLimit{}, nil
+}
+
+func (f *fakeGitHub) ConvertToDraft(context.Context, string) (bool, model.RateLimit, error) {
+	return true, model.RateLimit{}, nil
+}
+
+func (f *fakeGitHub) MergePullRequest(
+	context.Context, string, model.MergeMethod, *string, *string, string,
+) (model.PullRequest, model.RateLimit, error) {
+	return model.PullRequest{}, model.RateLimit{}, nil
+}
+
+func (f *fakeGitHub) ClosePullRequest(context.Context, string) (model.PRState, model.RateLimit, error) {
+	return model.PRStateClosed, model.RateLimit{}, nil
+}
+
+func (f *fakeGitHub) ReopenPullRequest(context.Context, string) (model.PRState, model.RateLimit, error) {
+	return model.PRStateOpen, model.RateLimit{}, nil
+}
+
+func (f *fakeGitHub) CreatePullRequest(context.Context, gh.CreatePullRequestInput) (model.PullRequest, model.RateLimit, error) {
+	return model.PullRequest{}, model.RateLimit{}, nil
+}
+
 func fixtureRef(number int) model.PRRef {
 	return model.PRRef{Repo: model.RepoRef{Host: "github.com", Owner: "acme", Name: "widgets"}, Number: number}
 }

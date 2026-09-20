@@ -33,7 +33,7 @@ func mapPullRequestDetail(host string, node pullRequestDetailNode, viewerLogin s
 
 	labels := make([]model.Label, 0, len(node.Labels.Nodes))
 	for _, l := range node.Labels.Nodes {
-		labels = append(labels, model.Label{Name: l.Name, Color: l.Color})
+		labels = append(labels, model.Label{ID: l.ID, Name: l.Name, Color: l.Color})
 	}
 
 	reviewers := make([]model.Reviewer, 0, len(node.ReviewRequests.Nodes))

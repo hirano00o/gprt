@@ -8,6 +8,7 @@ package ui
 
 import (
 	"testing"
+	"time"
 
 	"github.com/gdamore/tcell/v2"
 
@@ -231,13 +232,21 @@ func TestSubmitReviewPrefillsFromPendingReviewBody(t *testing.T) {
 	}
 }
 
-// TestSubmitReviewRefreshesListOnSuccess covers a successful submit also
-// refreshing the PR list (Store.Refresh, the same non-forced entry point
-// the auto-refresh ticker uses) so review-decision/state columns update.
+// TestSubmitReviewRefreshesListOnSuccess covers a successful submit
+// refreshing the PR list exactly once — driven by Store's own
+// mutation.refreshList (finishMutation calling Refresh, the same
+// non-forced entry point the auto-refresh ticker uses), not additionally
+// by the UI itself: composer.go used to also call Store.Refresh() after a
+// successful review-body send, which — since finishMutation's own call
+// and composer's onMutationChanged handler both run synchronously inside
+// the same Event emission — started a second, redundant list generation
+// on top of the store's own, doubling every section's SearchPullRequests
+// call for no benefit.
 func TestSubmitReviewRefreshesListOnSuccess(t *testing.T) {
 	app, _, fake, _ := newTestApp(t, nil)
 	ref := fixtureRef(1)
 	openDetailForComposer(t, app, fake, fixtureDetailPR(ref))
+	sectionCount := query(app.app, func() int { return len(app.deps.Store.Sections()) })
 	before := query(app.app, func() int { return fake.SearchCalls() })
 
 	sendRune(app.app, 'S')
@@ -251,7 +260,19 @@ func TestSubmitReviewRefreshesListOnSuccess(t *testing.T) {
 	sendSpecial(app.app, tcell.KeyEnter)
 
 	waitFor(t, app.app, func() bool { return len(fake.AddReviewNowWithEventCalls()) == 1 })
-	waitFor(t, app.app, func() bool { return fake.SearchCalls() > before })
+	waitFor(t, app.app, func() bool { return fake.SearchCalls()-before >= sectionCount })
+
+	// Let a second, unwanted refresh (the regression this test guards
+	// against) have time to happen before asserting an exact count: both
+	// refreshes, when the bug is present, are triggered synchronously
+	// within the same Event emission, so their fetch goroutines start
+	// within microseconds of each other — a short, generous settle window
+	// is enough to distinguish "one refresh" from "two" reliably against
+	// this in-memory fake (no real network latency involved).
+	time.Sleep(100 * time.Millisecond)
+	if got := fake.SearchCalls() - before; got != sectionCount {
+		t.Fatalf("SearchPullRequests calls after a successful submit = %d, want exactly %d (a single list refresh)", got, sectionCount)
+	}
 }
 
 // TestSubmitReviewChoiceCallbackRefusesWhenTargetPRIsNoLongerCurrent

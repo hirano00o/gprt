@@ -1,0 +1,29 @@
+mutation UpdatePullRequest(
+  $id: ID!
+  $title: String
+  $body: String
+  $baseRefName: String
+  $labelIds: [ID!]
+) {
+  updatePullRequest(
+    input: { pullRequestId: $id, title: $title, body: $body, baseRefName: $baseRefName, labelIds: $labelIds }
+  ) {
+    pullRequest {
+      title
+      body
+      baseRefName
+      labels(first: 20) {
+        nodes {
+          id
+          name
+          color
+        }
+      }
+      updatedAt
+    }
+  }
+  rateLimit {
+    remaining
+    resetAt
+  }
+}

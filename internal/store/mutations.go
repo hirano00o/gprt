@@ -120,6 +120,24 @@ type mutation struct {
 	// invalidateAndRefetch and finishMutation's own doc comments).
 	prepare func() error
 	run     func(ctx context.Context) (apply func(), err error)
+	// unscoped marks a mutation that does not target the currently open
+	// pull request at all (M5, CreatePullRequest only: there is nothing
+	// "current" yet for a pull request that does not exist until this
+	// mutation succeeds). finishMutation always invokes an unscoped
+	// mutation's apply on success (there is no "still current" ref to gate
+	// it on, unlike every other mutation) and never calls
+	// invalidateAndRefetch for it (there is nothing server-side yet to
+	// invalidate or refetch).
+	unscoped bool
+	// refreshList marks a mutation whose successful completion also
+	// starts the list's own non-forced refresh (finishMutation calls
+	// Refresh directly — the same entry point the auto-refresh ticker
+	// uses), for a mutation that changes state the list itself displays
+	// (merge/close/reopen/draft/title/labels/reviewers/submit review, and
+	// pull request creation): the pull request's row would otherwise show
+	// stale state (or, for creation, not appear at all) until the next
+	// scheduled refresh.
+	refreshList bool
 }
 
 // Mutating reports whether a mutation is currently running (as opposed to
@@ -245,7 +263,32 @@ func (s *Store) DeleteComment(id string) {
 // the queue and starts it if nothing else is running. Callers have
 // already verified a pull request is open (s.current != nil).
 func (s *Store) enqueueMutation(name string, run func(context.Context) (func(), error)) {
-	s.mutationQueue = append(s.mutationQueue, mutation{name: name, ref: *s.current, run: run})
+	s.enqueueMutationEntry(mutation{name: name, ref: *s.current, run: run})
+}
+
+// enqueueMutationWithListRefresh is enqueueMutation's counterpart for a
+// state-changing mutation whose success should also trigger the list's own
+// refresh (see mutation.refreshList's doc comment) — used by the M5
+// pull-request-edit/merge/close/reopen/draft operations (pr_edit.go),
+// none of which need enqueuePreparedMutation's late-bound prepare step.
+func (s *Store) enqueueMutationWithListRefresh(name string, run func(context.Context) (func(), error)) {
+	s.enqueueMutationEntry(mutation{name: name, ref: *s.current, run: run, refreshList: true})
+}
+
+// enqueueUnscopedMutation appends a mutation that does not target the
+// currently open pull request at all (see mutation.unscoped's doc
+// comment) — used only by CreatePullRequest (pr_create.go), which always
+// also refreshes the list on success (the newly created pull request must
+// appear in it).
+func (s *Store) enqueueUnscopedMutation(name string, run func(context.Context) (func(), error)) {
+	s.enqueueMutationEntry(mutation{name: name, unscoped: true, refreshList: true, run: run})
+}
+
+// enqueueMutationEntry appends m to the queue and starts it if nothing else
+// is running. The shared tail of every enqueueMutation*/enqueuePreparedMutation*
+// variant above and below.
+func (s *Store) enqueueMutationEntry(m mutation) {
+	s.mutationQueue = append(s.mutationQueue, m)
 	s.startNextMutation()
 }
 
@@ -267,8 +310,18 @@ func (s *Store) enqueueMutation(name string, run func(context.Context) (func(), 
 // call GitHub. Callers have already verified a pull request is open
 // (s.current != nil), matching enqueueMutation.
 func (s *Store) enqueuePreparedMutation(name string, prepare func() error, run func(context.Context) (func(), error)) {
-	s.mutationQueue = append(s.mutationQueue, mutation{name: name, ref: *s.current, prepare: prepare, run: run})
-	s.startNextMutation()
+	s.enqueueMutationEntry(mutation{name: name, ref: *s.current, prepare: prepare, run: run})
+}
+
+// enqueuePreparedMutationWithListRefresh is enqueuePreparedMutation's
+// counterpart for a state-changing mutation whose success should also
+// trigger the list's own refresh (see mutation.refreshList's doc comment)
+// — used by Merge (pr_edit.go, whose prepare captures the pull request's
+// HeadOID at run-start time) and SubmitReview (review.go).
+func (s *Store) enqueuePreparedMutationWithListRefresh(
+	name string, prepare func() error, run func(context.Context) (func(), error),
+) {
+	s.enqueueMutationEntry(mutation{name: name, ref: *s.current, prepare: prepare, run: run, refreshList: true})
 }
 
 // startNextMutation starts the queue's head mutation if none is already
@@ -388,7 +441,7 @@ func (s *Store) finishMutation(m mutation, apply func(), err error, cancelled, s
 			s.recomputeLastErr()
 			s.deps.Logger.Error("mutation failed", "mutation", m.name, "ref", m.ref.Key(), "err", err)
 			s.emit(Event{Kind: EventError, Err: err})
-			if sent {
+			if sent && !m.unscoped {
 				s.invalidateAndRefetch(m.ref)
 			}
 		}
@@ -404,11 +457,25 @@ func (s *Store) finishMutation(m mutation, apply func(), err error, cancelled, s
 	s.mutationErr = nil
 	s.recomputeLastErr()
 
-	current := s.current != nil && *s.current == m.ref
+	// An unscoped mutation (CreatePullRequest) has no "current ref" to
+	// gate its apply on — the pull request it targets did not exist until
+	// this very call succeeded — so its apply always runs.
+	current := m.unscoped || (s.current != nil && *s.current == m.ref)
 	if current && apply != nil {
 		apply()
 	}
-	s.invalidateAndRefetch(m.ref)
+	if !m.unscoped {
+		s.invalidateAndRefetch(m.ref)
+	}
+	if m.refreshList {
+		// The same non-forced entry point the auto-refresh ticker uses
+		// (see mutation.refreshList's doc comment): a state-changing
+		// mutation's own optimistic apply above already updated the
+		// current pull request, but the list's rows for it (and, for
+		// CreatePullRequest, the brand new row) would otherwise stay
+		// stale until the next scheduled refresh.
+		s.Refresh()
+	}
 
 	s.emit(Event{Kind: EventMutationChanged})
 	s.startNextMutation()

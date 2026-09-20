@@ -33,14 +33,14 @@
         ],
         "labels": {
           "nodes": [
-            { "name": "bug", "color": "d73a4a" },
-            { "name": "enhancement", "color": "a2eeef" }
+            { "id": "LA_bug", "name": "bug", "color": "d73a4a" },
+            { "id": "LA_enh", "name": "enhancement", "color": "a2eeef" }
           ]
         },
         "reviewRequests": {
           "nodes": [
-            { "asCodeOwner": true, "requestedReviewer": { "__typename": "User", "login": "reviewer1" } },
-            { "asCodeOwner": false, "requestedReviewer": { "__typename": "Team", "slug": "core-team" } }
+            { "asCodeOwner": true, "requestedReviewer": { "__typename": "User", "id": "U_reviewer1", "login": "reviewer1" } },
+            { "asCodeOwner": false, "requestedReviewer": { "__typename": "Team", "id": "T_core", "slug": "core-team" } }
           ]
         },
         "latestReviews": {

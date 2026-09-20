@@ -1,0 +1,11 @@
+mutation ConvertPullRequestToDraft($id: ID!) {
+  convertPullRequestToDraft(input: { pullRequestId: $id }) {
+    pullRequest {
+      isDraft
+    }
+  }
+  rateLimit {
+    remaining
+    resetAt
+  }
+}
