@@ -57,16 +57,24 @@ type searchCall struct {
 	cursor string
 }
 
-// fakeGitHub is a test double for the GitHub interface. viewerFunc and
-// searchFunc default to returning zero values with no error; tests override
-// either to control timing and results.
+// detailCall records one PullRequest invocation for assertions.
+type detailCall struct {
+	ref         model.PRRef
+	viewerLogin string
+}
+
+// fakeGitHub is a test double for the GitHub interface. viewerFunc,
+// searchFunc, and detailFunc default to returning zero values with no
+// error; tests override any of them to control timing and results.
 type fakeGitHub struct {
 	mu sync.Mutex
 
 	viewerFunc func(ctx context.Context) (model.User, model.RateLimit, error)
 	searchFunc func(ctx context.Context, query, cursor string) (gh.SearchResult, error)
+	detailFunc func(ctx context.Context, ref model.PRRef, viewerLogin string) (gh.DetailResult, error)
 
-	calls []searchCall
+	calls       []searchCall
+	detailCalls []detailCall
 }
 
 func newFakeGitHub() *fakeGitHub {
@@ -77,6 +85,9 @@ func newFakeGitHub() *fakeGitHub {
 		searchFunc: func(context.Context, string, string) (gh.SearchResult, error) {
 			return gh.SearchResult{}, nil
 		},
+		detailFunc: func(context.Context, model.PRRef, string) (gh.DetailResult, error) {
+			return gh.DetailResult{}, nil
+		},
 	}
 }
 
@@ -85,7 +96,7 @@ func (f *fakeGitHub) Viewer(ctx context.Context) (model.User, model.RateLimit, e
 	// after releasing it: fn can itself block for an arbitrary time (some
 	// tests deliberately do this to control fetch ordering), and holding
 	// the lock across that call would deadlock a test goroutine trying to
-	// reassign viewerFunc/searchFunc in the meantime.
+	// reassign viewerFunc/searchFunc/detailFunc in the meantime.
 	f.mu.Lock()
 	fn := f.viewerFunc
 	f.mu.Unlock()
@@ -100,12 +111,26 @@ func (f *fakeGitHub) SearchPullRequests(ctx context.Context, query, cursor strin
 	return fn(ctx, query, cursor)
 }
 
+func (f *fakeGitHub) PullRequest(ctx context.Context, ref model.PRRef, viewerLogin string) (gh.DetailResult, error) {
+	f.mu.Lock()
+	f.detailCalls = append(f.detailCalls, detailCall{ref: ref, viewerLogin: viewerLogin})
+	fn := f.detailFunc
+	f.mu.Unlock()
+	return fn(ctx, ref, viewerLogin)
+}
+
 func (f *fakeGitHub) searchCalls() []searchCall {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	out := make([]searchCall, len(f.calls))
 	copy(out, f.calls)
 	return out
+}
+
+func (f *fakeGitHub) detailCallCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.detailCalls)
 }
 
 // setSearchFunc reassigns searchFunc under the lock. Most tests reassign
@@ -121,6 +146,14 @@ func (f *fakeGitHub) setSearchFunc(fn func(ctx context.Context, query, cursor st
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.searchFunc = fn
+}
+
+// setDetailFunc reassigns detailFunc under the lock, for the same reason
+// setSearchFunc does.
+func (f *fakeGitHub) setDetailFunc(fn func(ctx context.Context, ref model.PRRef, viewerLogin string) (gh.DetailResult, error)) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.detailFunc = fn
 }
 
 // newTestStore builds a Store wired to a fakeGitHub and fakeDispatcher over

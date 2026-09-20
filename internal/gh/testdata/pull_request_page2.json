@@ -1,0 +1,117 @@
+{
+  "data": {
+    "repository": {
+      "pullRequest": {
+        "id": "PR_kwDOAbCdef",
+        "number": 42,
+        "title": "Add PR detail query",
+        "body": "This PR adds the detail query.",
+        "state": "OPEN",
+        "isDraft": false,
+        "mergeable": "MERGEABLE",
+        "mergeStateStatus": "CLEAN",
+        "reviewDecision": "REVIEW_REQUIRED",
+        "author": { "login": "octocat" },
+        "repository": { "id": "R_kgDOAbCdef", "nameWithOwner": "acme/widgets" },
+        "baseRefName": "main",
+        "headRefName": "feature-x",
+        "headRefOid": "abc123def456",
+        "additions": 120,
+        "deletions": 30,
+        "changedFiles": 5,
+        "createdAt": "2026-09-01T10:00:00Z",
+        "updatedAt": "2026-09-10T15:30:00Z",
+        "url": "https://example.com/acme/widgets/pull/42",
+        "viewerCanUpdate": true,
+        "viewerDidAuthor": true,
+        "viewerCanClose": true,
+        "viewerCanReopen": false,
+        "viewerCanReact": true,
+        "reactionGroups": [],
+        "labels": { "nodes": [] },
+        "reviewRequests": { "nodes": [] },
+        "latestReviews": { "nodes": [] },
+        "commits": {
+          "nodes": [
+            {
+              "commit": {
+                "oid": "abc123def456",
+                "statusCheckRollup": {
+                  "state": "FAILURE",
+                  "contexts": {
+                    "pageInfo": { "hasNextPage": false, "endCursor": "checks-c2" },
+                    "nodes": [
+                      {
+                        "__typename": "CheckRun",
+                        "name": "deploy",
+                        "status": "IN_PROGRESS",
+                        "conclusion": "",
+                        "detailsUrl": "https://example.com/checks/2",
+                        "isRequired": false,
+                        "checkSuite": { "workflowRun": null }
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "reviewThreads": {
+          "pageInfo": { "hasNextPage": false, "endCursor": "threads-c2" },
+          "nodes": [
+            {
+              "id": "RT_2",
+              "isResolved": true,
+              "isOutdated": true,
+              "path": "README.md",
+              "line": 0,
+              "startLine": 0,
+              "diffSide": "RIGHT",
+              "startDiffSide": "RIGHT",
+              "subjectType": "FILE",
+              "viewerCanReply": false,
+              "viewerCanResolve": false,
+              "viewerCanUnresolve": true,
+              "comments": {
+                "nodes": [
+                  {
+                    "id": "RC_3",
+                    "author": { "login": "reviewer1" },
+                    "body": "File-level nit",
+                    "createdAt": "2026-09-07T00:00:00Z",
+                    "state": "SUBMITTED",
+                    "url": "https://example.com/rc/3",
+                    "reactionGroups": [],
+                    "viewerCanUpdate": false,
+                    "viewerCanDelete": false,
+                    "pullRequestReview": { "id": "PRR_1" }
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "timelineItems": {
+          "pageInfo": { "hasNextPage": false, "endCursor": "timeline-c2" },
+          "nodes": [
+            {
+              "__typename": "IssueComment",
+              "id": "IC_2",
+              "author": { "login": "reviewer1" },
+              "body": "Second comment",
+              "createdAt": "2026-09-08T00:00:00Z",
+              "updatedAt": "2026-09-08T00:00:00Z",
+              "url": "https://example.com/ic/2",
+              "reactionGroups": [],
+              "viewerCanUpdate": false,
+              "viewerCanDelete": false
+            }
+          ]
+        },
+        "reviews": { "nodes": [{ "id": "PRV_1", "body": "Draft comments", "state": "PENDING" }] }
+      }
+    },
+    "rateLimit": { "remaining": 4899, "resetAt": "2026-09-11T13:00:00Z" }
+  }
+}

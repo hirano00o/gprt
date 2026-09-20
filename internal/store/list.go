@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"time"
 
 	"github.com/hirano00o/gprt/internal/cache"
 	"github.com/hirano00o/gprt/internal/gh"
@@ -34,13 +35,19 @@ func (s *Store) Start(ctx context.Context) {
 	s.LoadList(false)
 }
 
-// Stop cancels every in-flight list fetch. It does not wait for the
+// Stop cancels every in-flight list fetch and the current pull request's
+// in-flight detail fetch, if any (unlike ClosePR, it leaves current/
+// currentPR/DetailState untouched — Stop is about halting background
+// work, not closing the pull request view). It does not wait for the
 // goroutines it cancels to exit: per docs/DESIGN.md's concurrency rules,
 // nothing may block on a store-started goroutine after the caller decides
 // to stop.
 func (s *Store) Stop() {
 	if s.cancelList != nil {
 		s.cancelList()
+	}
+	if s.detailCancel != nil {
+		s.detailCancel()
 	}
 }
 
@@ -161,6 +168,42 @@ func (s *Store) applyViewerResult(user model.User, rl model.RateLimit, err error
 	if mismatch {
 		s.discardAllSectionItems()
 		s.LoadList(true)
+		if s.current != nil {
+			// The pull request currently open may have been fetched (or
+			// its cache read applied) under the seeded, now-confirmed-
+			// wrong login: viewer-scoped fields (PendingReview,
+			// ViewerCanUpdate/Close/Reopen/React) could belong to the
+			// wrong account. Discard it immediately, the same way
+			// discardAllSectionItems does for the list, rather than
+			// leaving it on screen (even marked stale) until ReloadPR's
+			// fetch completes.
+			s.currentPR = nil
+			s.detailFetchedAt = time.Time{}
+			s.emit(Event{Kind: EventPRChanged})
+			s.ReloadPR()
+		}
+	} else if s.current != nil {
+		// The viewer login just became known (the common case: OpenPR
+		// was called before Start's own viewer fetch resolved, so the
+		// pull request's first fetch ran with an empty $viewer) or was
+		// reconfirmed unchanged. Either way, refresh the open pull
+		// request now that the login is trustworthy: its pending-review
+		// lookup and viewer-scoped flags need the real login, not "" or
+		// a stale guess.
+		//
+		// startDetailFetch is called directly here, not RefreshPR:
+		// RefreshPR no-ops while a detail fetch is already in flight (by
+		// design, so the auto-refresh ticker never duplicates one), but
+		// an in-flight fetch at exactly this moment is very likely the
+		// pull request's own first fetch — the one started under the
+		// stale/empty login OpenPR saw before the viewer resolved, i.e.
+		// precisely the fetch that needs restarting, not skipping.
+		// startDetailFetch always cancels-and-restarts under a new
+		// generation (the same way ReloadPR already does, unconditionally,
+		// for the mismatch branch above), so the wrong-$viewer fetch's
+		// eventual result is dropped by the generation check in
+		// fetchDetail instead of being applied.
+		s.startDetailFetch(false)
 	}
 }
 
@@ -237,11 +280,12 @@ func (s *Store) Refresh() {
 	s.startList(false)
 }
 
-// Reload discards any cached data and re-fetches page 1 of every section
-// from the network only (used by the "R" key): it invalidates the on-disk
-// search cache for the current login before starting the fetches, so a
-// later LoadList's cache-first read can never resurrect the data Reload
-// was asked to throw away. Marking every section stale first means the
+// Reload discards any cached data and re-fetches page 1 of every section,
+// and the current pull request's detail (if one is open), from the
+// network only (used by the "R" key): it invalidates the on-disk search
+// cache for the current login before starting the fetches, so a later
+// LoadList's cache-first read can never resurrect the data Reload was
+// asked to throw away. Marking every section stale first means the
 // incoming page 1 replaces its items outright (see applyFetchResult)
 // instead of automatically chaining fetches to restore a previous
 // multi-page depth, the way a plain Refresh does: Reload is a deliberate,
@@ -250,6 +294,7 @@ func (s *Store) Reload() {
 	s.invalidateSearchCache()
 	s.markSectionsStale()
 	s.startList(false)
+	s.ReloadPR()
 }
 
 // invalidateSearchCache removes every cached search/list entry for the
@@ -548,10 +593,11 @@ func (s *Store) applyFetchResult(gen, i int, cursor string, res gh.SearchResult,
 	}
 }
 
-// recomputeLastErr sets lastErr to viewerLastErr if it is set, otherwise
-// to the first section (in priority order) with a standing error,
-// otherwise nil. It is called after every viewer or section fetch
-// outcome instead of assigning lastErr directly, so a success clears it
+// recomputeLastErr sets lastErr to viewerLastErr if it is set, otherwise to
+// detailErr if it is set, otherwise to the first section (in priority
+// order) with a standing error, otherwise nil. It is called after every
+// viewer, detail, or section fetch outcome instead of assigning lastErr
+// directly, so a success clears it
 // (or an error sets it) as a pure function of the current, persistent
 // per-source error state rather than "whichever dispatch happened to run
 // last": the viewer fetch and each section's fetch are independent,
@@ -567,6 +613,14 @@ func (s *Store) recomputeLastErr() {
 	}
 	if s.viewerLastErr != nil {
 		s.lastErr = s.viewerLastErr
+		return
+	}
+	if s.detailErr != nil {
+		// Ranked above section errors: the current pull request's detail
+		// is whatever the user is actively looking at, so its own
+		// standing error is more immediately relevant than an unrelated
+		// list section's.
+		s.lastErr = s.detailErr
 		return
 	}
 	for _, sec := range s.sections {

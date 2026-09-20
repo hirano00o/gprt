@@ -1,0 +1,51 @@
+{
+  "data": {
+    "repository": {
+      "pullRequest": {
+        "id": "PR_min",
+        "number": 7,
+        "title": "Minimal PR",
+        "body": "",
+        "state": "OPEN",
+        "isDraft": true,
+        "mergeable": "UNKNOWN",
+        "mergeStateStatus": "DRAFT",
+        "reviewDecision": "",
+        "author": { "login": "someone" },
+        "repository": { "id": "R_min", "nameWithOwner": "acme/empty" },
+        "baseRefName": "main",
+        "headRefName": "wip",
+        "headRefOid": "deadbeef",
+        "additions": 0,
+        "deletions": 0,
+        "changedFiles": 0,
+        "createdAt": "2026-09-01T00:00:00Z",
+        "updatedAt": "2026-09-01T00:00:00Z",
+        "url": "https://example.com/acme/empty/pull/7",
+        "viewerCanUpdate": false,
+        "viewerDidAuthor": false,
+        "viewerCanClose": false,
+        "viewerCanReopen": false,
+        "viewerCanReact": false,
+        "reactionGroups": [],
+        "labels": { "nodes": [] },
+        "reviewRequests": {
+          "nodes": [{ "asCodeOwner": false, "requestedReviewer": null }]
+        },
+        "latestReviews": { "nodes": [] },
+        "commits": { "nodes": [{ "commit": { "oid": "deadbeef", "statusCheckRollup": null } }] },
+        "reviewThreads": { "pageInfo": { "hasNextPage": false, "endCursor": "" }, "nodes": [] },
+        "timelineItems": { "pageInfo": { "hasNextPage": false, "endCursor": "" }, "nodes": [] },
+        "reviews": { "nodes": [] }
+      }
+    },
+    "rateLimit": { "remaining": 5000, "resetAt": "2026-09-11T13:00:00Z" }
+  },
+  "errors": [
+    {
+      "type": "FORBIDDEN",
+      "path": ["repository", "pullRequest", "reviewRequests", "nodes", 0, "requestedReviewer"],
+      "message": "You do not have permission to view this team"
+    }
+  ]
+}
