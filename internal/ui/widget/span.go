@@ -8,8 +8,9 @@
 package widget
 
 import (
+	"github.com/clipperhouse/displaywidth"
+	"github.com/clipperhouse/uax29/v2/graphemes"
 	"github.com/gdamore/tcell/v2"
-	"github.com/rivo/uniseg"
 )
 
 // Span is a run of text sharing one style: the basic unit gprt's widgets
@@ -23,7 +24,7 @@ type Span struct {
 func SpanWidth(spans []Span) int {
 	total := 0
 	for _, s := range spans {
-		total += uniseg.StringWidth(s.Text)
+		total += displaywidth.String(s.Text)
 	}
 	return total
 }
@@ -55,14 +56,15 @@ func DrawSpans(screen tcell.Screen, x, y, maxWidth int, spans []Span) int {
 	lastStyle := tcell.StyleDefault
 	for _, s := range spans {
 		lastStyle = s.Style
-		g := uniseg.NewGraphemes(s.Text)
-		for g.Next() {
-			width := g.Width()
+		it := graphemes.FromString(s.Text)
+		for it.Next() {
+			cluster := it.Value()
+			width := displaywidth.String(cluster)
 			if width > 0 && cursor+width > limit {
 				screen.SetContent(cursor, y, ellipsisRune, nil, lastStyle)
 				return cursor + 1 - x
 			}
-			runes := g.Runes()
+			runes := []rune(cluster)
 			screen.SetContent(cursor, y, runes[0], runes[1:], s.Style)
 			cursor += width
 		}
@@ -78,11 +80,12 @@ func DrawSpans(screen tcell.Screen, x, y, maxWidth int, spans []Span) int {
 // the display width consumed.
 func drawText(screen tcell.Screen, x, y int, s string, style tcell.Style) int {
 	cursor := x
-	g := uniseg.NewGraphemes(s)
-	for g.Next() {
-		runes := g.Runes()
+	it := graphemes.FromString(s)
+	for it.Next() {
+		cluster := it.Value()
+		runes := []rune(cluster)
 		screen.SetContent(cursor, y, runes[0], runes[1:], style)
-		cursor += g.Width()
+		cursor += displaywidth.String(cluster)
 	}
 	return cursor - x
 }

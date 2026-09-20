@@ -12,7 +12,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/rivo/uniseg"
+	"github.com/clipperhouse/displaywidth"
+	"github.com/clipperhouse/uax29/v2/graphemes"
 
 	"github.com/hirano00o/gprt/internal/model"
 )
@@ -220,12 +221,9 @@ func ExpandTabs(s string, width int) string {
 
 	var b strings.Builder
 	col := 0
-	state := -1
-	rest := s
-	for len(rest) > 0 {
-		var cluster string
-		var w int
-		cluster, rest, w, state = uniseg.FirstGraphemeClusterInString(rest, state)
+	it := graphemes.FromString(s)
+	for it.Next() {
+		cluster := it.Value()
 		if cluster == "\t" {
 			spaces := width - (col % width)
 			b.WriteString(strings.Repeat(" ", spaces))
@@ -233,7 +231,7 @@ func ExpandTabs(s string, width int) string {
 			continue
 		}
 		b.WriteString(cluster)
-		col += w
+		col += displaywidth.String(cluster)
 	}
 	return b.String()
 }

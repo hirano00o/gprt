@@ -3,8 +3,9 @@ package editor
 import (
 	"unicode"
 
+	"github.com/clipperhouse/displaywidth"
+	"github.com/clipperhouse/uax29/v2/graphemes"
 	"github.com/gdamore/tcell/v2"
-	"github.com/rivo/uniseg"
 )
 
 // modCtrl is tcell.ModCtrl, aliased locally so files in this package do not
@@ -26,15 +27,20 @@ type cluster struct {
 // of a returned cluster's start/end — all grapheme-cluster boundaries.
 func clusters(s string) []cluster {
 	var out []cluster
-	g := uniseg.NewGraphemes(s)
-	for g.Next() {
-		start, end := g.Positions()
-		runes := g.Runes()
+	it := graphemes.FromString(s)
+	for it.Next() {
+		value := it.Value()
 		var first rune
-		if len(runes) > 0 {
-			first = runes[0]
+		for _, r := range value {
+			first = r
+			break
 		}
-		out = append(out, cluster{start: start, end: end, first: first, width: g.Width()})
+		out = append(out, cluster{
+			start: it.Start(),
+			end:   it.End(),
+			first: first,
+			width: displaywidth.String(value),
+		})
 	}
 	return out
 }
