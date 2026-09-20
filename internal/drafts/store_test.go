@@ -201,6 +201,33 @@ func TestStore_Count(t *testing.T) {
 	}
 }
 
+// TestStore_Count_DoesNotDecodeFiles asserts Count is a plain directory
+// listing, not len(List(pr)): a corrupt draft file makes List fail to
+// decode it (and report the aggregated error), but Count must still
+// count it — and, crucially, without returning that decode error at
+// all — since gprt's own status bar calls Count on every render and
+// cannot afford to read and unmarshal every draft file that often.
+func TestStore_Count_DoesNotDecodeFiles(t *testing.T) {
+	s := newTestStore(t)
+	pr := "github.com/o/r#1"
+
+	if err := s.Save(Key{PR: pr, Kind: KindComment, Anchor: "good"}, "text"); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	corruptPath := filepath.Join(s.prDir(pr), "corrupt.json")
+	if err := os.WriteFile(corruptPath, []byte("{not valid json"), 0o600); err != nil {
+		t.Fatalf("write corrupt file: %v", err)
+	}
+
+	n, err := s.Count(pr)
+	if err != nil {
+		t.Fatalf("Count() error = %v, want nil (a corrupt file must not surface a decode error here)", err)
+	}
+	if n != 2 {
+		t.Fatalf("Count() = %d, want 2 (both draft files present, decodable or not)", n)
+	}
+}
+
 func TestStore_Permissions(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("POSIX permission bits are not meaningful on Windows")

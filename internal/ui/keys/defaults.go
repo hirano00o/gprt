@@ -63,8 +63,13 @@ var defaultTable = []defaultEntry{
 
 	{[]Context{ContextGlobal}, "<C-w>h", ActionGlobalFocusLeft},
 	{[]Context{ContextGlobal}, "<C-w>l", ActionGlobalFocusRight},
-	{[]Context{ContextComposer}, "<C-w>j", ActionGlobalFocusDown},
-	{[]Context{ContextComposer}, "<C-w>k", ActionGlobalFocusUp},
+	// Both directions toggle focus between the composer and whichever
+	// detail-column pane it was opened over: bound in ContextComposer so
+	// either key leaves it, and in every pane the composer can be opened
+	// from so either key also *enters* it (a no-op when no composer is
+	// open at all — see App.toggleComposerFocus).
+	{[]Context{ContextComposer, ContextDetail, ContextFiles, ContextDiff}, "<C-w>j", ActionGlobalFocusDown},
+	{[]Context{ContextComposer, ContextDetail, ContextFiles, ContextDiff}, "<C-w>k", ActionGlobalFocusUp},
 
 	// Bound in ContextFiles/ContextDiff too (not just ContextDetail): the
 	// Files tab's tree and diff panes are their own contexts, but tab

@@ -95,11 +95,17 @@ func (sb *statusBarView) Draw(screen tcell.Screen) {
 // hintForFocus returns the left-hand key hint text for whatever pane
 // currently has focus.
 func (a *App) hintForFocus() string {
+	// Checked before the switch, not as one of its cases: GetFocus()
+	// never equals a.composerEditor itself — see Editor.HasFocus's own
+	// doc comment.
+	if a.composerEditor != nil && a.composerEditor.HasFocus() {
+		return "Ctrl-w j/k switch focus  Ctrl-w h/l list/detail  Ctrl-c quit"
+	}
 	switch a.app.GetFocus() {
 	case a.listView:
 		return "j/k move  gg/G top/bottom  / filter  Enter open  o browser  R reload  ? help  q quit"
 	case a.prView:
-		return "j/k move  gg/G top/bottom  o browser  gt/Ctrl-l next tab  gT/Ctrl-h prev tab  Ctrl-w h back  ? help  q quit"
+		return "j/k move  gg/G top/bottom  c comment  e/d edit/delete own  o browser  gt/Ctrl-l next tab  gT/Ctrl-h prev tab  Ctrl-w h back  ? help  q quit"
 	case a.treeView:
 		return "j/k move  h/l collapse/expand  Enter/l open  Ctrl-w t hide tree  Ctrl-w l diff  gt/Ctrl-l next tab  ? help  q quit"
 	case a.diffView:
@@ -136,6 +142,9 @@ func (a *App) renderStatusBar(spinnerFrame int) {
 	}
 	if a.currentTab == "files" {
 		right += a.filesStatusSummary()
+	}
+	if n := a.draftCount(); n > 0 {
+		right += fmt.Sprintf("✎ %d  ", n)
 	}
 	if rl := st.RateLimit(); rl.Known {
 		right += fmt.Sprintf("rate %d  ", rl.Remaining)

@@ -15,6 +15,7 @@ import (
 	"github.com/hirano00o/gprt/internal/browser"
 	"github.com/hirano00o/gprt/internal/cache"
 	"github.com/hirano00o/gprt/internal/config"
+	"github.com/hirano00o/gprt/internal/drafts"
 	"github.com/hirano00o/gprt/internal/gh"
 	"github.com/hirano00o/gprt/internal/logging"
 	"github.com/hirano00o/gprt/internal/model"
@@ -48,6 +49,14 @@ type fakeGitHub struct {
 	filesPages map[string][]gh.FilesResult
 	filesErrs  map[string]map[int]error
 	filesBlock chan struct{}
+
+	addCommentErr      error
+	addCommentBodies   []string
+	addCommentBlock    chan struct{}
+	updateCommentErr   error
+	updateCommentCalls []struct{ id, body string }
+	deleteCommentErr   error
+	deleteCommentIDs   []string
 }
 
 func (f *fakeGitHub) Viewer(context.Context) (model.User, model.RateLimit, error) {
@@ -133,20 +142,102 @@ func (f *fakeGitHub) ChangedFiles(ctx context.Context, ref model.PRRef, page int
 	return pages[page-1], nil
 }
 
-// AddIssueComment, UpdateIssueComment, and DeleteIssueComment are no-ops:
-// the UI's comment/mutation wiring lands in M3a's second slice, but
-// store.GitHub already requires all three (see internal/store/mutations.go),
-// so fakeGitHub must implement them for this package to compile.
-func (f *fakeGitHub) AddIssueComment(context.Context, string, string) (model.IssueComment, model.RateLimit, error) {
-	return model.IssueComment{}, model.RateLimit{}, nil
+// SetAddCommentBlock arms (or, passed nil, disarms) a gate every
+// subsequent AddIssueComment call waits on before returning — used to
+// hold a mutation "in flight" long enough for a test to observe
+// Store.Mutating() before it resolves.
+func (f *fakeGitHub) SetAddCommentBlock(ch chan struct{}) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.addCommentBlock = ch
 }
 
-func (f *fakeGitHub) UpdateIssueComment(context.Context, string, string) (model.IssueComment, model.RateLimit, error) {
-	return model.IssueComment{}, model.RateLimit{}, nil
+// AddIssueComment records body and returns addCommentErr if armed (via
+// SetAddCommentError), otherwise a synthesized comment with that body.
+func (f *fakeGitHub) AddIssueComment(ctx context.Context, _, body string) (model.IssueComment, model.RateLimit, error) {
+	f.mu.Lock()
+	block := f.addCommentBlock
+	f.mu.Unlock()
+	if block != nil {
+		select {
+		case <-block:
+		case <-ctx.Done():
+			return model.IssueComment{}, model.RateLimit{}, ctx.Err()
+		}
+	}
+
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.addCommentBodies = append(f.addCommentBodies, body)
+	if f.addCommentErr != nil {
+		return model.IssueComment{}, model.RateLimit{}, f.addCommentErr
+	}
+	return model.IssueComment{ID: "IC_new", Author: model.User{Login: "octocat"}, Body: body, ViewerCanUpdate: true, ViewerCanDelete: true}, model.RateLimit{}, nil
 }
 
-func (f *fakeGitHub) DeleteIssueComment(context.Context, string) (model.RateLimit, error) {
+// SetAddCommentError makes AddIssueComment fail with err.
+func (f *fakeGitHub) SetAddCommentError(err error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.addCommentErr = err
+}
+
+// AddCommentBodies returns every body AddIssueComment has been called
+// with so far, in call order.
+func (f *fakeGitHub) AddCommentBodies() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.addCommentBodies...)
+}
+
+// UpdateIssueComment records (id, body) and returns updateCommentErr if
+// armed, otherwise a synthesized comment with that body.
+func (f *fakeGitHub) UpdateIssueComment(_ context.Context, id, body string) (model.IssueComment, model.RateLimit, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.updateCommentCalls = append(f.updateCommentCalls, struct{ id, body string }{id, body})
+	if f.updateCommentErr != nil {
+		return model.IssueComment{}, model.RateLimit{}, f.updateCommentErr
+	}
+	return model.IssueComment{ID: id, Author: model.User{Login: "octocat"}, Body: body, ViewerCanUpdate: true, ViewerCanDelete: true}, model.RateLimit{}, nil
+}
+
+// SetUpdateCommentError makes UpdateIssueComment fail with err.
+func (f *fakeGitHub) SetUpdateCommentError(err error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.updateCommentErr = err
+}
+
+// UpdateCommentBodies returns every body UpdateIssueComment has been
+// called with so far, in call order.
+func (f *fakeGitHub) UpdateCommentBodies() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]string, len(f.updateCommentCalls))
+	for i, c := range f.updateCommentCalls {
+		out[i] = c.body
+	}
+	return out
+}
+
+// DeleteIssueComment records id and returns deleteCommentErr if armed.
+func (f *fakeGitHub) DeleteIssueComment(_ context.Context, id string) (model.RateLimit, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.deleteCommentIDs = append(f.deleteCommentIDs, id)
+	if f.deleteCommentErr != nil {
+		return model.RateLimit{}, f.deleteCommentErr
+	}
 	return model.RateLimit{}, nil
+}
+
+// DeleteCommentIDs returns every ID DeleteIssueComment has been called
+// with so far, in call order.
+func (f *fakeGitHub) DeleteCommentIDs() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.deleteCommentIDs...)
 }
 
 // SetFilesPages registers the sequence of REST pages ChangedFiles returns
@@ -387,6 +478,11 @@ func newTestApp(t *testing.T, overrides map[string]string) (*App, <-chan struct{
 	cfg := config.Default()
 	cfg.RefreshInterval = time.Hour // long enough to never tick during a test
 
+	draftStore, err := drafts.New(t.TempDir())
+	if err != nil {
+		t.Fatalf("drafts.New: %v", err)
+	}
+
 	var app *App
 	st := store.New(store.Deps{
 		GitHub:   fake,
@@ -409,6 +505,7 @@ func newTestApp(t *testing.T, overrides map[string]string) (*App, <-chan struct{
 		Logger:  logger,
 		Recent:  recorder.Recent,
 		Version: "test",
+		Drafts:  draftStore,
 	})
 
 	screen := tcell.NewSimulationScreen("")

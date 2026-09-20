@@ -513,3 +513,71 @@ func TestAddComment_UnknownRateLimitDoesNotOverwriteKnownValue(t *testing.T) {
 		t.Fatalf("RateLimit() = %+v after a mutation with an unknown rate limit, want the standing known 4200", rl)
 	}
 }
+
+func TestAddComment_ReturnsWhetherItEnqueued(t *testing.T) {
+	cfg := config.Default()
+	gitHub := newFakeGitHub()
+	disp := newFakeDispatcher()
+	s := newTestStore(t, cfg, gitHub, disp)
+
+	if got := s.AddComment("hello"); got {
+		t.Error("AddComment(...) = true with no pull request open, want false")
+	}
+
+	openPRWithID(t, s, gitHub, disp, commentTestRef(1), "PR_1")
+	if got := s.AddComment("hello"); !got {
+		t.Error("AddComment(...) = false with a loaded pull request, want true")
+	}
+	runUntilIdle(t, disp)
+}
+
+func TestEditComment_ReturnsWhetherItEnqueued(t *testing.T) {
+	cfg := config.Default()
+	gitHub := newFakeGitHub()
+	disp := newFakeDispatcher()
+	s := newTestStore(t, cfg, gitHub, disp)
+
+	if got := s.EditComment("IC_1", "hello"); got {
+		t.Error("EditComment(...) = true with no pull request open, want false")
+	}
+
+	openPRWithID(t, s, gitHub, disp, commentTestRef(1), "PR_1")
+	if got := s.EditComment("IC_1", "hello"); !got {
+		t.Error("EditComment(...) = false with a loaded pull request, want true")
+	}
+	runUntilIdle(t, disp)
+}
+
+// TestMutationError_IsolatedFromStandingSectionError reproduces the bug an
+// App-level composer must route around: LastError() also surfaces a lower
+// priority, unrelated standing error (here, a section's), so a caller that
+// wants to know specifically "did *my* mutation fail" needs
+// MutationError() instead, not LastError().
+func TestMutationError_IsolatedFromStandingSectionError(t *testing.T) {
+	cfg := config.Default()
+	gitHub := newFakeGitHub()
+	disp := newFakeDispatcher()
+	s := newTestStore(t, cfg, gitHub, disp)
+	openPRWithID(t, s, gitHub, disp, commentTestRef(1), "PR_1")
+
+	s.LoadList(false)
+	runUntilIdle(t, disp)
+	gitHub.searchFunc = func(context.Context, string, string) (gh.SearchResult, error) {
+		return gh.SearchResult{}, errors.New("section boom")
+	}
+	s.Refresh()
+	runUntilIdle(t, disp)
+	if s.LastError() == nil {
+		t.Fatal("precondition: LastError() = nil, want the standing section error")
+	}
+
+	s.AddComment("hello")
+	runUntilIdle(t, disp)
+
+	if err := s.MutationError(); err != nil {
+		t.Errorf("MutationError() = %v after a successful mutation, want nil even though an unrelated section error still stands", err)
+	}
+	if s.LastError() == nil {
+		t.Error("LastError() = nil after AddComment succeeded; want the standing section error still surfaced (LastError is not mutation-specific)")
+	}
+}

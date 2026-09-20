@@ -153,7 +153,7 @@ func (a *App) submitCommand() {
 
 	switch text {
 	case "q", "quit":
-		a.quit()
+		a.quitWithConfirmIfMutating()
 	case "help":
 		a.openHelp()
 	case "messages":
