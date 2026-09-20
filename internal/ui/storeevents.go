@@ -1,0 +1,38 @@
+package ui
+
+import (
+	"github.com/hirano00o/gprt/internal/store"
+	"github.com/hirano00o/gprt/internal/ui/theme"
+)
+
+// subscribeStore wires every internal/store event this milestone reacts to.
+// Subscribe's callback runs synchronously on the UI goroutine (see
+// store.Store's package doc), so every handler here may call Store methods
+// and touch widgets directly.
+func (a *App) subscribeStore() {
+	a.deps.Store.Subscribe(func(ev store.Event) {
+		switch ev.Kind {
+		case store.EventListChanged:
+			a.refreshList()
+		case store.EventLoadingChanged:
+			a.onLoadingChanged()
+			// A section's loading/stale flags flip synchronously when a
+			// fetch starts (before its result arrives and fires
+			// EventListChanged): refresh now too, so "R" shows the
+			// stale dimming and the loading marker immediately instead
+			// of only once the new data lands.
+			a.refreshList()
+		case store.EventViewerLoaded, store.EventRateLimitChanged:
+			a.renderStatusBar(0)
+		case store.EventError:
+			if ev.Err != nil {
+				a.showToast(ev.Err.Error(), theme.Error)
+			}
+			// LastError (shown as a persistent marker, not just this
+			// toast) and, for a section-scoped error, that section's
+			// header row both need to reflect the new error state.
+			a.renderStatusBar(0)
+			a.refreshList()
+		}
+	})
+}
