@@ -72,6 +72,14 @@ func (a *App) handleKey(ev *tcell.EventKey) *tcell.EventKey {
 			return a.routePendingKey(ev, normalized)
 		case "reaction":
 			return a.routeReactionKey(ev, normalized)
+		case "merge":
+			return a.routeMergeKey(ev, normalized)
+		case "editform":
+			return a.routeEditFormKey(ev, normalized)
+		case "editlabels":
+			return a.routeEditLabelsKey(ev, normalized)
+		case "editreviewers":
+			return a.routeEditReviewersKey(ev, normalized)
 		default:
 			return a.routeOverlayKey(ev, normalized)
 		}
@@ -327,9 +335,9 @@ func (a *App) focusedListPane() movablePane {
 }
 
 // dispatch runs the effect of a resolved Action. Actions not yet
-// implemented (pr.edit, list.new_pr) are silently ignored rather than
-// surfacing a toast for every exploratory keypress — docs/REQUIREMENTS.md
-// tracks their milestone.
+// implemented (list.new_pr) are silently ignored rather than surfacing a
+// toast for every exploratory keypress — docs/REQUIREMENTS.md tracks their
+// milestone.
 func (a *App) dispatch(action keys.Action, count int) {
 	switch action {
 	case keys.ActionListDown:
@@ -433,6 +441,8 @@ func (a *App) dispatch(action keys.Action, count int) {
 		a.openPendingList()
 	case keys.ActionPRSubmit:
 		a.openSubmitReviewDialog()
+	case keys.ActionPREdit:
+		a.openEditPRForm()
 	case keys.ActionCommentReact:
 		switch a.app.GetFocus() {
 		case a.prView:

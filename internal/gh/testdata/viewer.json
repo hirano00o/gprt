@@ -1,6 +1,7 @@
 {
   "data": {
     "viewer": {
+      "id": "U_octocat",
       "login": "octocat",
       "name": "The Octocat"
     },

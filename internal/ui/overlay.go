@@ -139,8 +139,9 @@ func (a *App) buildMessagesView() *tview.TextView {
 }
 
 // submitCommand runs whatever was typed into the command line, then closes
-// it. Recognized commands: q/quit, help, messages, reload; anything else
-// shows an error toast instead of doing nothing silently.
+// it. Recognized commands: q/quit, help, messages, reload, close, reopen,
+// merge (see prcommands.go/mergedialog.go); anything else shows an error
+// toast instead of doing nothing silently.
 func (a *App) submitCommand() {
 	text := strings.TrimSpace(a.cmdLine.GetText())
 	a.closeCommandLine()
@@ -160,6 +161,12 @@ func (a *App) submitCommand() {
 		a.openMessages()
 	case "reload":
 		a.reload()
+	case "close":
+		a.cmdClose()
+	case "reopen":
+		a.cmdReopen()
+	case "merge":
+		a.cmdMerge()
 	default:
 		a.showToast("unknown command: "+text, theme.Error)
 	}

@@ -27,8 +27,17 @@ import (
 )
 
 // mentionableUsersCacheRest is the Key.Rest segment mentionable-users cache
-// entries are stored under (see cache.RepoKey).
-const mentionableUsersCacheRest = "mentionable-users"
+// entries are stored under (see cache.RepoKey). Bumped to a "-v2" suffix
+// (M5) when model.User gained an ID field (needed to add a brand-new
+// individual reviewer via the edit-PR form's reviewers picker): an older,
+// still-cached "mentionable-users" entry decodes fine into []model.User
+// (an added struct field is backward-compatible for JSON decoding) but
+// every one of its users would silently have an empty ID until the next
+// network refetch — a stale disk cache from before this change must never
+// be read back at all, not merely allowed to expire on its own hourly
+// freshness window, so a new cache key name is simpler than adding an
+// empty-ID staleness check to every read path.
+const mentionableUsersCacheRest = "mentionable-users-v2"
 
 // mentionableUsersFreshFor is how long a repository's mentionable-users
 // result — in memory or on disk — is treated as fresh enough to skip a

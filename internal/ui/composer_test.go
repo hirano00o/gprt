@@ -411,7 +411,7 @@ func TestComposerDeleteWithConfirmCallsDeleteComment(t *testing.T) {
 	sendRune(app.app, 'd')
 	waitFor(t, app.app, func() bool { return app.overlay == "confirm" })
 
-	sendSpecial(app.app, tcell.KeyEnter) // the Modal's default button is "Delete"
+	confirmYes(app.app) // "Cancel" is the Modal's default button; Tab then Enter reaches "Delete"
 	waitFor(t, app.app, func() bool { return len(fake.DeleteCommentIDs()) == 1 })
 	if got, want := fake.DeleteCommentIDs()[0], "IC_1"; got != want {
 		t.Fatalf("DeleteIssueComment id = %q, want %q", got, want)
