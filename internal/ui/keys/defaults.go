@@ -34,12 +34,12 @@ type defaultEntry struct {
 // literal parsed form of "<C-h>" here would never match anything Normalize
 // actually produces.
 var defaultTable = []defaultEntry{
-	{[]Context{ContextList, ContextDiff, ContextFiles}, "j", ActionListDown},
-	{[]Context{ContextList, ContextDiff, ContextFiles}, "k", ActionListUp},
-	{[]Context{ContextList, ContextDiff, ContextFiles}, "gg", ActionListTop},
-	{[]Context{ContextList, ContextDiff, ContextFiles}, "G", ActionListBottom},
-	{[]Context{ContextList, ContextDiff, ContextFiles}, "<C-d>", ActionListHalfDown},
-	{[]Context{ContextList, ContextDiff, ContextFiles}, "<C-u>", ActionListHalfUp},
+	{[]Context{ContextList, ContextDiff, ContextFiles, ContextDetail}, "j", ActionListDown},
+	{[]Context{ContextList, ContextDiff, ContextFiles, ContextDetail}, "k", ActionListUp},
+	{[]Context{ContextList, ContextDiff, ContextFiles, ContextDetail}, "gg", ActionListTop},
+	{[]Context{ContextList, ContextDiff, ContextFiles, ContextDetail}, "G", ActionListBottom},
+	{[]Context{ContextList, ContextDiff, ContextFiles, ContextDetail}, "<C-d>", ActionListHalfDown},
+	{[]Context{ContextList, ContextDiff, ContextFiles, ContextDetail}, "<C-u>", ActionListHalfUp},
 
 	{[]Context{ContextGlobal}, "<C-w>h", ActionGlobalFocusLeft},
 	{[]Context{ContextGlobal}, "<C-w>l", ActionGlobalFocusRight},

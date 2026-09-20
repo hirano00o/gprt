@@ -86,13 +86,14 @@ func (a *App) buildHelpView() *tview.TextView {
 
 // buildMessagesView lists the ring buffer of recent error-and-above log
 // entries, followed by every section's *current* warnings (see
-// gh.SearchResult.Warnings) under a "Warnings" heading. Warnings are logged
-// by internal/store at Warn level, which the ":messages" ring buffer does
-// not keep (it only keeps Error and above) — rather than re-logging them at
+// gh.SearchResult.Warnings) and the current pull request's own
+// DetailState().Warnings under a "Warnings" heading. Warnings are logged by
+// internal/store at Warn level, which the ":messages" ring buffer does not
+// keep (it only keeps Error and above) — rather than re-logging them at
 // Error from here (which would duplicate the store's own logging and could
 // drift out of sync with whether a warning is still current), this reads
-// them fresh from Store.SectionStates every time the overlay is built,
-// which is simpler and always accurate.
+// them fresh from Store.SectionStates/DetailState every time the overlay
+// is built, which is simpler and always accurate.
 func (a *App) buildMessagesView() *tview.TextView {
 	view := tview.NewTextView().SetScrollable(true)
 	view.SetBorder(true).SetTitle(" Messages (q or Esc to close) ")
@@ -113,12 +114,17 @@ func (a *App) buildMessagesView() *tview.TextView {
 			warned = append(warned, s)
 		}
 	}
-	if len(warned) > 0 {
+	detailWarnings := a.deps.Store.DetailState().Warnings
+
+	if len(warned) > 0 || len(detailWarnings) > 0 {
 		b.WriteString("\nWarnings:\n")
 		for _, s := range warned {
 			for _, w := range s.Warnings {
 				fmt.Fprintf(&b, "  %s: %s\n", s.Section.Name, w)
 			}
+		}
+		for _, w := range detailWarnings {
+			fmt.Fprintf(&b, "  Pull request: %s\n", w)
 		}
 	}
 

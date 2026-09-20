@@ -6,7 +6,7 @@ Reference for gprt's default keybindings. This is the source for the in-app `?` 
 
 `internal/ui/keys` (normalisation, vim-notation parsing, the full default keymap below, `Merge` validation, and the `Sequencer` multi-key/count state machine) and the router (`internal/ui`) are implemented (M1a). The **Status** column below marks each binding `Done (M1a)` once the *action itself* has an effect — reaching it through the Sequencer and dispatch table is not enough on its own if the pane or feature it controls does not exist yet. Every binding is present in the keymap and listed by `?`/`:help` regardless of its status, since remapping validation (`keys:` in config) does not depend on whether an action is implemented yet.
 
-The `?` help and `:messages` overlays are scrollable `TextView`s: `q` or `Esc` closes either one (pressing `?` again also closes the help overlay specifically), and every other key — including `j`/`k`/`gg`/`G`/`PgUp`/`PgDn` — is left to the `TextView`'s own native scrolling rather than being swallowed by the router. The same "let it through" rule applies to the **[PR]**/**[Files]** detail tabs for any key gprt does not bind in the `detail` context, so those `TextView`s scroll the same way even before M1b's full detail view exists.
+The `?` help and `:messages` overlays are scrollable `TextView`s: `q` or `Esc` closes either one (pressing `?` again also closes the help overlay specifically), and every other key — including `j`/`k`/`gg`/`G`/`PgUp`/`PgDn` — is left to the `TextView`'s own native scrolling rather than being swallowed by the router. The same "let it through" rule applies to the **[Files]** tab's still-placeholder `TextView` for any key gprt does not bind in the `detail` context. The **[PR]** tab (`widget.DetailView`, M1b) is different: `list.down`/`up`/`top`/`bottom`/`half_down`/`half_up` are now bound in the `detail` context too and move its own cursor over the header/description/checks/conversation blocks (the router picks whichever `ListView`-backed pane — the PR list or the PR tab — currently has focus); a key genuinely bound in no context still falls through unchanged.
 
 ## Remapping
 
@@ -27,12 +27,12 @@ The vim editor's own keys (listed at the bottom of this document) are **fixed** 
 
 | Key | Context | Action | Action ID | Status |
 |-----|---------|--------|-----------|--------|
-| `j` | list / diff / tree | move down | `list.down` | Done (M1a, list only) |
-| `k` | list / diff / tree | move up | `list.up` | Done (M1a, list only) |
-| `gg` | list / diff / tree | move to top | `list.top` | Done (M1a, list only) |
-| `G` | list / diff / tree | move to bottom | `list.bottom` | Done (M1a, list only) |
-| `Ctrl-d` | list / diff / tree | move down half a page | `list.half_down` | Done (M1a, list only) |
-| `Ctrl-u` | list / diff / tree | move up half a page | `list.half_up` | Done (M1a, list only) |
+| `j` | list / diff / tree / detail | move down | `list.down` | Done (M1a list; M1b PR tab) |
+| `k` | list / diff / tree / detail | move up | `list.up` | Done (M1a list; M1b PR tab) |
+| `gg` | list / diff / tree / detail | move to top | `list.top` | Done (M1a list; M1b PR tab) |
+| `G` | list / diff / tree / detail | move to bottom | `list.bottom` | Done (M1a list; M1b PR tab) |
+| `Ctrl-d` | list / diff / tree / detail | move down half a page | `list.half_down` | Done (M1a list; M1b PR tab) |
+| `Ctrl-u` | list / diff / tree / detail | move up half a page | `list.half_up` | Done (M1a list; M1b PR tab) |
 | `Ctrl-w h` | global | focus previous column (list ⇄ detail; in Files: tree ⇄ diff) | `global.focus_left` | Done (M1a) |
 | `Ctrl-w l` | global | focus next column (list ⇄ detail; in Files: tree ⇄ diff) | `global.focus_right` | Done (M1a) |
 | `Ctrl-w j` | composer open | focus down into the composer | `global.focus_down`¹ | Planned (M3a) |
@@ -41,9 +41,9 @@ The vim editor's own keys (listed at the bottom of this document) are **fixed** 
 | `Ctrl-h`, `gT` | detail | switch to the previous tab (Files → PR); `Ctrl-h` equals Backspace on legacy terminals, so it is only bound outside text input | `detail.tab_prev` | Done (M1a) |
 | `Ctrl-w o` | global | toggle the PR list column | `global.toggle_list` | Done (M1a) |
 | `Ctrl-w t` | Files | toggle the file tree | `files.toggle_tree` | Planned (M2) |
-| `R` | global | reload the list and the current PR, ignoring cache | `global.reload` | Done (M1a, list only; current PR arrives with M1b) |
+| `R` | global | reload the list and the current PR, ignoring cache | `global.reload` | Done |
 | `/` | list | open the filter input (`Esc` clears) | `list.filter` | Done (M1a) |
-| `Enter`, `l` | list | open the selected PR and focus the detail pane; in the tree: open the file and focus the diff | `list.open` | Done (M1a, list only) |
+| `Enter`, `l` | list | open the selected PR and focus the detail pane; in the tree: open the file and focus the diff | `list.open` | Done (M1a trigger; M1b shows the full PR tab) |
 | `V` | diff | start visual line selection for a range comment; `Esc` cancels | `diff.visual` | Planned (M2) |
 | `c` | diff | new comment on the current line or visual selection | `diff.comment` | Planned (M2, M3b) |
 | `c` | PR tab | new general comment on the PR | `diff.comment`² | Planned (M3a) |
@@ -58,7 +58,7 @@ The vim editor's own keys (listed at the bottom of this document) are **fixed** 
 | `S` | PR open | open the submit review dialog | `pr.submit` | Planned (M4) |
 | `n` | list | create a PR | `list.new_pr` | Planned (M5) |
 | `E` | PR | edit PR meta (title / base / labels / reviewers / draft) | `pr.edit` | Planned (M5) |
-| `o` | any | open in browser | `global.open_browser` | Done (M1a) |
+| `o` | any | open in browser: the list cursor's PR on the list, the selected block's own URL on the PR tab (falling back to the pull request's URL when the block has none of its own, for example a commit or event row), otherwise the currently open pull request | `global.open_browser` | Done |
 | `za` | diff | fold the thread under the cursor | `diff.fold` | Planned (M2) |
 | `zR` | diff | unfold all threads | `diff.unfold_all` | Planned (M2) |
 | `zM` | diff | fold all threads | `diff.fold_all` | Planned (M2) |

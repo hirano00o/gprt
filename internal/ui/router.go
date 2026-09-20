@@ -49,11 +49,16 @@ func (a *App) handleKey(ev *tcell.EventKey) *tcell.EventKey {
 		}
 	}
 	if !anyConsumed {
-		// No context bound (or is mid-sequence toward) this key: let it
-		// fall through to whatever has focus. For the PR/Files TextViews
-		// this is what makes their own native scrolling (j/k/g/G,
-		// PgUp/PgDn, ...) work; for ListView, which does not act on
-		// forwarded keys at all, this is harmless.
+		// No context bound (or mid-sequence toward) this key at all: let
+		// it fall through to whatever has focus. list.down/up/top/bottom/
+		// half_down/half_up (j/k/gg/G/Ctrl-d/Ctrl-u) are bound in
+		// ContextDetail too, so they are consumed (as a no-op while the
+		// Files tab is focused — see focusedListPane) rather than
+		// reaching its placeholder TextView; only a genuinely unbound key
+		// (PgUp/PgDn, arrows, ...) actually falls through to it for
+		// native scrolling. For the ListView-backed list and PR tab,
+		// neither of which acts on a forwarded key at all, this is
+		// harmless either way.
 		return ev
 	}
 	return nil
@@ -149,24 +154,62 @@ func (a *App) currentContexts() []keys.Context {
 	}
 }
 
+// movablePane is the subset of widget.ListView's movement API that
+// list.down/up/top/bottom/half_down/half_up dispatch to, so those actions
+// route to whichever ListView-backed pane currently has focus (the PR
+// list, or the PR tab's DetailView) rather than always moving the list.
+type movablePane interface {
+	MoveBy(n int)
+	MoveTop()
+	MoveBottom()
+	MoveHalfPage(dir int)
+}
+
+// noopMovablePane discards every movement: the default focusedListPane
+// result when neither ListView-backed pane has focus (for example the
+// Files tab's placeholder TextView), so a list movement key bound in
+// ContextDetail does nothing rather than silently moving the PR list in
+// the background.
+type noopMovablePane struct{}
+
+func (noopMovablePane) MoveBy(int)       {}
+func (noopMovablePane) MoveTop()         {}
+func (noopMovablePane) MoveBottom()      {}
+func (noopMovablePane) MoveHalfPage(int) {}
+
+// focusedListPane returns the ListView-backed pane that currently has
+// focus (the PR list, or the PR tab's DetailView), or a no-op pane when
+// neither does.
+func (a *App) focusedListPane() movablePane {
+	switch a.app.GetFocus() {
+	case a.listView:
+		return a.listView
+	case a.prView:
+		return a.prView
+	default:
+		return noopMovablePane{}
+	}
+}
+
 // dispatch runs the effect of a resolved Action. Actions not yet
-// implemented in M1a (files/diff/thread/comment/pr actions, list.new_pr)
-// are silently ignored rather than surfacing a toast for every
-// exploratory keypress — docs/REQUIREMENTS.md tracks their milestone.
+// implemented in M1a/M1b (files/diff/thread/comment/pr actions,
+// list.new_pr) are silently ignored rather than surfacing a toast for
+// every exploratory keypress — docs/REQUIREMENTS.md tracks their
+// milestone.
 func (a *App) dispatch(action keys.Action, count int) {
 	switch action {
 	case keys.ActionListDown:
-		a.listView.MoveBy(count)
+		a.focusedListPane().MoveBy(count)
 	case keys.ActionListUp:
-		a.listView.MoveBy(-count)
+		a.focusedListPane().MoveBy(-count)
 	case keys.ActionListTop:
-		a.listView.MoveTop()
+		a.focusedListPane().MoveTop()
 	case keys.ActionListBottom:
-		a.listView.MoveBottom()
+		a.focusedListPane().MoveBottom()
 	case keys.ActionListHalfDown:
-		a.listView.MoveHalfPage(1)
+		a.focusedListPane().MoveHalfPage(1)
 	case keys.ActionListHalfUp:
-		a.listView.MoveHalfPage(-1)
+		a.focusedListPane().MoveHalfPage(-1)
 	case keys.ActionListFilter:
 		a.openFilter()
 	case keys.ActionListOpen:

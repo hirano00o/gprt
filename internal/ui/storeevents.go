@@ -24,6 +24,16 @@ func (a *App) subscribeStore() {
 			a.refreshList()
 		case store.EventViewerLoaded, store.EventRateLimitChanged:
 			a.renderStatusBar(0)
+		case store.EventPRChanged:
+			a.renderPRTab()
+		case store.EventPRLoadingChanged:
+			a.renderStatusBar(0)
+			// A failed fetch changes DetailState().Err/Loading without
+			// touching CurrentRef/CurrentPR, so it never fires
+			// EventPRChanged: without this, the PR tab would stay on
+			// "Loading pull request..." forever instead of showing the
+			// error (see detail.go's emptyPRBlock).
+			a.renderPRTab()
 		case store.EventError:
 			if ev.Err != nil {
 				a.showToast(ev.Err.Error(), theme.Error)

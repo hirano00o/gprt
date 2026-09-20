@@ -55,7 +55,7 @@ func (a *App) buildDetailColumn() {
 	a.tabBar = newTabBarView([]string{"PR", "Files"})
 	a.tabBar.SetActive(0)
 
-	a.prView = tview.NewTextView().SetWrap(true)
+	a.prView = widget.NewDetailView()
 	a.filesView = tview.NewTextView().SetWrap(true)
 	a.filesView.SetText("Files view arrives in M2.")
 
