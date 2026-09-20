@@ -84,13 +84,84 @@ type fakeGitHub struct {
 	updateCommentFunc func(ctx context.Context, id, body string) (model.IssueComment, model.RateLimit, error)
 	deleteCommentFunc func(ctx context.Context, id string) (model.RateLimit, error)
 
+	createPendingReviewFunc   func(ctx context.Context, prID string) (model.Review, model.RateLimit, error)
+	addReviewNowFunc          func(ctx context.Context, prID string, threads []gh.DraftThread, body string) (model.Review, model.RateLimit, error)
+	addReviewNowWithEventFunc func(ctx context.Context, prID string, event model.ReviewEvent, body string) (model.Review, model.RateLimit, error)
+	addReviewThreadFunc       func(ctx context.Context, in gh.ThreadInput) (model.ReviewThread, model.RateLimit, error)
+	addThreadReplyFunc        func(ctx context.Context, threadID, body, pendingReviewID string) (model.ReviewComment, model.RateLimit, error)
+	submitReviewFunc          func(ctx context.Context, reviewID string, event model.ReviewEvent, body string) (model.Review, model.RateLimit, error)
+	deletePendingReviewFunc   func(ctx context.Context, reviewID string) (model.RateLimit, error)
+	updateReviewCommentFunc   func(ctx context.Context, id, body string) (model.ReviewComment, model.RateLimit, error)
+	deleteReviewCommentFunc   func(ctx context.Context, id string) (model.RateLimit, error)
+	resolveThreadFunc         func(ctx context.Context, threadID string) (model.ReviewThread, model.RateLimit, error)
+	unresolveThreadFunc       func(ctx context.Context, threadID string) (model.ReviewThread, model.RateLimit, error)
+
 	calls              []searchCall
 	detailCalls        []detailCall
 	filesCalls         []filesCall
 	addCommentCalls    []addCommentCall
 	updateCommentCalls []updateCommentCall
 	deleteCommentCalls []deleteCommentCall
+
+	createPendingReviewCalls   []createPendingReviewCall
+	addReviewNowCalls          []addReviewNowCall
+	addReviewNowWithEventCalls []addReviewNowWithEventCall
+	addReviewThreadCalls       []addReviewThreadCall
+	addThreadReplyCalls        []addThreadReplyCall
+	submitReviewCalls          []submitReviewCall
+	deletePendingReviewCalls   []deletePendingReviewCall
+	updateReviewCommentCalls   []updateReviewCommentCall
+	deleteReviewCommentCalls   []deleteReviewCommentCall
+	resolveThreadCalls         []resolveThreadCall
+	unresolveThreadCalls       []unresolveThreadCall
 }
+
+// createPendingReviewCall records one CreatePendingReview invocation.
+type createPendingReviewCall struct{ prID string }
+
+// addReviewNowCall records one AddReviewNow invocation.
+type addReviewNowCall struct {
+	prID    string
+	threads []gh.DraftThread
+	body    string
+}
+
+// addReviewNowWithEventCall records one AddReviewNowWithEvent invocation.
+type addReviewNowWithEventCall struct {
+	prID  string
+	event model.ReviewEvent
+	body  string
+}
+
+// addReviewThreadCall records one AddReviewThread invocation.
+type addReviewThreadCall struct{ in gh.ThreadInput }
+
+// addThreadReplyCall records one AddThreadReply invocation.
+type addThreadReplyCall struct {
+	threadID, body, pendingReviewID string
+}
+
+// submitReviewCall records one SubmitReview invocation.
+type submitReviewCall struct {
+	reviewID string
+	event    model.ReviewEvent
+	body     string
+}
+
+// deletePendingReviewCall records one DeletePendingReview invocation.
+type deletePendingReviewCall struct{ reviewID string }
+
+// updateReviewCommentCall records one UpdateReviewComment invocation.
+type updateReviewCommentCall struct{ id, body string }
+
+// deleteReviewCommentCall records one DeleteReviewComment invocation.
+type deleteReviewCommentCall struct{ id string }
+
+// resolveThreadCall records one ResolveThread invocation.
+type resolveThreadCall struct{ threadID string }
+
+// unresolveThreadCall records one UnresolveThread invocation.
+type unresolveThreadCall struct{ threadID string }
 
 // addCommentCall records one AddIssueComment invocation for assertions.
 type addCommentCall struct {
@@ -133,6 +204,39 @@ func newFakeGitHub() *fakeGitHub {
 		},
 		deleteCommentFunc: func(context.Context, string) (model.RateLimit, error) {
 			return model.RateLimit{}, nil
+		},
+		createPendingReviewFunc: func(context.Context, string) (model.Review, model.RateLimit, error) {
+			return model.Review{}, model.RateLimit{}, nil
+		},
+		addReviewNowFunc: func(context.Context, string, []gh.DraftThread, string) (model.Review, model.RateLimit, error) {
+			return model.Review{}, model.RateLimit{}, nil
+		},
+		addReviewNowWithEventFunc: func(context.Context, string, model.ReviewEvent, string) (model.Review, model.RateLimit, error) {
+			return model.Review{}, model.RateLimit{}, nil
+		},
+		addReviewThreadFunc: func(context.Context, gh.ThreadInput) (model.ReviewThread, model.RateLimit, error) {
+			return model.ReviewThread{}, model.RateLimit{}, nil
+		},
+		addThreadReplyFunc: func(context.Context, string, string, string) (model.ReviewComment, model.RateLimit, error) {
+			return model.ReviewComment{}, model.RateLimit{}, nil
+		},
+		submitReviewFunc: func(context.Context, string, model.ReviewEvent, string) (model.Review, model.RateLimit, error) {
+			return model.Review{}, model.RateLimit{}, nil
+		},
+		deletePendingReviewFunc: func(context.Context, string) (model.RateLimit, error) {
+			return model.RateLimit{}, nil
+		},
+		updateReviewCommentFunc: func(context.Context, string, string) (model.ReviewComment, model.RateLimit, error) {
+			return model.ReviewComment{}, model.RateLimit{}, nil
+		},
+		deleteReviewCommentFunc: func(context.Context, string) (model.RateLimit, error) {
+			return model.RateLimit{}, nil
+		},
+		resolveThreadFunc: func(context.Context, string) (model.ReviewThread, model.RateLimit, error) {
+			return model.ReviewThread{}, model.RateLimit{}, nil
+		},
+		unresolveThreadFunc: func(context.Context, string) (model.ReviewThread, model.RateLimit, error) {
+			return model.ReviewThread{}, model.RateLimit{}, nil
 		},
 	}
 }
@@ -195,6 +299,318 @@ func (f *fakeGitHub) DeleteIssueComment(ctx context.Context, id string) (model.R
 	fn := f.deleteCommentFunc
 	f.mu.Unlock()
 	return fn(ctx, id)
+}
+
+func (f *fakeGitHub) CreatePendingReview(ctx context.Context, prID string) (model.Review, model.RateLimit, error) {
+	f.mu.Lock()
+	f.createPendingReviewCalls = append(f.createPendingReviewCalls, createPendingReviewCall{prID: prID})
+	fn := f.createPendingReviewFunc
+	f.mu.Unlock()
+	return fn(ctx, prID)
+}
+
+func (f *fakeGitHub) AddReviewNow(
+	ctx context.Context, prID string, threads []gh.DraftThread, body string,
+) (model.Review, model.RateLimit, error) {
+	f.mu.Lock()
+	f.addReviewNowCalls = append(f.addReviewNowCalls, addReviewNowCall{prID: prID, threads: threads, body: body})
+	fn := f.addReviewNowFunc
+	f.mu.Unlock()
+	return fn(ctx, prID, threads, body)
+}
+
+func (f *fakeGitHub) AddReviewNowWithEvent(
+	ctx context.Context, prID string, event model.ReviewEvent, body string,
+) (model.Review, model.RateLimit, error) {
+	f.mu.Lock()
+	f.addReviewNowWithEventCalls = append(f.addReviewNowWithEventCalls, addReviewNowWithEventCall{prID: prID, event: event, body: body})
+	fn := f.addReviewNowWithEventFunc
+	f.mu.Unlock()
+	return fn(ctx, prID, event, body)
+}
+
+func (f *fakeGitHub) AddReviewThread(ctx context.Context, in gh.ThreadInput) (model.ReviewThread, model.RateLimit, error) {
+	f.mu.Lock()
+	f.addReviewThreadCalls = append(f.addReviewThreadCalls, addReviewThreadCall{in: in})
+	fn := f.addReviewThreadFunc
+	f.mu.Unlock()
+	return fn(ctx, in)
+}
+
+func (f *fakeGitHub) AddThreadReply(
+	ctx context.Context, threadID, body, pendingReviewID string,
+) (model.ReviewComment, model.RateLimit, error) {
+	f.mu.Lock()
+	f.addThreadReplyCalls = append(f.addThreadReplyCalls, addThreadReplyCall{
+		threadID: threadID, body: body, pendingReviewID: pendingReviewID,
+	})
+	fn := f.addThreadReplyFunc
+	f.mu.Unlock()
+	return fn(ctx, threadID, body, pendingReviewID)
+}
+
+func (f *fakeGitHub) SubmitReview(
+	ctx context.Context, reviewID string, event model.ReviewEvent, body string,
+) (model.Review, model.RateLimit, error) {
+	f.mu.Lock()
+	f.submitReviewCalls = append(f.submitReviewCalls, submitReviewCall{reviewID: reviewID, event: event, body: body})
+	fn := f.submitReviewFunc
+	f.mu.Unlock()
+	return fn(ctx, reviewID, event, body)
+}
+
+func (f *fakeGitHub) DeletePendingReview(ctx context.Context, reviewID string) (model.RateLimit, error) {
+	f.mu.Lock()
+	f.deletePendingReviewCalls = append(f.deletePendingReviewCalls, deletePendingReviewCall{reviewID: reviewID})
+	fn := f.deletePendingReviewFunc
+	f.mu.Unlock()
+	return fn(ctx, reviewID)
+}
+
+func (f *fakeGitHub) UpdateReviewComment(ctx context.Context, id, body string) (model.ReviewComment, model.RateLimit, error) {
+	f.mu.Lock()
+	f.updateReviewCommentCalls = append(f.updateReviewCommentCalls, updateReviewCommentCall{id: id, body: body})
+	fn := f.updateReviewCommentFunc
+	f.mu.Unlock()
+	return fn(ctx, id, body)
+}
+
+func (f *fakeGitHub) DeleteReviewComment(ctx context.Context, id string) (model.RateLimit, error) {
+	f.mu.Lock()
+	f.deleteReviewCommentCalls = append(f.deleteReviewCommentCalls, deleteReviewCommentCall{id: id})
+	fn := f.deleteReviewCommentFunc
+	f.mu.Unlock()
+	return fn(ctx, id)
+}
+
+func (f *fakeGitHub) ResolveThread(ctx context.Context, threadID string) (model.ReviewThread, model.RateLimit, error) {
+	f.mu.Lock()
+	f.resolveThreadCalls = append(f.resolveThreadCalls, resolveThreadCall{threadID: threadID})
+	fn := f.resolveThreadFunc
+	f.mu.Unlock()
+	return fn(ctx, threadID)
+}
+
+func (f *fakeGitHub) UnresolveThread(ctx context.Context, threadID string) (model.ReviewThread, model.RateLimit, error) {
+	f.mu.Lock()
+	f.unresolveThreadCalls = append(f.unresolveThreadCalls, unresolveThreadCall{threadID: threadID})
+	fn := f.unresolveThreadFunc
+	f.mu.Unlock()
+	return fn(ctx, threadID)
+}
+
+// createPendingReviewCallsSnapshot returns a copy of every
+// CreatePendingReview call recorded so far, for assertions.
+func (f *fakeGitHub) createPendingReviewCallsSnapshot() []createPendingReviewCall {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]createPendingReviewCall, len(f.createPendingReviewCalls))
+	copy(out, f.createPendingReviewCalls)
+	return out
+}
+
+// addReviewNowCallsSnapshot returns a copy of every AddReviewNow call
+// recorded so far, for assertions.
+func (f *fakeGitHub) addReviewNowCallsSnapshot() []addReviewNowCall {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]addReviewNowCall, len(f.addReviewNowCalls))
+	copy(out, f.addReviewNowCalls)
+	return out
+}
+
+// addReviewNowWithEventCallsSnapshot returns a copy of every
+// AddReviewNowWithEvent call recorded so far, for assertions.
+func (f *fakeGitHub) addReviewNowWithEventCallsSnapshot() []addReviewNowWithEventCall {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]addReviewNowWithEventCall, len(f.addReviewNowWithEventCalls))
+	copy(out, f.addReviewNowWithEventCalls)
+	return out
+}
+
+// addReviewThreadCallsSnapshot returns a copy of every AddReviewThread call
+// recorded so far, for assertions.
+func (f *fakeGitHub) addReviewThreadCallsSnapshot() []addReviewThreadCall {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]addReviewThreadCall, len(f.addReviewThreadCalls))
+	copy(out, f.addReviewThreadCalls)
+	return out
+}
+
+// addThreadReplyCallsSnapshot returns a copy of every AddThreadReply call
+// recorded so far, for assertions.
+func (f *fakeGitHub) addThreadReplyCallsSnapshot() []addThreadReplyCall {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]addThreadReplyCall, len(f.addThreadReplyCalls))
+	copy(out, f.addThreadReplyCalls)
+	return out
+}
+
+// submitReviewCallsSnapshot returns a copy of every SubmitReview call
+// recorded so far, for assertions.
+func (f *fakeGitHub) submitReviewCallsSnapshot() []submitReviewCall {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]submitReviewCall, len(f.submitReviewCalls))
+	copy(out, f.submitReviewCalls)
+	return out
+}
+
+// deletePendingReviewCallsSnapshot returns a copy of every
+// DeletePendingReview call recorded so far, for assertions.
+func (f *fakeGitHub) deletePendingReviewCallsSnapshot() []deletePendingReviewCall {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]deletePendingReviewCall, len(f.deletePendingReviewCalls))
+	copy(out, f.deletePendingReviewCalls)
+	return out
+}
+
+// updateReviewCommentCallsSnapshot returns a copy of every
+// UpdateReviewComment call recorded so far, for assertions.
+func (f *fakeGitHub) updateReviewCommentCallsSnapshot() []updateReviewCommentCall {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]updateReviewCommentCall, len(f.updateReviewCommentCalls))
+	copy(out, f.updateReviewCommentCalls)
+	return out
+}
+
+// deleteReviewCommentCallsSnapshot returns a copy of every
+// DeleteReviewComment call recorded so far, for assertions.
+func (f *fakeGitHub) deleteReviewCommentCallsSnapshot() []deleteReviewCommentCall {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]deleteReviewCommentCall, len(f.deleteReviewCommentCalls))
+	copy(out, f.deleteReviewCommentCalls)
+	return out
+}
+
+// resolveThreadCallsSnapshot returns a copy of every ResolveThread call
+// recorded so far, for assertions.
+func (f *fakeGitHub) resolveThreadCallsSnapshot() []resolveThreadCall {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]resolveThreadCall, len(f.resolveThreadCalls))
+	copy(out, f.resolveThreadCalls)
+	return out
+}
+
+// unresolveThreadCallsSnapshot returns a copy of every UnresolveThread call
+// recorded so far, for assertions.
+func (f *fakeGitHub) unresolveThreadCallsSnapshot() []unresolveThreadCall {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]unresolveThreadCall, len(f.unresolveThreadCalls))
+	copy(out, f.unresolveThreadCalls)
+	return out
+}
+
+// setCreatePendingReviewFunc reassigns createPendingReviewFunc under the
+// lock, for the same reason setSearchFunc does.
+func (f *fakeGitHub) setCreatePendingReviewFunc(fn func(ctx context.Context, prID string) (model.Review, model.RateLimit, error)) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.createPendingReviewFunc = fn
+}
+
+// setAddReviewNowFunc reassigns addReviewNowFunc under the lock, for the
+// same reason setSearchFunc does.
+func (f *fakeGitHub) setAddReviewNowFunc(
+	fn func(ctx context.Context, prID string, threads []gh.DraftThread, body string) (model.Review, model.RateLimit, error),
+) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.addReviewNowFunc = fn
+}
+
+// setAddReviewNowWithEventFunc reassigns addReviewNowWithEventFunc under the
+// lock, for the same reason setSearchFunc does.
+func (f *fakeGitHub) setAddReviewNowWithEventFunc(
+	fn func(ctx context.Context, prID string, event model.ReviewEvent, body string) (model.Review, model.RateLimit, error),
+) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.addReviewNowWithEventFunc = fn
+}
+
+// setAddReviewThreadFunc reassigns addReviewThreadFunc under the lock, for
+// the same reason setSearchFunc does.
+func (f *fakeGitHub) setAddReviewThreadFunc(
+	fn func(ctx context.Context, in gh.ThreadInput) (model.ReviewThread, model.RateLimit, error),
+) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.addReviewThreadFunc = fn
+}
+
+// setAddThreadReplyFunc reassigns addThreadReplyFunc under the lock, for
+// the same reason setSearchFunc does.
+func (f *fakeGitHub) setAddThreadReplyFunc(
+	fn func(ctx context.Context, threadID, body, pendingReviewID string) (model.ReviewComment, model.RateLimit, error),
+) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.addThreadReplyFunc = fn
+}
+
+// setSubmitReviewFunc reassigns submitReviewFunc under the lock, for the
+// same reason setSearchFunc does.
+func (f *fakeGitHub) setSubmitReviewFunc(
+	fn func(ctx context.Context, reviewID string, event model.ReviewEvent, body string) (model.Review, model.RateLimit, error),
+) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.submitReviewFunc = fn
+}
+
+// setDeletePendingReviewFunc reassigns deletePendingReviewFunc under the
+// lock, for the same reason setSearchFunc does.
+func (f *fakeGitHub) setDeletePendingReviewFunc(fn func(ctx context.Context, reviewID string) (model.RateLimit, error)) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.deletePendingReviewFunc = fn
+}
+
+// setUpdateReviewCommentFunc reassigns updateReviewCommentFunc under the
+// lock, for the same reason setSearchFunc does.
+func (f *fakeGitHub) setUpdateReviewCommentFunc(
+	fn func(ctx context.Context, id, body string) (model.ReviewComment, model.RateLimit, error),
+) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.updateReviewCommentFunc = fn
+}
+
+// setDeleteReviewCommentFunc reassigns deleteReviewCommentFunc under the
+// lock, for the same reason setSearchFunc does.
+func (f *fakeGitHub) setDeleteReviewCommentFunc(fn func(ctx context.Context, id string) (model.RateLimit, error)) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.deleteReviewCommentFunc = fn
+}
+
+// setResolveThreadFunc reassigns resolveThreadFunc under the lock, for the
+// same reason setSearchFunc does.
+func (f *fakeGitHub) setResolveThreadFunc(
+	fn func(ctx context.Context, threadID string) (model.ReviewThread, model.RateLimit, error),
+) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.resolveThreadFunc = fn
+}
+
+// setUnresolveThreadFunc reassigns unresolveThreadFunc under the lock, for
+// the same reason setSearchFunc does.
+func (f *fakeGitHub) setUnresolveThreadFunc(
+	fn func(ctx context.Context, threadID string) (model.ReviewThread, model.RateLimit, error),
+) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.unresolveThreadFunc = fn
 }
 
 func (f *fakeGitHub) searchCalls() []searchCall {

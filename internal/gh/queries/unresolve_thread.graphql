@@ -1,0 +1,14 @@
+mutation UnresolveThread($threadId: ID!) {
+  unresolveReviewThread(input: { threadId: $threadId }) {
+    thread {
+      id
+      isResolved
+      viewerCanResolve
+      viewerCanUnresolve
+    }
+  }
+  rateLimit {
+    remaining
+    resetAt
+  }
+}

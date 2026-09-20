@@ -1,0 +1,30 @@
+mutation UpdateReviewComment($id: ID!, $body: String!) {
+  updatePullRequestReviewComment(input: { pullRequestReviewCommentId: $id, body: $body }) {
+    pullRequestReviewComment {
+      id
+      author {
+        login
+      }
+      body
+      createdAt
+      state
+      url
+      reactionGroups {
+        content
+        viewerHasReacted
+        reactors {
+          totalCount
+        }
+      }
+      viewerCanUpdate
+      viewerCanDelete
+      pullRequestReview {
+        id
+      }
+    }
+  }
+  rateLimit {
+    remaining
+    resetAt
+  }
+}

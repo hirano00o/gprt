@@ -1,0 +1,9 @@
+mutation DeletePendingReview($reviewId: ID!) {
+  deletePullRequestReview(input: { pullRequestReviewId: $reviewId }) {
+    clientMutationId
+  }
+  rateLimit {
+    remaining
+    resetAt
+  }
+}

@@ -1,0 +1,13 @@
+mutation CreatePendingReview($id: ID!) {
+  addPullRequestReview(input: { pullRequestId: $id }) {
+    pullRequestReview {
+      id
+      state
+      body
+    }
+  }
+  rateLimit {
+    remaining
+    resetAt
+  }
+}

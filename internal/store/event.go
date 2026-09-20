@@ -45,6 +45,14 @@ const (
 	// PendingMutations() would return something different: a queued
 	// mutation starts running, or one finishes (successfully or not).
 	EventMutationChanged
+	// EventNotice fires for an informational message that is not an error
+	// (Event.Message; Event.Err is nil): for example a review-comment send
+	// silently coerced from "single comment" to "add to review" because a
+	// pending review already existed by the time the mutation actually
+	// ran (see internal/store/review.go). A generic, reusable kind rather
+	// than one dedicated to that single case, since later milestones (a
+	// submitted review's own confirmation, say) need the same shape.
+	EventNotice
 )
 
 // Event is published synchronously, on the UI goroutine, by Subscribe
@@ -57,6 +65,8 @@ type Event struct {
 	Err     error
 	// Path names the file an EventFileHighlighted result belongs to.
 	Path string
+	// Message carries an EventNotice's informational text.
+	Message string
 }
 
 // Subscribe registers fn to be called for every Event published from now

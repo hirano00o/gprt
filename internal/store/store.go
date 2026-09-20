@@ -31,6 +31,24 @@ type GitHub interface {
 	AddIssueComment(ctx context.Context, subjectID, body string) (model.IssueComment, model.RateLimit, error)
 	UpdateIssueComment(ctx context.Context, id, body string) (model.IssueComment, model.RateLimit, error)
 	DeleteIssueComment(ctx context.Context, id string) (model.RateLimit, error)
+
+	// Review mutations (see review.go). CreatePendingReview/AddReviewNow/
+	// AddReviewNowWithEvent all wrap GraphQL's addPullRequestReview: the
+	// first two mirror gh.Client's own split (create a PENDING review with
+	// no event; publish threads immediately with event: COMMENT), and the
+	// third covers the store's SubmitReview when no pending review exists
+	// yet (an arbitrary event, no threads).
+	CreatePendingReview(ctx context.Context, prID string) (model.Review, model.RateLimit, error)
+	AddReviewNow(ctx context.Context, prID string, threads []gh.DraftThread, body string) (model.Review, model.RateLimit, error)
+	AddReviewNowWithEvent(ctx context.Context, prID string, event model.ReviewEvent, body string) (model.Review, model.RateLimit, error)
+	AddReviewThread(ctx context.Context, in gh.ThreadInput) (model.ReviewThread, model.RateLimit, error)
+	AddThreadReply(ctx context.Context, threadID, body, pendingReviewID string) (model.ReviewComment, model.RateLimit, error)
+	SubmitReview(ctx context.Context, reviewID string, event model.ReviewEvent, body string) (model.Review, model.RateLimit, error)
+	DeletePendingReview(ctx context.Context, reviewID string) (model.RateLimit, error)
+	UpdateReviewComment(ctx context.Context, id, body string) (model.ReviewComment, model.RateLimit, error)
+	DeleteReviewComment(ctx context.Context, id string) (model.RateLimit, error)
+	ResolveThread(ctx context.Context, threadID string) (model.ReviewThread, model.RateLimit, error)
+	UnresolveThread(ctx context.Context, threadID string) (model.ReviewThread, model.RateLimit, error)
 }
 
 // lineHighlighter is the subset of *highlight.Highlighter the store depends

@@ -240,6 +240,56 @@ func (f *fakeGitHub) DeleteCommentIDs() []string {
 	return append([]string(nil), f.deleteCommentIDs...)
 }
 
+// Review mutations (see internal/store/review.go): no UI slice exercises
+// these yet (M3b lands the store/gh side only), so these are unarmed stubs
+// returning zero values with no error, kept here only so *fakeGitHub keeps
+// satisfying store.GitHub. A future UI slice that composes/reviews threads
+// will arm them the same way AddIssueComment/UpdateIssueComment above are
+// armed, not by adding parallel plumbing to this file.
+func (f *fakeGitHub) CreatePendingReview(context.Context, string) (model.Review, model.RateLimit, error) {
+	return model.Review{}, model.RateLimit{}, nil
+}
+
+func (f *fakeGitHub) AddReviewNow(context.Context, string, []gh.DraftThread, string) (model.Review, model.RateLimit, error) {
+	return model.Review{}, model.RateLimit{}, nil
+}
+
+func (f *fakeGitHub) AddReviewNowWithEvent(context.Context, string, model.ReviewEvent, string) (model.Review, model.RateLimit, error) {
+	return model.Review{}, model.RateLimit{}, nil
+}
+
+func (f *fakeGitHub) AddReviewThread(context.Context, gh.ThreadInput) (model.ReviewThread, model.RateLimit, error) {
+	return model.ReviewThread{}, model.RateLimit{}, nil
+}
+
+func (f *fakeGitHub) AddThreadReply(context.Context, string, string, string) (model.ReviewComment, model.RateLimit, error) {
+	return model.ReviewComment{}, model.RateLimit{}, nil
+}
+
+func (f *fakeGitHub) SubmitReview(context.Context, string, model.ReviewEvent, string) (model.Review, model.RateLimit, error) {
+	return model.Review{}, model.RateLimit{}, nil
+}
+
+func (f *fakeGitHub) DeletePendingReview(context.Context, string) (model.RateLimit, error) {
+	return model.RateLimit{}, nil
+}
+
+func (f *fakeGitHub) UpdateReviewComment(context.Context, string, string) (model.ReviewComment, model.RateLimit, error) {
+	return model.ReviewComment{}, model.RateLimit{}, nil
+}
+
+func (f *fakeGitHub) DeleteReviewComment(context.Context, string) (model.RateLimit, error) {
+	return model.RateLimit{}, nil
+}
+
+func (f *fakeGitHub) ResolveThread(context.Context, string) (model.ReviewThread, model.RateLimit, error) {
+	return model.ReviewThread{}, model.RateLimit{}, nil
+}
+
+func (f *fakeGitHub) UnresolveThread(context.Context, string) (model.ReviewThread, model.RateLimit, error) {
+	return model.ReviewThread{}, model.RateLimit{}, nil
+}
+
 // SetFilesPages registers the sequence of REST pages ChangedFiles returns
 // for ref, in page order (pages[0] is page 1, and so on).
 func (f *fakeGitHub) SetFilesPages(ref model.PRRef, pages []gh.FilesResult) {

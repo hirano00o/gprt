@@ -1,0 +1,66 @@
+mutation AddReviewThread(
+  $reviewId: ID!
+  $path: String!
+  $line: Int
+  $side: DiffSide
+  $startLine: Int
+  $startSide: DiffSide
+  $subjectType: PullRequestReviewThreadSubjectType!
+  $body: String!
+) {
+  addPullRequestReviewThread(
+    input: {
+      pullRequestReviewId: $reviewId
+      path: $path
+      line: $line
+      side: $side
+      startLine: $startLine
+      startSide: $startSide
+      subjectType: $subjectType
+      body: $body
+    }
+  ) {
+    thread {
+      id
+      isResolved
+      isOutdated
+      path
+      line
+      startLine
+      diffSide
+      startDiffSide
+      subjectType
+      viewerCanReply
+      viewerCanResolve
+      viewerCanUnresolve
+      comments(first: 100) {
+        nodes {
+          id
+          author {
+            login
+          }
+          body
+          createdAt
+          state
+          url
+          reactionGroups {
+            content
+            viewerHasReacted
+            reactors {
+              totalCount
+            }
+          }
+          viewerCanUpdate
+          viewerCanDelete
+          pullRequestReview {
+            id
+          }
+        }
+      }
+    }
+  }
+  rateLimit {
+    remaining
+    resetAt
+  }
+}

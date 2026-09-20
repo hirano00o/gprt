@@ -335,6 +335,37 @@ func TestMutation_Error_KeepsStateEmitsEventError(t *testing.T) {
 	}
 }
 
+// TestMutation_Error_TriggersRefetch confirms finishMutation's failure path
+// invalidates and refetches the target pull request exactly like its
+// success path does (see invalidateAndRefetch): a failed mutation's own
+// network call may have partially taken effect server-side even though it
+// ultimately reported an error, so the local state must converge to
+// GitHub's own rather than silently drift until the next auto-refresh (up
+// to 5 minutes later). AddComment stands in for any mutation here, since
+// the refetch trigger lives in the queue's shared finishMutation, not in
+// any one mutation's own apply.
+func TestMutation_Error_TriggersRefetch(t *testing.T) {
+	cfg := config.Default()
+	gitHub := newFakeGitHub()
+	disp := newFakeDispatcher()
+	s := newTestStore(t, cfg, gitHub, disp)
+
+	ref := commentTestRef(1)
+	openPRWithID(t, s, gitHub, disp, ref, "PR_node_1")
+	before := gitHub.detailCallCount()
+
+	gitHub.setAddCommentFunc(func(context.Context, string, string) (model.IssueComment, model.RateLimit, error) {
+		return model.IssueComment{}, model.RateLimit{}, errors.New("boom: network failure")
+	})
+
+	s.AddComment("x")
+	runUntilIdle(t, disp)
+
+	if got := gitHub.detailCallCount() - before; got != 1 {
+		t.Errorf("detail calls after the failed mutation = %d, want 1 (the failure-triggered refetch)", got)
+	}
+}
+
 func TestMutation_GenerationGuard_SwitchPRSkipsApplyButStillInvalidates(t *testing.T) {
 	cfg := config.Default()
 	gitHub := newFakeGitHub()
