@@ -38,6 +38,24 @@ const (
 	CheckConclusionStale          CheckConclusion = "STALE"
 )
 
+// StatusState is the overall status-check rollup state for a pull request's
+// head commit, as reported by GitHub's statusCheckRollup field on a commit.
+// Unlike ChecksState (derived locally from a full list of Check values via
+// Summarize), this is the rollup GitHub itself computes and is available
+// from the search query, before the full per-check list has been fetched.
+// The empty string means the head commit has no status-check rollup at all
+// (no checks or statuses have ever been reported for it).
+type StatusState string
+
+// Known status-check rollup states, matching GitHub's StatusState enum.
+const (
+	StatusStateSuccess  StatusState = "SUCCESS"
+	StatusStateFailure  StatusState = "FAILURE"
+	StatusStatePending  StatusState = "PENDING"
+	StatusStateError    StatusState = "ERROR"
+	StatusStateExpected StatusState = "EXPECTED"
+)
+
 // Check is a single check run or commit status attached to a pull request's
 // head commit.
 type Check struct {

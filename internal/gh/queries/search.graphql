@@ -1,0 +1,93 @@
+query SearchPullRequests($q: String!, $cursor: String) {
+  search(query: $q, type: ISSUE, first: 50, after: $cursor) {
+    issueCount
+    pageInfo {
+      endCursor
+      hasNextPage
+    }
+    nodes {
+      ... on PullRequest {
+        id
+        number
+        title
+        state
+        isDraft
+        reviewDecision
+        author {
+          login
+        }
+        repository {
+          id
+          nameWithOwner
+        }
+        baseRefName
+        headRefName
+        headRefOid
+        createdAt
+        updatedAt
+        url
+        additions
+        deletions
+        changedFiles
+        viewerDidAuthor
+        labels(first: 20) {
+          nodes {
+            name
+            color
+          }
+        }
+        reviewRequests(first: 20) {
+          nodes {
+            asCodeOwner
+            requestedReviewer {
+              __typename
+              ... on User {
+                login
+              }
+              ... on Team {
+                slug
+              }
+              ... on Bot {
+                login
+              }
+              ... on Mannequin {
+                login
+              }
+              # No fragment for EnterpriseTeam: that type does not exist on
+              # GitHub Enterprise Server (RequestedReviewer there is only
+              # Bot | Mannequin | Team | User), and an inline fragment on a
+              # type absent from the schema is a query validation error,
+              # which would fail this query entirely on GHES. On
+              # github.com, __typename alone still correctly reports
+              # "EnterpriseTeam" for that case; it just has no slug
+              # available (see mapReviewer).
+            }
+          }
+        }
+        latestReviews(first: 20) {
+          nodes {
+            id
+            author {
+              login
+            }
+            state
+            submittedAt
+          }
+        }
+        commits(last: 1) {
+          nodes {
+            commit {
+              statusCheckRollup {
+                state
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+  rateLimit {
+    remaining
+    resetAt
+  }
+}

@@ -5,7 +5,7 @@ GitHub PR TUI application
 
 ## Status
 
-This project is under active development and is not yet usable end to end. Milestone **M1a (foundation and PR list)** is in progress: configuration, logging, the domain model, the disk cache store, and the browser launcher are implemented. The GitHub client, PR list UI, PR detail, diff view, editor, and review/mutation flows are still planned. See [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md) for the full status by requirement and milestone.
+This project is under active development and is not yet usable end to end. Milestone **M1a (foundation and PR list)** is in progress: configuration, logging, the domain model, the disk cache store, the browser launcher, the GitHub search client, and the PR list store are implemented. The PR list UI, PR detail, diff view, editor, and review/mutation flows are still planned. See [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md) for the full status by requirement and milestone.
 
 ## Features (roadmap)
 
@@ -23,7 +23,7 @@ This project is under active development and is not yet usable end to end. Miles
 | F10 | CI checks: rollup icon, check list, refreshed with the PR, open a check in the browser |
 | F11 | Every navigation/action key is remappable in config; the editor's own keys are fixed |
 
-Every feature above is planned; none is implemented yet. See [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md) for per-item status.
+F1's GitHub search client and list store (`internal/gh`, `internal/store`) exist; its TUI, and every other feature above, are still planned. See [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md) for per-item status.
 
 ## Requirements
 
@@ -59,7 +59,7 @@ browser: ""               # overrides $BROWSER
 highlight_style: github-dark
 tab_width: 4
 list:
-  state: open             # open | closed | merged | all
+  state: open             # open | closed (not merged) | merged | all
   sections:
     - name: Backend
       query: "org:acme label:backend"

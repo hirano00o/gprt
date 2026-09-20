@@ -76,16 +76,21 @@ type PullRequest struct {
 	ReviewRequests   []Reviewer
 	LatestReviews    []Review
 	Checks           []Check
-	Timeline         []TimelineItem
-	ReviewThreads    []ReviewThread
-	PendingReview    *Review
-	ReactionGroups   []ReactionGroup
-	ViewerCanUpdate  bool
-	ViewerDidAuthor  bool
-	ViewerCanClose   bool
-	ViewerCanReopen  bool
-	ViewerCanReact   bool
-	CreatedAt        time.Time
-	UpdatedAt        time.Time
-	URL              string
+	// RollupState is the head commit's overall status-check rollup, as
+	// returned directly by the search/list query. It drives the list's
+	// check icon before Checks (which needs the separate detail query) is
+	// populated.
+	RollupState     StatusState
+	Timeline        []TimelineItem
+	ReviewThreads   []ReviewThread
+	PendingReview   *Review
+	ReactionGroups  []ReactionGroup
+	ViewerCanUpdate bool
+	ViewerDidAuthor bool
+	ViewerCanClose  bool
+	ViewerCanReopen bool
+	ViewerCanReact  bool
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
+	URL             string
 }

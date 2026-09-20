@@ -30,8 +30,12 @@ type ListItem struct {
 }
 
 // RateLimit reports the GitHub API rate limit state returned alongside a
-// query result.
+// query result. Known is false when the server did not report a rate limit
+// at all (for example a GHES instance with rate limiting turned off, where
+// the GraphQL response's "rateLimit" field is null): Remaining and ResetAt
+// are then meaningless zero values, not "no limit" or "just reset".
 type RateLimit struct {
 	Remaining int
 	ResetAt   time.Time
+	Known     bool
 }

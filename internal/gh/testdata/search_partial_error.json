@@ -1,0 +1,70 @@
+{
+  "data": {
+    "search": {
+      "issueCount": 2,
+      "pageInfo": { "endCursor": "cursor-1", "hasNextPage": false },
+      "nodes": [
+        {
+          "id": "PR_1",
+          "number": 101,
+          "title": "Add feature A",
+          "state": "OPEN",
+          "isDraft": false,
+          "reviewDecision": null,
+          "author": { "login": "alice" },
+          "repository": { "id": "REPO_1", "nameWithOwner": "acme/widgets" },
+          "baseRefName": "main",
+          "headRefName": "feature-a",
+          "headRefOid": "abc123",
+          "createdAt": "2026-09-01T00:00:00Z",
+          "updatedAt": "2026-09-10T00:00:00Z",
+          "url": "https://example.com/acme/widgets/pull/101",
+          "additions": 1,
+          "deletions": 1,
+          "changedFiles": 1,
+          "viewerDidAuthor": false,
+          "labels": { "nodes": [] },
+          "reviewRequests": { "nodes": [] },
+          "latestReviews": { "nodes": [] },
+          "commits": { "nodes": [] }
+        },
+        {
+          "id": "PR_2",
+          "number": 102,
+          "title": "Fix bug B",
+          "state": "OPEN",
+          "isDraft": false,
+          "reviewDecision": null,
+          "author": { "login": "bob" },
+          "repository": { "id": "REPO_1", "nameWithOwner": "acme/widgets" },
+          "baseRefName": "main",
+          "headRefName": "fix-b",
+          "headRefOid": "def456",
+          "createdAt": "2026-09-02T00:00:00Z",
+          "updatedAt": "2026-09-11T00:00:00Z",
+          "url": "https://example.com/acme/widgets/pull/102",
+          "additions": 1,
+          "deletions": 1,
+          "changedFiles": 1,
+          "viewerDidAuthor": false,
+          "labels": { "nodes": [] },
+          "reviewRequests": {
+            "nodes": [
+              { "asCodeOwner": false, "requestedReviewer": null }
+            ]
+          },
+          "latestReviews": { "nodes": [] },
+          "commits": { "nodes": [] }
+        }
+      ]
+    },
+    "rateLimit": { "remaining": 100, "resetAt": "2026-09-11T00:00:00Z" }
+  },
+  "errors": [
+    {
+      "message": "You do not have permission to view this team",
+      "path": ["search", "nodes", 1, "reviewRequests", "nodes", 0, "requestedReviewer"],
+      "type": "INSUFFICIENT_SCOPES"
+    }
+  ]
+}
