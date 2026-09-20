@@ -423,6 +423,22 @@ func (f *fakeGitHub) UnresolveThread(_ context.Context, threadID string) (model.
 	return model.ReviewThread{ID: threadID, IsResolved: false, ViewerCanResolve: true}, model.RateLimit{}, nil
 }
 
+// AddReaction/RemoveReaction/MentionableUsers are not yet exercised by any
+// UI test (the M4 UI slice - reaction picker, mention completion from
+// mentionableUsers - is not implemented yet): these minimal stubs exist
+// only so *fakeGitHub keeps satisfying store.GitHub.
+func (f *fakeGitHub) AddReaction(context.Context, string, model.ReactionContent) ([]model.ReactionGroup, model.RateLimit, error) {
+	return nil, model.RateLimit{}, nil
+}
+
+func (f *fakeGitHub) RemoveReaction(context.Context, string, model.ReactionContent) ([]model.ReactionGroup, model.RateLimit, error) {
+	return nil, model.RateLimit{}, nil
+}
+
+func (f *fakeGitHub) MentionableUsers(context.Context, model.RepoRef, string, int) ([]model.User, model.RateLimit, error) {
+	return nil, model.RateLimit{}, nil
+}
+
 // CreatePendingReviewCalls returns how many times CreatePendingReview has
 // been called so far.
 func (f *fakeGitHub) CreatePendingReviewCalls() int {

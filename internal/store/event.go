@@ -53,6 +53,11 @@ const (
 	// than one dedicated to that single case, since later milestones (a
 	// submitted review's own confirmation, say) need the same shape.
 	EventNotice
+	// EventMentionableChanged fires whenever MentionableUsers() would
+	// return different data for the current pull request's repository: a
+	// cached or network result applied, or a switch to a pull request in a
+	// different repository whose own list has not resolved yet.
+	EventMentionableChanged
 )
 
 // Event is published synchronously, on the UI goroutine, by Subscribe

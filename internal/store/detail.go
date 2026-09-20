@@ -75,8 +75,17 @@ func (s *Store) DetailState() DetailState {
 // as true (or FetchedAt as non-zero) purely because the *previous* pull
 // request happened to leave it that way. Any cached detail for ref is then
 // applied immediately, marked Stale, before a network fetch starts under a
-// new generation.
+// new generation. ref.Repo's mentionable users (see mentionable.go) are
+// also loaded here, lazily, unless already fresh for that repository;
+// EventMentionableChanged fires immediately (synchronously, unlike the
+// fetch's own eventual apply) whenever ref's repository differs from the
+// previously open pull request's (or none was open before) — the value
+// MentionableUsers() returns can genuinely jump between two repositories'
+// independent lists at that instant, which a UI driven purely by events
+// would otherwise miss until some unrelated event happened to fire.
 func (s *Store) OpenPR(ref model.PRRef) {
+	repoChanged := s.current == nil || s.current.Repo != ref.Repo
+
 	s.current = &ref
 	s.currentPR = nil
 	s.detailErr = nil
@@ -95,6 +104,10 @@ func (s *Store) OpenPR(ref model.PRRef) {
 	// request is actually wrong yet.
 	s.recomputeLastErr()
 	s.startDetailFetch(true)
+	s.startMentionableUsersFetch(ref.Repo, false)
+	if repoChanged {
+		s.emit(Event{Kind: EventMentionableChanged})
+	}
 	s.emit(Event{Kind: EventPRChanged})
 	s.emit(Event{Kind: EventFilesChanged})
 	// resetFiles above may have just turned off a files fetch that was in
@@ -129,7 +142,11 @@ func (s *Store) RefreshPR() {
 // request, marks it stale (so the UI shows the existing detail as stale
 // immediately, rather than looking frozen until the fetch lands), and
 // re-fetches it from the network only (used by the "R" key, via Reload).
-// A no-op when no pull request is open.
+// It also force-refetches the current pull request's repository's
+// mentionable users (see mentionable.go's startMentionableUsersFetch),
+// ignoring whatever is cached or already fresh: "R" means "ignore the
+// cache and refetch", the same way it does for the pull request's own
+// detail and files. A no-op when no pull request is open.
 func (s *Store) ReloadPR() {
 	if s.current == nil {
 		return
@@ -142,6 +159,7 @@ func (s *Store) ReloadPR() {
 	s.detailStale = true
 	s.emit(Event{Kind: EventPRChanged})
 	s.startDetailFetch(false)
+	s.startMentionableUsersFetch(s.current.Repo, true)
 	// Reload files from the network only, but only if the Files tab has
 	// ever actually been opened for this pull request (filesStarted):
 	// without this guard, "R" on a pull request whose Files tab was never
