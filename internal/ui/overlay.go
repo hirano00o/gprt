@@ -50,9 +50,9 @@ func (a *App) closeOverlay() {
 }
 
 // helpContexts are the (label, Context) pairs the help overlay lists, in
-// display order. Only the contexts this milestone's router actually
-// resolves keys against are shown; the rest (diff, thread, comment, pr,
-// composer, files) arrive with the milestones that give them a pane.
+// display order. Only the contexts the router actually resolves keys
+// against today are shown; the rest (thread, comment, pr, composer) arrive
+// with the milestones that give them a pane.
 var helpContexts = []struct {
 	label string
 	ctx   keys.Context
@@ -60,6 +60,8 @@ var helpContexts = []struct {
 	{"Global", keys.ContextGlobal},
 	{"List", keys.ContextList},
 	{"Detail", keys.ContextDetail},
+	{"Files (tree)", keys.ContextFiles},
+	{"Diff", keys.ContextDiff},
 }
 
 func (a *App) buildHelpView() *tview.TextView {
@@ -115,8 +117,9 @@ func (a *App) buildMessagesView() *tview.TextView {
 		}
 	}
 	detailWarnings := a.deps.Store.DetailState().Warnings
+	filesWarnings := a.deps.Store.FilesState().Warnings
 
-	if len(warned) > 0 || len(detailWarnings) > 0 {
+	if len(warned) > 0 || len(detailWarnings) > 0 || len(filesWarnings) > 0 {
 		b.WriteString("\nWarnings:\n")
 		for _, s := range warned {
 			for _, w := range s.Warnings {
@@ -125,6 +128,9 @@ func (a *App) buildMessagesView() *tview.TextView {
 		}
 		for _, w := range detailWarnings {
 			fmt.Fprintf(&b, "  Pull request: %s\n", w)
+		}
+		for _, w := range filesWarnings {
+			fmt.Fprintf(&b, "  Files: %s\n", w)
 		}
 	}
 

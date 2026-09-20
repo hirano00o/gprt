@@ -154,14 +154,20 @@ func (s *Store) FileByPath(path string) (FileEntry, bool) {
 // with nothing currently loading resumes the sequence from the next
 // unfetched page instead of no-op'ing forever (see resumeFilesFetch). Call
 // LoadFiles(true) to force a fresh sequence regardless (used by Reload and
-// the HeadOID/ChangedFiles-change coupling in applyDetailResult).
+// the ChangedFiles-change coupling in applyDetailResult).
 //
 // force also controls whether each page's own cached entry is shown before
 // its network fetch resolves (force skips that cache read, mirroring
-// LoadList's own force parameter): the HeadOID/ChangedFiles-change coupling
-// always forces, since a cached page keyed only by page number - not by
-// HeadOID, see cachedFilesPage - would otherwise briefly show a *different*
-// commit's diff after a force-push.
+// LoadList's own force parameter) - except when CurrentPR().HeadOID has
+// already moved past filesHeadOID (a force-push, most commonly), which is
+// treated as forced regardless of the force argument: a cached page is
+// keyed only by page number, not by HeadOID (see cachedFilesPage), so
+// showing one would risk briefly displaying a *different* commit's diff
+// with no indication that it does not match what is actually open.
+// internal/ui's Files tab calls LoadFiles(false) on every EventPRChanged
+// while it is visible - not only the ones a force-push caused - so
+// LoadFiles must recognise this itself rather than relying on every
+// caller to know when to force.
 func (s *Store) LoadFiles(force bool) {
 	if s.current == nil {
 		return
@@ -172,6 +178,18 @@ func (s *Store) LoadFiles(force bool) {
 	}
 
 	headOID := s.currentPR.HeadOID
+	if s.filesStarted && s.filesHeadOID != headOID {
+		// The head commit has moved since files were last loaded for it (a
+		// force-push) — every internal/ui caller of LoadFiles(false) must
+		// still land here safely, not just the ones that already know to
+		// force: a cached page is keyed only by page number, not by
+		// HeadOID, so showing one now would risk briefly displaying the
+		// *previous* commit's diff with no indication that it does not
+		// match what is actually open.
+		s.filesWanted = false
+		s.startFilesFetch(headOID, false)
+		return
+	}
 	if !force && s.filesStarted && s.filesHeadOID == headOID {
 		if s.filesErr != nil && !s.filesLoading {
 			s.resumeFilesFetch()

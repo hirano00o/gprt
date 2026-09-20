@@ -26,6 +26,7 @@ func (a *App) subscribeStore() {
 			a.renderStatusBar(0)
 		case store.EventPRChanged:
 			a.renderPRTab()
+			a.onPRChangedForFiles()
 		case store.EventPRLoadingChanged:
 			a.renderStatusBar(0)
 			// A failed fetch changes DetailState().Err/Loading without
@@ -34,6 +35,23 @@ func (a *App) subscribeStore() {
 			// "Loading pull request..." forever instead of showing the
 			// error (see detail.go's emptyPRBlock).
 			a.renderPRTab()
+		case store.EventFilesChanged:
+			a.rebuildFileTree()
+			a.refreshCurrentFile()
+			a.checkFilesWarnings()
+		case store.EventFileHighlighted:
+			// FilesState().Highlighting (the status bar's "highlighting N"
+			// segment) decrements on every hunk highlight job's
+			// completion, for any file, not just the one currently open —
+			// re-render unconditionally, or it can freeze at whatever
+			// count happened to be current the last time some other event
+			// triggered a render.
+			a.renderStatusBar(a.spinnerFrame)
+			if ev.Path == a.currentFilePath {
+				a.refreshCurrentFile()
+			}
+		case store.EventFilesLoadingChanged:
+			a.renderStatusBar(0)
 		case store.EventError:
 			if ev.Err != nil {
 				a.showToast(ev.Err.Error(), theme.Error)

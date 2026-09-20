@@ -3,6 +3,8 @@ package ui
 import (
 	"time"
 
+	"github.com/rivo/tview"
+
 	"github.com/hirano00o/gprt/internal/model"
 	"github.com/hirano00o/gprt/internal/ui/theme"
 	"github.com/hirano00o/gprt/internal/ui/widget"
@@ -186,19 +188,90 @@ func (a *App) focusList() {
 	a.app.SetFocus(a.listView)
 }
 
-// focusDetail moves focus to the detail column's currently visible tab.
-func (a *App) focusDetail() {
-	a.app.SetFocus(a.detailPages)
+// focusSequence returns the ordered, currently reachable panes
+// global.focus_left/right (Ctrl-w h/l) cycle through: the PR list, then
+// whichever pane(s) the active detail tab exposes — just the PR tab's
+// DetailView for "pr", or the file tree (when not hidden by
+// files.toggle_tree) followed by the diff for "files".
+func (a *App) focusSequence() []tview.Primitive {
+	seq := []tview.Primitive{a.listView}
+	if a.currentTab == "files" {
+		if a.treeExpanded {
+			seq = append(seq, a.treeView)
+		}
+		seq = append(seq, a.diffView)
+	} else {
+		seq = append(seq, a.prView)
+	}
+	return seq
 }
 
-// isDetailFocused reports whether either detail tab currently has focus.
+// focusDetail moves focus to the detail column's first pane for whichever
+// tab is currently active (the PR tab's DetailView, or the Files tab's
+// tree — or its diff, if the tree is hidden).
+func (a *App) focusDetail() {
+	if seq := a.focusSequence(); len(seq) > 1 {
+		a.app.SetFocus(seq[1])
+	}
+}
+
+// isDetailFocused reports whether any detail-column pane currently has
+// focus.
 func (a *App) isDetailFocused() bool {
 	switch a.app.GetFocus() {
-	case a.prView, a.filesView:
+	case a.prView, a.treeView, a.diffView:
 		return true
 	default:
 		return false
 	}
+}
+
+// focusPrevPane moves focus to the pane before the currently focused one in
+// focusSequence (global.focus_left, "Ctrl-w h"): list ⇄ detail on the PR
+// tab, or diff → tree → list on the Files tab. Landing on the list
+// re-expands it first (never focusing a zero-width pane); a no-op when
+// already on the first pane, or when focus is on some other primitive
+// entirely (an overlay, the filter, ...), in which case it falls back to
+// the list.
+func (a *App) focusPrevPane() {
+	seq := a.focusSequence()
+	cur := a.app.GetFocus()
+	for i, p := range seq {
+		if p != cur {
+			continue
+		}
+		if i == 0 {
+			return
+		}
+		if seq[i-1] == a.listView {
+			a.focusList()
+			return
+		}
+		a.app.SetFocus(seq[i-1])
+		return
+	}
+	a.focusList()
+}
+
+// focusNextPane moves focus to the pane after the currently focused one in
+// focusSequence (global.focus_right, "Ctrl-w l"): list ⇄ detail on the PR
+// tab, or list → tree → diff on the Files tab. A no-op when already on the
+// last pane; falls back to the detail column's first pane when focus is on
+// some other primitive entirely.
+func (a *App) focusNextPane() {
+	seq := a.focusSequence()
+	cur := a.app.GetFocus()
+	for i, p := range seq {
+		if p != cur {
+			continue
+		}
+		if i == len(seq)-1 {
+			return
+		}
+		a.app.SetFocus(seq[i+1])
+		return
+	}
+	a.focusDetail()
 }
 
 // toggleListColumn shows or hides the PR list column (global.toggle_list,
@@ -241,6 +314,11 @@ func (a *App) switchTab(name string, index int) {
 	a.currentTab = name
 	a.detailPages.SwitchToPage(name)
 	a.tabBar.SetActive(index)
+	if name == "files" {
+		a.deps.Store.LoadFiles(false)
+		a.rebuildFileTree()
+		a.refreshCurrentFile()
+	}
 	if a.isDetailFocused() {
 		a.focusDetail()
 	}
@@ -323,8 +401,14 @@ func (a *App) reload() {
 // PR URL when the list has focus (so browsing does not wait for the
 // preview debounce); the selected block's own URL when the PR tab has
 // focus, falling back to the open pull request's URL when the current
-// block has none of its own (for example a commit or event row); otherwise
-// whatever pull request is currently open, if any.
+// block has none of its own (for example a commit or event row); the
+// cursor's own review thread's URL when the diff has focus and one is
+// under it; otherwise, when either the diff or the tree has focus, the
+// open pull request's own "/files" URL; otherwise whatever pull request is
+// currently open, if any. Every focus for which a pull request can be open
+// at all toasts "no pull request open" rather than silently doing nothing
+// when none is (M2 review round 3, item 26: the tree had no case of its
+// own before this, silently falling into the generic default branch).
 func (a *App) openCurrentInBrowser() {
 	var url string
 	switch {
@@ -342,6 +426,24 @@ func (a *App) openCurrentInBrowser() {
 				// its own: without this, "o" here would silently do
 				// nothing, leaving the user unsure whether the key even
 				// registered.
+				a.showToast("no pull request open", theme.Warning)
+				return
+			}
+		}
+	case a.app.GetFocus() == a.diffView, a.app.GetFocus() == a.treeView:
+		if a.app.GetFocus() == a.diffView {
+			if t, ok := a.diffView.CursorThread(); ok && len(t.Comments) > 0 {
+				url = t.Comments[0].URL
+			}
+		}
+		if url == "" {
+			if pr := a.deps.Store.CurrentPR(); pr != nil {
+				url = pr.URL + "/files"
+			} else {
+				// Same "tell the user there is nothing to open" rule as the
+				// PR tab's own empty state, above: the tree had no case of
+				// its own at all before this, so "o" there fell into the
+				// generic default branch below and silently did nothing.
 				a.showToast("no pull request open", theme.Warning)
 				return
 			}

@@ -335,6 +335,69 @@ func TestOpenPR_HeadOIDChangeReloadsFilesForcingReload(t *testing.T) {
 	}
 }
 
+// TestLoadFiles_ForcesReloadWithoutCacheWhenHeadOIDAlreadyChanged is the
+// regression test for a UI-layer bug: internal/ui's Files tab calls
+// LoadFiles(false) on every EventPRChanged while it is visible, so that
+// call can land *after* CurrentPR().HeadOID has already moved (a
+// force-push) but before whatever caller is meant to force a reload for
+// it gets a chance to run. Since a cached files page is keyed only by
+// page number, not by HeadOID, LoadFiles(false) falling through to its
+// usual cache-first behaviour in that situation would risk briefly
+// showing the *previous* commit's diff with no indication that it does
+// not match what is actually open. LoadFiles must recognise
+// filesHeadOID != CurrentPR().HeadOID itself and force a reload
+// regardless of its own force argument.
+func TestLoadFiles_ForcesReloadWithoutCacheWhenHeadOIDAlreadyChanged(t *testing.T) {
+	gitHub := newFakeGitHub()
+	disp := newFakeDispatcher()
+	ref := filesTestRef()
+	s := newFilesTestStore(t, gitHub, disp, ref, "head1")
+
+	gitHub.setFilesFunc(func(context.Context, model.PRRef, int, string) (gh.FilesResult, error) {
+		return gh.FilesResult{Files: []model.ChangedFile{changedFile("a.go", "")}}, nil
+	})
+	s.LoadFiles(false)
+	runUntilIdle(t, disp)
+	if files := s.Files(); len(files) != 1 || files[0].File.Path != "a.go" {
+		t.Fatalf("Files() = %+v, want the initial single file a.go", files)
+	}
+
+	// CurrentPR() now reports a different HeadOID (as if a detail refresh
+	// had already applied a force-push) *before* LoadFiles(false) is
+	// called again — mirroring internal/ui's own onPRChangedForFiles,
+	// which calls LoadFiles(false) unconditionally on every EventPRChanged
+	// while the Files tab is visible, not just the ones caused by a
+	// force-push.
+	s.currentPR.HeadOID = "head2"
+	gitHub.setFilesFunc(func(context.Context, model.PRRef, int, string) (gh.FilesResult, error) {
+		return gh.FilesResult{Files: []model.ChangedFile{changedFile("b.go", "")}}, nil
+	})
+
+	s.LoadFiles(false)
+
+	// Checked synchronously, before the real (head2) network fetch below
+	// has any chance to resolve: applyCachedFilesPage runs synchronously
+	// within LoadFiles' own call stack, so a bugged, cache-first
+	// LoadFiles(false) would already have shown head1's cached a.go here,
+	// marked FilesState().Stale, before the goroutine below ever runs.
+	if files := s.Files(); len(files) != 0 {
+		t.Fatalf("Files() = %+v immediately after LoadFiles(false) with a changed HeadOID, want empty (no stale head1 cache shown) until head2's own fetch resolves", files)
+	}
+	if s.FilesState().Stale {
+		t.Error("FilesState().Stale = true immediately after LoadFiles(false) with a changed HeadOID, want it never set: a cache-first page is keyed by page number only, so it could belong to head1, not head2")
+	}
+
+	runUntilIdle(t, disp)
+
+	files := s.Files()
+	if len(files) != 1 || files[0].File.Path != "b.go" {
+		t.Fatalf("Files() = %+v, want reloaded to head2's single file b.go even though LoadFiles was called with force=false", files)
+	}
+	if s.FilesState().Stale {
+		t.Error("FilesState().Stale = true after the head2 reload resolved, want it cleared (no cache-first page was ever shown for head2)")
+	}
+}
+
 func TestReload_ReloadsFiles(t *testing.T) {
 	gitHub := newFakeGitHub()
 	disp := newFakeDispatcher()

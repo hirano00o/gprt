@@ -59,6 +59,7 @@ func run() error {
 	}()
 
 	theme.Apply()
+	theme.SetHighlightStyle(cfg.HighlightStyle)
 
 	cacheDir, err := config.CacheDir()
 	if err != nil {

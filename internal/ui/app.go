@@ -66,8 +66,56 @@ type App struct {
 	tabBar       *tabBarView
 	detailPages  *tview.Pages
 	prView       *widget.DetailView
-	filesView    *tview.TextView
 	currentTab   string
+
+	// Files tab: a tree of changed files (left) and the diff of whichever
+	// file is selected (right) — see files.go.
+	filesFlex    *tview.Flex
+	treeView     *tview.TreeView
+	diffView     *widget.DiffView
+	treeExpanded bool
+	// currentFilePath is the path of the file currently shown in diffView,
+	// or "" when nothing has been opened yet (no pull request open, or its
+	// files have not loaded any entries yet).
+	currentFilePath string
+	// wantedFilePath is the path the user most recently asked to open
+	// (openFile), kept separate from currentFilePath: when rebuildFileTree
+	// cannot find it among the currently loaded files (its own page has
+	// not arrived, or re-arrived after a reload, yet) it falls back to
+	// some other node so the tree is never left with none at all — see
+	// onTreeNodeChanged and lastFallbackNode — without losing track of
+	// what to restore once the wanted file's data does arrive.
+	wantedFilePath string
+	// lastFallbackNode is the specific *tview.TreeNode rebuildFileTree
+	// most recently gave the tree as that placeholder selection. The
+	// tree's own SetChangedFunc fires for this transition exactly like it
+	// would for real navigation; comparing against this lets
+	// onTreeNodeChanged tell the two apart, one time only, so a
+	// placeholder selection's own resulting event never overwrites
+	// wantedFilePath.
+	lastFallbackNode *tview.TreeNode
+	// dirExpansion remembers each directory's own collapsed/expanded state
+	// across rebuilds, keyed by path prefix exactly like
+	// collectDirExpansion's own return value: a rebuild that catches the
+	// tree in a transient, empty state (a force-push/"R" reload's own
+	// resetFiles clears Store.Files() before the new page arrives — see
+	// LoadFiles' doc comment) would otherwise collect an empty map right
+	// then, discarding every collapse state the user had set, well before
+	// the rebuild that actually has files to apply it to ever runs.
+	// rebuildFileTree only overwrites this field when a rebuild's own
+	// collectDirExpansion call is non-empty, so a transient empty rebuild
+	// leaves it untouched for the next, real one to use instead.
+	dirExpansion map[string]bool
+	// filesForRef is the pull request Files-tab state (currentFilePath,
+	// the tree) was last built for, so a switch to a *different* pull
+	// request resets them instead of trying to resolve the previous PR's
+	// file path against the new one's file list (see subscribeStore's
+	// EventPRChanged handler).
+	filesForRef *model.PRRef
+	// filesWarned tracks whether FilesState().Warnings' current contents
+	// have already been toasted once, matching warnedSections' role for
+	// section warnings — reset once the warnings clear.
+	filesWarned bool
 
 	row          *tview.Flex
 	listColumn   *tview.Flex

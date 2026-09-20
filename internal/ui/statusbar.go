@@ -100,8 +100,13 @@ func (a *App) hintForFocus() string {
 		return "j/k move  gg/G top/bottom  / filter  Enter open  o browser  R reload  ? help  q quit"
 	case a.prView:
 		return "j/k move  gg/G top/bottom  o browser  gt/Ctrl-l next tab  gT/Ctrl-h prev tab  Ctrl-w h back  ? help  q quit"
-	case a.filesView:
-		return "gt/Ctrl-l next tab  gT/Ctrl-h prev tab  Ctrl-w h back  ? help  q quit"
+	case a.treeView:
+		return "j/k move  h/l collapse/expand  Enter/l open  Ctrl-w t hide tree  Ctrl-w l diff  gt/Ctrl-l next tab  ? help  q quit"
+	case a.diffView:
+		if a.treeExpanded {
+			return "j/k move  V select  za fold  ]c/[c thread  ]f/[f file  zh/zl scroll  o browser  Ctrl-w h tree  Ctrl-w t hide tree  gt/Ctrl-l next tab  ? help  q quit"
+		}
+		return "j/k move  V select  za fold  ]c/[c thread  ]f/[f file  zh/zl scroll  o browser  Ctrl-w t show tree  Ctrl-w h list  gt/Ctrl-l next tab  ? help  q quit"
 	case a.filterInput:
 		return "type to filter  Enter keep  Esc clear"
 	case a.cmdLine:
@@ -128,6 +133,9 @@ func (a *App) renderStatusBar(spinnerFrame int) {
 	var right string
 	if st.Loading() {
 		right += string(spinnerFrames[spinnerFrame%len(spinnerFrames)]) + "  "
+	}
+	if a.currentTab == "files" {
+		right += a.filesStatusSummary()
 	}
 	if rl := st.RateLimit(); rl.Known {
 		right += fmt.Sprintf("rate %d  ", rl.Remaining)

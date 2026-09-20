@@ -4,9 +4,9 @@ Reference for gprt's default keybindings. This is the source for the in-app `?` 
 
 ## Status
 
-`internal/ui/keys` (normalisation, vim-notation parsing, the full default keymap below, `Merge` validation, and the `Sequencer` multi-key/count state machine) and the router (`internal/ui`) are implemented (M1a). The **Status** column below marks each binding `Done (M1a)` once the *action itself* has an effect — reaching it through the Sequencer and dispatch table is not enough on its own if the pane or feature it controls does not exist yet. Every binding is present in the keymap and listed by `?`/`:help` regardless of its status, since remapping validation (`keys:` in config) does not depend on whether an action is implemented yet.
+`internal/ui/keys` (normalisation, vim-notation parsing, the full default keymap below, `Merge` validation, and the `Sequencer` multi-key/count state machine) and the router (`internal/ui`) are implemented (M1a). The **Status** column below marks each binding `Done (M1a)` once the *action itself* has an effect — reaching it through the Sequencer and dispatch table is not enough on its own if the pane or feature it controls does not exist yet. Every binding is present in the keymap and listed by `?`/`:help` regardless of its status, since remapping validation (`keys:` in config) does not depend on whether an action is implemented yet — including bindings in `thread`/`comment`/`pr`/`composer`, contexts `keys.Context` already defines but `App.currentContexts` never actually resolves a keypress against today (no focused pane maps to any of them yet; only `global`/`list`/`detail`/`files`/`diff` do), so those bindings are listed but unreachable until the panes/features that would give them focus arrive with M3a/M3b.
 
-The `?` help and `:messages` overlays are scrollable `TextView`s: `q` or `Esc` closes either one (pressing `?` again also closes the help overlay specifically), and every other key — including `j`/`k`/`gg`/`G`/`PgUp`/`PgDn` — is left to the `TextView`'s own native scrolling rather than being swallowed by the router. The same "let it through" rule applies to the **[Files]** tab's still-placeholder `TextView` for any key gprt does not bind in the `detail` context. The **[PR]** tab (`widget.DetailView`, M1b) is different: `list.down`/`up`/`top`/`bottom`/`half_down`/`half_up` are now bound in the `detail` context too and move its own cursor over the header/description/checks/conversation blocks (the router picks whichever `ListView`-backed pane — the PR list or the PR tab — currently has focus); a key genuinely bound in no context still falls through unchanged.
+The `?` help and `:messages` overlays are scrollable `TextView`s: `q` or `Esc` closes either one (pressing `?` again also closes the help overlay specifically), and every other key — including `j`/`k`/`gg`/`G`/`PgUp`/`PgDn` — is left to the `TextView`'s own native scrolling rather than being swallowed by the router. `list.down`/`up`/`top`/`bottom`/`half_down`/`half_up` are bound in the `files`/`detail`/`diff` contexts too and move whichever movable pane currently has focus — the PR list, the PR tab, the Files tab's tree, or its diff. For the tree specifically, these actions are routed through a `treeMovablePane` adapter that synthesises `tview.TreeView`'s own native `j`/`k`/PgUp/PgDn keys (repeating `k`/`j` for top/bottom, since `tview.TreeView`'s native `g`/`G` only scroll the viewport and never move the selection itself) rather than reimplementing tree traversal by hand, so the visible movement is unchanged from the tree's native behaviour. `K`/`J` (parent/child navigation) remain `tview.TreeView`'s own, unmapped by gprt's keymap. `h` is added on top of the tree's native handling via its own `SetInputCapture` (collapse-or-parent); `l` is the remappable `list.open` action (`Enter`'s row below), routed to `treeOpen` when the tree has focus rather than the list's own `Select`. A key genuinely bound in no context still falls through unchanged.
 
 ## Remapping
 
@@ -27,24 +27,24 @@ The vim editor's own keys (listed at the bottom of this document) are **fixed** 
 
 | Key | Context | Action | Action ID | Status |
 |-----|---------|--------|-----------|--------|
-| `j` | list / diff / tree / detail | move down | `list.down` | Done (M1a list; M1b PR tab) |
-| `k` | list / diff / tree / detail | move up | `list.up` | Done (M1a list; M1b PR tab) |
-| `gg` | list / diff / tree / detail | move to top | `list.top` | Done (M1a list; M1b PR tab) |
-| `G` | list / diff / tree / detail | move to bottom | `list.bottom` | Done (M1a list; M1b PR tab) |
-| `Ctrl-d` | list / diff / tree / detail | move down half a page | `list.half_down` | Done (M1a list; M1b PR tab) |
-| `Ctrl-u` | list / diff / tree / detail | move up half a page | `list.half_up` | Done (M1a list; M1b PR tab) |
-| `Ctrl-w h` | global | focus previous column (list ⇄ detail; in Files: tree ⇄ diff) | `global.focus_left` | Done (M1a) |
-| `Ctrl-w l` | global | focus next column (list ⇄ detail; in Files: tree ⇄ diff) | `global.focus_right` | Done (M1a) |
+| `j` | list / files / diff / detail | move down; in the tree, its own native movement reached via `treeMovablePane` (see the Status section above) | `list.down` | Done (M1a list; M1b PR tab; M2 diff, tree) |
+| `k` | list / files / diff / detail | move up; in the tree, its own native movement | `list.up` | Done (M1a list; M1b PR tab; M2 diff, tree) |
+| `gg` | list / files / diff / detail | move to top; in the tree, repeated native `k` presses (its own native `g` only scrolls, see the Status section above) | `list.top` | Done (M1a list; M1b PR tab; M2 diff, tree) |
+| `G` | list / files / diff / detail | move to bottom; in the tree, repeated native `j` presses | `list.bottom` | Done (M1a list; M1b PR tab; M2 diff, tree) |
+| `Ctrl-d` | list / files / diff / detail | move down half a page | `list.half_down` | Done (M1a list; M1b PR tab; M2 diff, tree) |
+| `Ctrl-u` | list / files / diff / detail | move up half a page | `list.half_up` | Done (M1a list; M1b PR tab; M2 diff, tree) |
+| `Ctrl-w h` | global | focus previous pane (list ⇄ detail; in Files: list → tree → diff, and back) | `global.focus_left` | Done (M1a; M2 Files tab) |
+| `Ctrl-w l` | global | focus next pane (list ⇄ detail; in Files: list → tree → diff, and back) | `global.focus_right` | Done (M1a; M2 Files tab) |
 | `Ctrl-w j` | composer open | focus down into the composer | `global.focus_down`¹ | Planned (M3a) |
 | `Ctrl-w k` | composer open | focus up out of the composer, back to diff/detail | `global.focus_up`¹ | Planned (M3a) |
-| `Ctrl-l`, `gt` | detail | switch to the next tab (PR → Files) | `detail.tab_next` | Done (M1a) |
-| `Ctrl-h`, `gT` | detail | switch to the previous tab (Files → PR); `Ctrl-h` equals Backspace on legacy terminals, so it is only bound outside text input | `detail.tab_prev` | Done (M1a) |
+| `Ctrl-l`, `gt` | detail / tree / diff | switch to the next tab (PR → Files) | `detail.tab_next` | Done (M1a) |
+| `Ctrl-h`, `gT` | detail / tree / diff | switch to the previous tab (Files → PR); `Ctrl-h` equals Backspace on legacy terminals, so it is only bound outside text input | `detail.tab_prev` | Done (M1a) |
 | `Ctrl-w o` | global | toggle the PR list column | `global.toggle_list` | Done (M1a) |
-| `Ctrl-w t` | Files | toggle the file tree | `files.toggle_tree` | Planned (M2) |
+| `Ctrl-w t` | Files / diff | toggle the file tree (bound in both, so it stays reachable from the diff once the tree is hidden) | `files.toggle_tree` | Done (M2) |
 | `R` | global | reload the list and the current PR, ignoring cache | `global.reload` | Done |
 | `/` | list | open the filter input (`Esc` clears) | `list.filter` | Done (M1a) |
-| `Enter`, `l` | list | open the selected PR and focus the detail pane; in the tree: open the file and focus the diff | `list.open` | Done (M1a trigger; M1b shows the full PR tab) |
-| `V` | diff | start visual line selection for a range comment; `Esc` cancels | `diff.visual` | Planned (M2) |
+| `Enter`, `l` | list / tree | open the selected PR and focus the detail pane; in the tree: expand a directory, or open a file and focus the diff | `list.open` | Done (M1a PR list; M2 tree) |
+| `V` | diff | start visual line selection for a range comment; `Esc` cancels | `diff.visual` | Done (M2 selection; comment creation M3b) |
 | `c` | diff | new comment on the current line or visual selection | `diff.comment` | Planned (M2, M3b) |
 | `c` | PR tab | new general comment on the PR | `diff.comment`² | Planned (M3a) |
 | `c` | on a thread | reply (same as `r`) | `thread.reply`² | Planned (M3b) |
@@ -58,16 +58,16 @@ The vim editor's own keys (listed at the bottom of this document) are **fixed** 
 | `S` | PR open | open the submit review dialog | `pr.submit` | Planned (M4) |
 | `n` | list | create a PR | `list.new_pr` | Planned (M5) |
 | `E` | PR | edit PR meta (title / base / labels / reviewers / draft) | `pr.edit` | Planned (M5) |
-| `o` | any | open in browser: the list cursor's PR on the list, the selected block's own URL on the PR tab (falling back to the pull request's URL when the block has none of its own, for example a commit or event row), otherwise the currently open pull request | `global.open_browser` | Done |
-| `za` | diff | fold the thread under the cursor | `diff.fold` | Planned (M2) |
-| `zR` | diff | unfold all threads | `diff.unfold_all` | Planned (M2) |
-| `zM` | diff | fold all threads | `diff.fold_all` | Planned (M2) |
-| `zh` | diff | scroll left | `diff.scroll_left` | Planned (M2) |
-| `zl` | diff | scroll right | `diff.scroll_right` | Planned (M2) |
-| `]c` | diff | jump to the next thread | `diff.next_thread` | Planned (M2) |
-| `[c` | diff | jump to the previous thread | `diff.prev_thread` | Planned (M2) |
-| `]f` | diff | jump to the next file | `diff.next_file` | Planned (M2) |
-| `[f` | diff | jump to the previous file | `diff.prev_file` | Planned (M2) |
+| `o` | any | open in browser: the list cursor's PR on the list, the selected block's own URL on the PR tab (falling back to the pull request's URL when the block has none of its own, for example a commit or event row), the thread comment's URL on the diff when the cursor is on a thread (otherwise the pull request's own `/files` URL, also used on the tree), otherwise the currently open pull request | `global.open_browser` | Done |
+| `za` | diff | fold the thread under the cursor | `diff.fold` | Done (M2) |
+| `zR` | diff | unfold all threads | `diff.unfold_all` | Done (M2) |
+| `zM` | diff | fold all threads | `diff.fold_all` | Done (M2) |
+| `zh` | diff | scroll left | `diff.scroll_left` | Done (M2) |
+| `zl` | diff | scroll right | `diff.scroll_right` | Done (M2) |
+| `]c` | diff | jump to the next thread | `diff.next_thread` | Done (M2) |
+| `[c` | diff | jump to the previous thread | `diff.prev_thread` | Done (M2) |
+| `]f` | diff | jump to the next file | `diff.next_file` | Done (M2) |
+| `[f` | diff | jump to the previous file | `diff.prev_file` | Done (M2) |
 | `?` | global | help (pressing it again while help is open closes it) | `global.help` | Done (M1a) |
 | `q` | global | close the topmost dialog/composer, otherwise quit | `global.quit` | Done (M1a, list/detail/overlay) |
 | `Ctrl-c` | global | quit; asks for confirmation only while a mutation is in flight | `global.quit`³ | Done (M1a; the confirmation itself arrives with M3a's mutation queue) |
