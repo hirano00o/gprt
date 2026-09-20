@@ -181,7 +181,7 @@ type App struct {
 
 	seq *keys.Sequencer
 
-	overlay    string // "" | "help" | "messages" | "confirm" | "choice" | "pending" | "pendingConfirm"
+	overlay    string // "" | "help" | "messages" | "confirm" | "choice" | "pending" | "pendingConfirm" | "reaction"
 	savedFocus tview.Primitive
 
 	// choiceMenu/choiceOnChoose back the "choice" overlay (see
@@ -203,6 +203,14 @@ type App struct {
 	// filesWarned/warnedSections' own "warn once, reset once resolved"
 	// shape.
 	pendingListDraftsWarned bool
+
+	// reactionPickerView/reactionSubjectID back the "reaction" overlay
+	// (reactionpicker.go's openReactionPicker/closeReactionPicker): the
+	// eight known reactions for reactionSubjectID (the pull request
+	// itself, an issue comment, a review, or a review comment), each row's
+	// count/marker re-rendered on EventPRChanged while open.
+	reactionPickerView *tview.List
+	reactionSubjectID  string
 
 	// rowIndex maps a ListRow.ID (a PR's PRRef.Key()) to the data needed
 	// to preview it and to decide whether reaching it should trigger

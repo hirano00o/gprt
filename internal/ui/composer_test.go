@@ -827,3 +827,143 @@ func TestComposerDraftCountShowsInStatusBar(t *testing.T) {
 	waitFor(t, app.app, func() bool { return app.draftCount() == 1 })
 	waitFor(t, app.app, func() bool { return containsSubstring(app.statusBar.right, "✎ 1") })
 }
+
+// TestMentionCandidatesMergesRepositoryUsersAfterParticipantsDeduped covers
+// mentionCandidates appending Store.MentionableUsers() after the PR-derived
+// participants: fixtureDetailPR's own participants (alice, bob, carol,
+// dave, in that order — see mentionCandidates' own doc comment) come
+// first, then the repository's mentionable users, with a repeat of an
+// already-listed participant (carol) skipped rather than duplicated.
+func TestMentionCandidatesMergesRepositoryUsersAfterParticipantsDeduped(t *testing.T) {
+	app, _, fake, _ := newTestApp(t, nil)
+	ref := fixtureRef(1)
+	pr := fixtureDetailPR(ref)
+	fake.SetMentionableUsers(ref.Repo, []model.User{
+		{Login: "carol", Name: "Carol Repeated"}, // already a participant: must not duplicate
+		{Login: "erin"},
+		{Login: "frank"},
+	})
+	openDetailForComposer(t, app, fake, pr)
+	waitFor(t, app.app, func() bool { return len(app.deps.Store.MentionableUsers()) == 3 })
+
+	got := query(app.app, func() []string {
+		var logins []string
+		for _, c := range app.mentionCandidates("") {
+			logins = append(logins, c.Login)
+		}
+		return logins
+	})
+	want := []string{"alice", "bob", "carol", "dave", "erin", "frank"}
+	if len(got) != len(want) {
+		t.Fatalf("mentionCandidates logins = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("mentionCandidates logins = %v, want %v", got, want)
+		}
+	}
+}
+
+// TestMentionCandidatesBackfillsNameFromMentionableUsers covers a
+// participant added with no Name (fixtureDetailPR's "bob", a
+// ReviewRequests entry — model.Reviewer has no Name field at all) getting
+// its Name filled in from Store.MentionableUsers() once that repository's
+// fetch resolves, as a single candidate — not a second, duplicate entry —
+// still in its original participant-priority position.
+func TestMentionCandidatesBackfillsNameFromMentionableUsers(t *testing.T) {
+	app, _, fake, _ := newTestApp(t, nil)
+	ref := fixtureRef(1)
+	pr := fixtureDetailPR(ref)
+	fake.SetMentionableUsers(ref.Repo, []model.User{{Login: "bob", Name: "Bob Smith"}})
+	openDetailForComposer(t, app, fake, pr)
+	waitFor(t, app.app, func() bool { return len(app.deps.Store.MentionableUsers()) == 1 })
+
+	got := query(app.app, func() []editor.Candidate { return app.mentionCandidates("") })
+	var bobCount int
+	var bobName string
+	for _, c := range got {
+		if c.Login == "bob" {
+			bobCount++
+			bobName = c.Name
+		}
+	}
+	if bobCount != 1 {
+		t.Fatalf("candidate list has %d entries for bob, want exactly 1", bobCount)
+	}
+	if bobName != "Bob Smith" {
+		t.Fatalf("bob's candidate Name = %q, want it backfilled to %q", bobName, "Bob Smith")
+	}
+}
+
+// TestMentionCandidatesFuzzyMatchesSubsequences covers "hro" fuzzy-matching
+// "hirano00o" (F5 / docs/DESIGN.md: sahilm/fuzzy-based completion) — a
+// plain prefix match alone would reject this.
+func TestMentionCandidatesFuzzyMatchesSubsequences(t *testing.T) {
+	app, _, fake, _ := newTestApp(t, nil)
+	ref := fixtureRef(1)
+	fake.SetMentionableUsers(ref.Repo, []model.User{{Login: "hirano00o"}})
+	openDetailForComposer(t, app, fake, fixtureDetailPR(ref))
+	waitFor(t, app.app, func() bool { return len(app.deps.Store.MentionableUsers()) == 1 })
+
+	got := query(app.app, func() []editor.Candidate { return app.mentionCandidates("hro") })
+	if len(got) != 1 || got[0].Login != "hirano00o" {
+		t.Fatalf("mentionCandidates(%q) = %+v, want a single hirano00o match", "hro", got)
+	}
+}
+
+// TestMentionCandidatesFuzzyMatchIsCaseInsensitive covers an uppercase
+// query still matching a lowercase login.
+func TestMentionCandidatesFuzzyMatchIsCaseInsensitive(t *testing.T) {
+	app, _, fake, _ := newTestApp(t, nil)
+	ref := fixtureRef(1)
+	fake.SetMentionableUsers(ref.Repo, []model.User{{Login: "hirano00o"}})
+	openDetailForComposer(t, app, fake, fixtureDetailPR(ref))
+	waitFor(t, app.app, func() bool { return len(app.deps.Store.MentionableUsers()) == 1 })
+
+	got := query(app.app, func() []editor.Candidate { return app.mentionCandidates("HIR") })
+	if len(got) != 1 || got[0].Login != "hirano00o" {
+		t.Fatalf("mentionCandidates(%q) = %+v, want a single hirano00o match", "HIR", got)
+	}
+}
+
+// TestMentionCandidatesFuzzyRanksExactPrefixFirst covers a candidate whose
+// login starts with the query ranking ahead of one where the query only
+// appears as a scattered subsequence.
+func TestMentionCandidatesFuzzyRanksExactPrefixFirst(t *testing.T) {
+	app, _, fake, _ := newTestApp(t, nil)
+	ref := fixtureRef(1)
+	fake.SetMentionableUsers(ref.Repo, []model.User{{Login: "malice"}})
+	openDetailForComposer(t, app, fake, fixtureDetailPR(ref)) // author's login is "alice"
+	waitFor(t, app.app, func() bool { return len(app.deps.Store.MentionableUsers()) == 1 })
+
+	got := query(app.app, func() []editor.Candidate { return app.mentionCandidates("ali") })
+	aliceIdx, maliceIdx := -1, -1
+	for i, c := range got {
+		switch c.Login {
+		case "alice":
+			aliceIdx = i
+		case "malice":
+			maliceIdx = i
+		}
+	}
+	if aliceIdx == -1 || maliceIdx == -1 {
+		t.Fatalf("mentionCandidates(%q) = %+v, want both alice and malice", "ali", got)
+	}
+	if aliceIdx > maliceIdx {
+		t.Fatalf("alice (exact prefix) ranked after malice (scattered match): %+v", got)
+	}
+}
+
+// TestMentionCandidatesHandlesNilMentionableUsers covers no repository
+// mentionable-users fetch having resolved yet (Store.MentionableUsers()
+// returns nil): mentionCandidates must not panic and returns just the
+// PR-derived participants.
+func TestMentionCandidatesHandlesNilMentionableUsers(t *testing.T) {
+	app, _, fake, _ := newTestApp(t, nil)
+	openDetailForComposer(t, app, fake, fixtureDetailPR(fixtureRef(1)))
+
+	got := query(app.app, func() []editor.Candidate { return app.mentionCandidates("") })
+	if len(got) == 0 {
+		t.Fatal("mentionCandidates returned no participants at all")
+	}
+}

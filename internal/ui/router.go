@@ -70,6 +70,8 @@ func (a *App) handleKey(ev *tcell.EventKey) *tcell.EventKey {
 			return a.routeChoiceKey(ev, normalized)
 		case "pending":
 			return a.routePendingKey(ev, normalized)
+		case "reaction":
+			return a.routeReactionKey(ev, normalized)
 		default:
 			return a.routeOverlayKey(ev, normalized)
 		}
@@ -325,9 +327,9 @@ func (a *App) focusedListPane() movablePane {
 }
 
 // dispatch runs the effect of a resolved Action. Actions not yet
-// implemented (comment.react, pr.submit, pr.edit, list.new_pr) are silently
-// ignored rather than surfacing a toast for every exploratory keypress —
-// docs/REQUIREMENTS.md tracks their milestone.
+// implemented (pr.edit, list.new_pr) are silently ignored rather than
+// surfacing a toast for every exploratory keypress — docs/REQUIREMENTS.md
+// tracks their milestone.
 func (a *App) dispatch(action keys.Action, count int) {
 	switch action {
 	case keys.ActionListDown:
@@ -429,6 +431,15 @@ func (a *App) dispatch(action keys.Action, count int) {
 		}
 	case keys.ActionPRPending:
 		a.openPendingList()
+	case keys.ActionPRSubmit:
+		a.openSubmitReviewDialog()
+	case keys.ActionCommentReact:
+		switch a.app.GetFocus() {
+		case a.prView:
+			a.reactToCurrentPRTabBlock()
+		case a.diffView:
+			a.reactToCurrentThreadComment()
+		}
 	}
 }
 

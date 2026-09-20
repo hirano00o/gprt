@@ -3,7 +3,18 @@ package theme
 // Icons is one glyph set gprt draws pull request state, review, and section
 // markers with. Every field is exactly one grapheme cluster wide in a
 // terminal using the matching font (a plain Unicode font for Unicode, a
-// Nerd Font patched font for Nerd).
+// Nerd Font patched font for Nerd). Fields are plain strings, not a map, so
+// Icons stays comparable with == (theme_test.go/icons_test.go compare whole
+// Icons values directly).
+//
+// GitHub's eight reactions have no glyph here: their real emoji
+// (model.ReactionContent.Emoji()) is already portable everywhere gprt
+// draws them (internal/ui/detail.go's reactionLine,
+// internal/ui/widget/diffview.go's reactionSummary,
+// internal/ui/reactionpicker.go), so there is nothing for either icon set
+// to substitute — a duplicate ReactionXxx table here previously repeated
+// model.ReactionContent's own emoji map field-for-field with no icon-set
+// variation at all.
 type Icons struct {
 	Draft  string
 	Open   string

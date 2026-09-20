@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/rivo/tview"
+	"github.com/sahilm/fuzzy"
 
 	"github.com/hirano00o/gprt/internal/diff"
 	"github.com/hirano00o/gprt/internal/drafts"
@@ -41,6 +42,9 @@ const (
 	// composerKindReviewEdit updates an existing review comment's body
 	// (target.commentID).
 	composerKindReviewEdit
+	// composerKindReviewBody submits (or creates and submits) the current
+	// pull request's review with target.reviewEvent (submitreview.go).
+	composerKindReviewBody
 )
 
 // composerTarget identifies what the currently open composer is editing.
@@ -65,6 +69,9 @@ type composerTarget struct {
 	anchor diff.Range
 	// threadID is the thread being replied to, for composerKindReply only.
 	threadID string
+	// reviewEvent is the review event being submitted, for
+	// composerKindReviewBody only (submitreview.go).
+	reviewEvent model.ReviewEvent
 	// title is the composer's title line ("Comment on #12",
 	// "Edit comment by @alice", …).
 	title string
@@ -481,12 +488,16 @@ func (a *App) sendComposer() {
 		return
 	}
 	text := a.composerEditor.Text()
-	if strings.TrimSpace(text) == "" {
+	target := *a.composerTarget
+	// A review-body send has its own body/pending-comments validation
+	// (sendReviewBodyComposer): APPROVE never requires a body, so the
+	// generic "cannot send an empty comment" rule below must not apply to
+	// this target kind at all.
+	if target.kind != composerKindReviewBody && strings.TrimSpace(text) == "" {
 		a.showToast("cannot send an empty comment", theme.Warning)
 		return
 	}
 
-	target := *a.composerTarget
 	switch target.kind {
 	case composerKindEdit:
 		a.finishSend(target, text, a.deps.Store.EditComment(target.commentID, text))
@@ -494,6 +505,8 @@ func (a *App) sendComposer() {
 		a.finishSend(target, text, a.deps.Store.EditReviewComment(target.commentID, text))
 	case composerKindLineComment, composerKindFileComment, composerKindReply:
 		a.sendReviewComposer(target, text)
+	case composerKindReviewBody:
+		a.sendReviewBodyComposer(target, text)
 	default:
 		a.finishSend(target, text, a.deps.Store.AddComment(text))
 	}
@@ -633,6 +646,15 @@ func (a *App) onMutationChanged() {
 		a.showToast(ps.notice, theme.Info)
 		return
 	}
+	if ps.target.kind == composerKindReviewBody {
+		// The list's own review-decision/state columns must reflect the
+		// just-submitted review without waiting for the next auto-refresh
+		// tick — Refresh() is the same non-forced entry point that ticker
+		// already uses (see docs/DESIGN.md's Store section).
+		a.deps.Store.Refresh()
+		a.showToast("review submitted", theme.Success)
+		return
+	}
 	verb := "posted"
 	switch ps.target.kind {
 	case composerKindEdit, composerKindReviewEdit:
@@ -663,22 +685,45 @@ func (a *App) onComposerError(message string) {
 
 // mentionCandidates derives "@" completion candidates from the currently
 // open pull request — its author, requested reviewers, and every
-// comment/review author already in its timeline — deduplicated by login
-// and filtered by a case-insensitive prefix match. M4 replaces this with
-// the repository's real mentionableUsers query.
+// comment/review author already in its timeline, followed by the
+// repository's own mentionable users (Store.MentionableUsers, M4 data
+// slice; nil until that repository's fetch resolves, which range handles
+// like any other empty slice) — deduplicated by login (a repository user
+// already listed as a PR participant is not repeated). A non-empty prefix
+// fuzzy-matches (github.com/sahilm/fuzzy) against "login name" for each
+// candidate, so a query can hit either half and a scattered subsequence
+// (not just a strict prefix) still matches; fuzzy.FindFrom's own scoring
+// already ranks an exact-prefix match above a scattered one and folds case
+// itself (see candidateSource), so no separate lower-casing is needed
+// here. An empty prefix returns every candidate as-is, in the
+// participant-priority order add() built above.
 func (a *App) mentionCandidates(prefix string) []editor.Candidate {
 	pr := a.deps.Store.CurrentPR()
 	if pr == nil {
 		return nil
 	}
 
-	seen := make(map[string]bool)
+	// seen maps a login already added to its index in all, so a later add()
+	// for the same login (for example the repository's own mentionable
+	// users, which — unlike model.Reviewer — always carries a Name) can
+	// backfill an empty Name left by an earlier one (a bare
+	// pr.ReviewRequests entry has no Name field at all) instead of losing
+	// it: without this, a requested reviewer who has not yet commented
+	// would show with no display name in the mention popup even though the
+	// repository's own data has one.
+	seen := make(map[string]int)
 	var all []editor.Candidate
 	add := func(login, name string) {
-		if login == "" || seen[login] {
+		if login == "" {
 			return
 		}
-		seen[login] = true
+		if idx, ok := seen[login]; ok {
+			if all[idx].Name == "" && name != "" {
+				all[idx].Name = name
+			}
+			return
+		}
+		seen[login] = len(all)
 		all = append(all, editor.Candidate{Login: login, Name: name})
 	}
 
@@ -703,19 +748,35 @@ func (a *App) mentionCandidates(prefix string) []editor.Candidate {
 			}
 		}
 	}
+	for _, u := range a.deps.Store.MentionableUsers() {
+		add(u.Login, u.Name)
+	}
 
 	if prefix == "" {
 		return all
 	}
-	lower := strings.ToLower(prefix)
-	filtered := make([]editor.Candidate, 0, len(all))
-	for _, c := range all {
-		if strings.HasPrefix(strings.ToLower(c.Login), lower) {
-			filtered = append(filtered, c)
-		}
+	matches := fuzzy.FindFrom(prefix, candidateSource(all))
+	filtered := make([]editor.Candidate, len(matches))
+	for i, m := range matches {
+		filtered[i] = all[m.Index]
 	}
 	return filtered
 }
+
+// candidateSource adapts a []editor.Candidate to fuzzy.Source for
+// mentionCandidates: each candidate's match string is its login alone, or
+// "login name" when it has one, so a query can fuzzy-match either half —
+// for example a display name with no hint of it in the login itself.
+type candidateSource []editor.Candidate
+
+func (c candidateSource) String(i int) string {
+	if c[i].Name == "" {
+		return c[i].Login
+	}
+	return c[i].Login + " " + c[i].Name
+}
+
+func (c candidateSource) Len() int { return len(c) }
 
 // draftCount returns how many drafts exist for the currently open pull
 // request, or 0 when none is open or drafts are disabled — shown by the

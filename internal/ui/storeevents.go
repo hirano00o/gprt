@@ -38,6 +38,9 @@ func (a *App) subscribeStore() {
 			if a.overlay == "pending" {
 				a.rebuildPendingList()
 			}
+			if a.overlay == "reaction" {
+				a.rebuildReactionPicker()
+			}
 		case store.EventPRLoadingChanged:
 			a.renderStatusBar(0)
 			// A failed fetch changes DetailState().Err/Loading without
