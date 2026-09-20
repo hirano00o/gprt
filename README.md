@@ -12,7 +12,7 @@ On top of M4, the first half of M5's UI slice adds pull-request editing and life
 
 `n` (list only) opens the create-PR form, the other half of M5's UI slice: a Repository field fuzzy-autocompleted over your own repositories (typing an exact `owner/name` not in that list works too), Head/Base branch fields autocompleted the same way as the edit form's own base field, a Title field, an "Edit body" button opening the same vim composer over the pull request's body-to-be, a "Reviewers" button (the edit form's own overlay, reused), and a Draft checkbox. Choosing a repository preselects Base with its default branch and, if the body is still empty, prefills it from the repository's first pull request template. `Ctrl-s` validates locally (a repository, differing head/base branches, a title) before creating the pull request, then opens it and toasts its number; a failure — including a created pull request whose reviewer request then failed — keeps you informed without losing what you typed. `Esc` asks to discard first only once you have entered something. Unlike every other dialog, an unrelated pull request switch never closes this form or its body composer. See [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md) for the full status by requirement and milestone.
 
-## Features (roadmap)
+## Features
 
 | # | Feature |
 |---|---------|
@@ -28,7 +28,7 @@ On top of M4, the first half of M5's UI slice adds pull-request editing and life
 | F10 | CI checks: rollup icon, check list, refreshed with the PR, open a check in the browser |
 | F11 | Every navigation/action key is remappable in config; the editor's own keys are fixed |
 
-F1 (the PR list), F3 (Files changed), F4 (submit reviews), F5 (mentions), F6 (reactions), F7 (the vim editor and `:e`), F10 (CI checks, list and PR tab), F11 (key remapping), and the browser-opening half of F9 are done. F8 (edit/delete comments, PR metadata) is done except for PR creation, which is a separate feature (F2): issue comments and review comments are both done end to end (add/edit/delete, with a composer trigger, a choice menu when several apply, and confirmation), the pull request's own body is edited the same way (`e` on the description block), and `E` opens a form editing title/base/labels/reviewers/draft. F9's `:merge`/`:close`/`:reopen` commands are also done, each behind a confirmation dialog. Every other feature above is still planned. See [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md) for per-item status.
+Every feature above is done. F1 (the PR list), F3 (Files changed), F4 (submit reviews), F5 (mentions), F6 (reactions), F7 (the vim editor and `:e`), F10 (CI checks, list and PR tab), F11 (key remapping), and the browser-opening half of F9 landed first. F8 (edit/delete comments, PR metadata) covers issue comments and review comments end to end (add/edit/delete, with a composer trigger, a choice menu when several apply, and confirmation), the pull request's own body edited the same way (`e` on the description block), and `E` opening a form editing title/base/labels/reviewers/draft. F9's `:merge`/`:close`/`:reopen` commands each sit behind a confirmation dialog, and F2 (creating a pull request from the TUI, `n`) completed the set. See [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md) for per-item status.
 
 ## Requirements
 
