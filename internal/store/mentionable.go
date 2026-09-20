@@ -86,6 +86,27 @@ func (s *Store) MentionableUsers() []model.User {
 	return s.mentionable[s.current.Repo].users
 }
 
+// MentionableUsersOf returns repo's mentionable users, as loaded lazily by
+// EnsureMentionableUsers (or by OpenPR, for the current pull request's own
+// repository — MentionableUsers and MentionableUsersOf(current pull
+// request's repo) always agree, since both read the same underlying
+// mentionableEntry), or nil when repo's list has not resolved yet. Unlike
+// MentionableUsers, this has no dependency on a pull request being open at
+// all: the create-PR form's own reviewers picker (internal/ui/createform.go)
+// needs a chosen repository's mentionable users well before any pull
+// request in it exists.
+func (s *Store) MentionableUsersOf(repo model.RepoRef) []model.User {
+	return s.mentionable[repo].users
+}
+
+// EnsureMentionableUsers loads repo's mentionable users unless already
+// fresh (mentionableUsersFreshFor) or a fetch is already in flight — the
+// create-PR form's own explicit counterpart to OpenPR's automatic, lazy
+// load for the currently open pull request's repository.
+func (s *Store) EnsureMentionableUsers(repo model.RepoRef) {
+	s.startMentionableUsersFetch(repo, false)
+}
+
 // startMentionableUsersFetch loads repo's mentionable users. A fetch
 // already in flight for repo is never duplicated (loading dedup, checked
 // on the UI goroutine — a second OpenPR for the same repository while the

@@ -1279,6 +1279,18 @@ func newTestStore(t *testing.T, cfg config.Config, gitHub *fakeGitHub, disp *fak
 	})
 }
 
+// TestStore_Host covers the create-PR form's own need for the resolved
+// host (internal/ui/createform.go): the repository field accepts an exact
+// "owner/name" not found in Store.ViewerRepositories(), and must attach it
+// to the same host every other RepoRef in this Store's data was built
+// against, without the UI reaching into Deps itself.
+func TestStore_Host(t *testing.T) {
+	s := newTestStore(t, config.Default(), newFakeGitHub(), newFakeDispatcher())
+	if got := s.Host(); got != "example.com" {
+		t.Errorf("Host() = %q, want %q", got, "example.com")
+	}
+}
+
 func TestSections_BuiltinsThenCustom(t *testing.T) {
 	cfg := config.Default()
 	cfg.List.Sections = []config.Section{{Name: "Backend", Query: "org:acme label:backend"}}

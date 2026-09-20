@@ -1,18 +1,22 @@
-// editreviewers.go implements the edit-PR form's "Reviewers" button: a
-// stacked overlay (App.overlay == "editreviewers") combining a search
-// InputField and a multi-select *tview.List — Tab toggles focus between
-// them, Space toggles the row under the cursor, Enter confirms (writing
-// the result back to App.editFormSelectedReviewers and the form's own
-// button text), Esc/q cancel.
+// editreviewers.go implements the "Reviewers" button shared by the edit-PR
+// form (editform.go) and the create-PR form (createform.go): a stacked
+// overlay (App.overlay == "editreviewers") combining a search InputField
+// and a multi-select *tview.List — Tab toggles focus between them, Space
+// toggles the row under the cursor, Enter confirms (writing the result
+// back to whichever form opened it, and that form's own button text),
+// Esc/q cancel. App.reviewersOwner ("editform" or "createform") and
+// App.reviewersRepo name which form opened it and which repository to
+// search — see openReviewersOverlay's own doc comment.
 //
 // Candidates come from three sources, merged and deduplicated by ID: every
 // currently-selected reviewer (user or team, always shown so it stays
-// toggleable regardless of the typed query), the repository's own
-// Store.MentionableUsers() filtered locally by substring against the
-// typed query (each carrying a real GraphQL node ID, model.User.ID,
-// selected by internal/gh/queries/mentionable_users.graphql — this is
-// what makes adding a brand-new individual user reviewer possible here at
-// all), and Store.SearchTeams(repo.Owner, query, …) results, debounced.
+// toggleable regardless of the typed query), reviewersRepo's own
+// Store.MentionableUsersOf(reviewersRepo) filtered locally by substring
+// against the typed query (each carrying a real GraphQL node ID,
+// model.User.ID, selected by internal/gh/queries/mentionable_users.graphql
+// — this is what makes adding a brand-new individual user reviewer
+// possible here at all), and Store.SearchTeams(reviewersRepo.Owner, query, …)
+// results, debounced.
 package ui
 
 import (
@@ -40,15 +44,30 @@ type reviewerEntry struct {
 	selected bool
 }
 
-// openEditReviewersOverlay opens the "editreviewers" overlay: a no-op
-// unless the edit form is the overlay currently open.
+// openEditReviewersOverlay opens the "editreviewers" overlay for the
+// edit-PR form.
 func (a *App) openEditReviewersOverlay() {
-	if a.overlay != "editform" {
+	a.openReviewersOverlay("editform", a.editFormRepo, a.editFormSelectedReviewers)
+}
+
+// openReviewersOverlay is openEditReviewersOverlay's/openCreateReviewersOverlay's
+// (createform.go) shared implementation: a no-op unless owner is the
+// overlay currently open (matching the two callers' own single-caller
+// guard); repo is whose mentionable users/teams to search
+// (App.reviewersRepo, read by editReviewersEntries/rebuildEditReviewersList/
+// onEditReviewersSearchChanged below); selected is the caller's own current
+// reviewer selection, copied into the overlay's own working set so Esc/q
+// can discard it untouched.
+func (a *App) openReviewersOverlay(owner string, repo model.RepoRef, selected map[string]model.Reviewer) {
+	if a.overlay != owner {
 		return
 	}
 	a.overlay = "editreviewers"
-	a.editReviewersWorking = copyReviewerSet(a.editFormSelectedReviewers)
+	a.reviewersOwner = owner
+	a.reviewersRepo = repo
+	a.editReviewersWorking = copyReviewerSet(selected)
 	a.editReviewersTeams = nil
+	a.deps.Store.EnsureMentionableUsers(repo)
 
 	a.editReviewersSearch = tview.NewInputField().SetLabel("Search: ")
 	a.editReviewersSearch.SetChangedFunc(a.onEditReviewersSearchChanged)
@@ -87,7 +106,7 @@ func (a *App) editReviewersEntries() []reviewerEntry {
 	if a.editReviewersSearch != nil {
 		query = strings.ToLower(a.editReviewersSearch.GetText())
 	}
-	for _, u := range a.deps.Store.MentionableUsers() {
+	for _, u := range a.deps.Store.MentionableUsersOf(a.reviewersRepo) {
 		// A mentionable user with no ID (should not normally happen now
 		// that mentionable_users.graphql selects one — an accepted,
 		// defensive fallback rather than a case this form has a specific
@@ -113,16 +132,16 @@ func (a *App) editReviewersEntries() []reviewerEntry {
 
 // rebuildEditReviewersList re-renders the list from editReviewersEntries,
 // preserving the cursor position. A trailing, non-toggleable "(loading
-// users…)" row is appended while Store.MentionableUsers() is nil (the
-// repository's own mentionable-users fetch has not resolved yet — see its
-// own doc comment for why nil, not merely an empty slice, means "not
-// resolved"): toggleCurrentEditReviewer's own bounds check against
-// editReviewersEntries (which never includes this marker row) already
-// makes Space on it a safe no-op.
+// users…)" row is appended while Store.MentionableUsersOf(reviewersRepo) is
+// nil (that repository's own mentionable-users fetch has not resolved yet —
+// see MentionableUsersOf's own doc comment for why nil, not merely an empty
+// slice, means "not resolved"): toggleCurrentEditReviewer's own bounds
+// check against editReviewersEntries (which never includes this marker
+// row) already makes Space on it a safe no-op.
 func (a *App) rebuildEditReviewersList() {
 	cur := a.editReviewersView.GetCurrentItem()
 	entries := a.editReviewersEntries()
-	loading := a.deps.Store.MentionableUsers() == nil
+	loading := a.deps.Store.MentionableUsersOf(a.reviewersRepo) == nil
 	a.editReviewersView.Clear()
 	if len(entries) == 0 && !loading {
 		a.editReviewersView.AddItem("(no matching users or teams)", "", 0, nil)
@@ -157,8 +176,8 @@ func editReviewerItemText(e reviewerEntry) string {
 // operation — no reason to wait for a debounce), then debounces a team
 // search by editReviewersSearchDebounce (docs/DESIGN.md's timer-callback
 // concurrency rule: a timer callback only ever dispatches into a store
-// call), calling Store.SearchTeams(repo.Owner, query, …) — safe regardless
-// of whether the repository owner is actually an organization:
+// call), calling Store.SearchTeams(reviewersRepo.Owner, query, …) — safe
+// regardless of whether the repository owner is actually an organization:
 // Store.SearchTeams' own doc comment confirms a user-owned repository's
 // org login simply resolves to an empty, non-error result.
 func (a *App) onEditReviewersSearchChanged(query string) {
@@ -167,7 +186,7 @@ func (a *App) onEditReviewersSearchChanged(query string) {
 	if a.editReviewersSearchTimer != nil {
 		a.editReviewersSearchTimer.Stop()
 	}
-	org := a.editFormRepo.Owner
+	org := a.reviewersRepo.Owner
 	a.editReviewersSearchTimer = time.AfterFunc(editReviewersSearchDebounce, func() {
 		a.app.QueueUpdateDraw(func() {
 			a.deps.Store.SearchTeams(org, query, func(teams []model.Team, err error) {
@@ -198,10 +217,12 @@ func (a *App) toggleCurrentEditReviewer() {
 	a.rebuildEditReviewersList()
 }
 
-// closeEditReviewersOverlay closes the "editreviewers" overlay. apply
-// writes editReviewersWorking back to App.editFormSelectedReviewers and
-// refreshes the edit form's own "Reviewers (N selected)" button text
-// (Enter); false discards it (Esc/q).
+// closeEditReviewersOverlay closes the "editreviewers" overlay, returning
+// to whichever form opened it (App.reviewersOwner). apply writes
+// editReviewersWorking back to that form's own selected-reviewers field
+// (App.editFormSelectedReviewers or App.createFormSelectedReviewers) and
+// refreshes its "Reviewers (N selected)" button text (Enter); false
+// discards it (Esc/q).
 func (a *App) closeEditReviewersOverlay(apply bool) {
 	if a.overlay != "editreviewers" {
 		return
@@ -211,9 +232,17 @@ func (a *App) closeEditReviewersOverlay(apply bool) {
 		a.editReviewersSearchTimer = nil
 	}
 	if apply {
-		a.editFormSelectedReviewers = a.editReviewersWorking
-		if a.editForm != nil {
-			a.editForm.GetButton(1).SetLabel(a.editFormReviewersButtonText())
+		switch a.reviewersOwner {
+		case "editform":
+			a.editFormSelectedReviewers = a.editReviewersWorking
+			if a.editForm != nil {
+				a.editForm.GetButton(1).SetLabel(a.editFormReviewersButtonText())
+			}
+		case "createform":
+			a.createFormSelectedReviewers = a.editReviewersWorking
+			if a.createForm != nil {
+				a.createForm.GetButton(createFormReviewersButtonIndex).SetLabel(a.createFormReviewersButtonText())
+			}
 		}
 	}
 	a.editReviewersWorking = nil
@@ -222,9 +251,18 @@ func (a *App) closeEditReviewersOverlay(apply bool) {
 	a.editReviewersSearch = nil
 	a.editReviewersFlex = nil
 	a.root.RemovePage("editreviewers")
-	a.overlay = "editform"
-	if a.editForm != nil {
-		a.app.SetFocus(a.editForm)
+	owner := a.reviewersOwner
+	a.reviewersOwner = ""
+	a.overlay = owner
+	switch owner {
+	case "editform":
+		if a.editForm != nil {
+			a.app.SetFocus(a.editForm)
+		}
+	case "createform":
+		if a.createForm != nil {
+			a.app.SetFocus(a.createForm)
+		}
 	}
 }
 

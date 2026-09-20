@@ -15,6 +15,7 @@ package ui
 import (
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/gdamore/tcell/v2"
@@ -284,11 +285,15 @@ func (a *App) editFormBranchAutocomplete(text string) []string {
 // comparing the form's live field values against editFormOriginal — used
 // by both saveEditForm and cancelEditForm's own dirty check, so "is there
 // anything to discard" and "is there anything to save" always agree.
+// Title/Base are trimmed of leading/trailing whitespace before either
+// comparison or being sent (found missing in review): an accidental space
+// typed into either field must not itself count as, or be saved as, a
+// change.
 func (a *App) editFormComputeDiff() editFormDiff {
 	var diff editFormDiff
 
-	title := a.editFormTitleField.GetText()
-	base := a.editFormBaseField.GetText()
+	title := strings.TrimSpace(a.editFormTitleField.GetText())
+	base := strings.TrimSpace(a.editFormBaseField.GetText())
 	draft := a.editFormDraftBox.IsChecked()
 
 	if title != a.editFormOriginal.title {

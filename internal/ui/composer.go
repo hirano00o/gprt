@@ -49,6 +49,18 @@ const (
 	// composerKindPRBody updates the current pull request's own body
 	// (prbody.go), sending Store.UpdatePullRequestMeta with only Body set.
 	composerKindPRBody
+	// composerKindNewPRBody edits the create-PR form's own body
+	// (createform.go), for a pull request that does not exist yet. Unlike
+	// every other kind, Send never calls the store at all: it hands the
+	// text back to the form (App.createFormBody) and the composer closes
+	// keeping its draft, deleted only once the pull request is actually
+	// created. It is also the only kind not bound to Store.CurrentRef() —
+	// composerTarget.ref carries a repository-scoped sentinel ref (Number
+	// 0, see drafts.KindNewPR's own doc comment), not a real pull request
+	// — so closeComposerIfWrongPR must never close it on an unrelated PR
+	// switch, and sendComposer must never refuse it merely because some
+	// other (or no) pull request happens to be current.
+	composerKindNewPRBody
 )
 
 // composerTarget identifies what the currently open composer is editing.
@@ -338,7 +350,11 @@ func (a *App) openComposer(target composerTarget, prefill string) {
 // time this runs), the moment the currently open pull request no longer
 // matches it. Called from EventPRChanged, so a composer for pull request
 // A can never still be open, let alone sent, once pull request B becomes
-// current — see composerTarget.ref's own doc comment.
+// current — see composerTarget.ref's own doc comment. A no-op for
+// composerKindNewPRBody (the create-PR form's own body composer): it is
+// not bound to Store.CurrentRef() at all — the create-PR form itself must
+// stay open across an unrelated pull request switch, per its own design —
+// so an EventPRChanged here must never close it.
 //
 // The composer's own send-mode choice menu (dialogs.go's showChoiceMenu,
 // a.overlay == "choice") stays open across this — it is a separate
@@ -351,7 +367,7 @@ func (a *App) openComposer(target composerTarget, prefill string) {
 // but confusingly) still be offered against a target that no longer
 // applies.
 func (a *App) closeComposerIfWrongPR() {
-	if a.composerTarget == nil {
+	if a.composerTarget == nil || a.composerTarget.kind == composerKindNewPRBody {
 		return
 	}
 	if ref, ok := a.deps.Store.CurrentRef(); !ok || ref != a.composerTarget.ref {
@@ -375,7 +391,8 @@ func (a *App) composerHeight() int {
 
 // closeComposer removes the composer pane, saving its draft (keepDraft)
 // or deleting it (send, or ":q!"), and restores focus to whichever pane
-// had it before the composer opened.
+// had it before the composer opened — or, for composerKindNewPRBody, to
+// the create-PR form itself (see the reopen branch below).
 func (a *App) closeComposer(keepDraft bool) {
 	if a.composerFlex == nil {
 		return
@@ -418,7 +435,17 @@ func (a *App) closeComposer(keepDraft bool) {
 		a.refreshDraftGutterIfNeeded(target)
 	}
 
-	if a.composerReturnFocus != nil {
+	if target.kind == composerKindNewPRBody {
+		// The create-PR form's own page was removed from a.root when this
+		// composer opened (openCreatePRBodyComposer), since a root Pages
+		// overlay page and the composer, a detailColumn child, would
+		// otherwise both be visible at once with the overlay drawn on top,
+		// hiding the composer entirely — re-add it now and give it focus
+		// directly, ignoring composerReturnFocus (openCreatePRBodyComposer
+		// clears it for exactly this reason).
+		a.composerReturnFocus = nil
+		a.reopenCreatePRFormAfterBodyComposer()
+	} else if a.composerReturnFocus != nil {
 		a.app.SetFocus(a.composerReturnFocus)
 		a.composerReturnFocus = nil
 	} else {
@@ -463,11 +490,23 @@ func (a *App) onComposerChange(text string) {
 // onComposerAction reacts to the editor's own send/close/discard
 // requests (":w"/Ctrl-s, ":q", ":q!"); ModeChanged needs no extra work
 // here since Editor already renders its own mode line.
+//
+// For composerKindNewPRBody, ":q" (CloseRequested) also hands the buffer's
+// current text back to App.createFormBody before closing — unlike every
+// other composer kind, whose own draft is the only record of unsent text,
+// this one is round-tripped into a sibling form field, and only Send
+// (sendNewPRBodyComposer) did that until this was found missing in review:
+// reopening ":q"'s own kept draft made it merely *look* saved, while
+// Create would still submit whatever createFormBody held before. ":q!"
+// (DiscardRequested) is unaffected — discarding still means discarding.
 func (a *App) onComposerAction(act editor.Action) {
 	switch act.Kind {
 	case editor.SendRequested:
 		a.sendComposer()
 	case editor.CloseRequested:
+		if a.composerTarget != nil && a.composerTarget.kind == composerKindNewPRBody {
+			a.createFormBody = a.composerEditor.Text()
+		}
 		a.closeComposer(true)
 	case editor.DiscardRequested:
 		a.closeComposer(false)
@@ -488,6 +527,12 @@ func (a *App) onComposerAction(act editor.Action) {
 // happens once a truly enqueued mutation finishes.
 func (a *App) sendComposer() {
 	if a.composerTarget == nil {
+		return
+	}
+	if a.composerTarget.kind == composerKindNewPRBody {
+		// Never touches the store or Store.CurrentRef() at all — see
+		// composerKindNewPRBody's own doc comment.
+		a.sendNewPRBodyComposer(*a.composerTarget, a.composerEditor.Text())
 		return
 	}
 	if ref, ok := a.deps.Store.CurrentRef(); !ok || ref != a.composerTarget.ref {
@@ -533,6 +578,19 @@ func (a *App) sendComposer() {
 	default:
 		a.finishSend(target, text, a.deps.Store.AddComment(text))
 	}
+}
+
+// sendNewPRBodyComposer implements Send for the create-PR form's own body
+// composer (composerKindNewPRBody): unlike every other composer target, it
+// never calls the store — it hands text back to the form (App.createFormBody)
+// and closes the composer keeping its draft (deleted only once the pull
+// request is actually created — see createform.go's onPullRequestCreated).
+// An empty body is a legitimate, intentional value (the user clearing a
+// prefilled template), so — unlike the generic case in sendComposer — this
+// is never refused for being blank.
+func (a *App) sendNewPRBodyComposer(target composerTarget, text string) {
+	a.createFormBody = text
+	a.closeComposer(true)
 }
 
 // finishSend closes the composer (deleting its draft) and starts tracking
@@ -722,6 +780,12 @@ func (a *App) onComposerError(message string) {
 // here. An empty prefix returns every candidate as-is, in the
 // participant-priority order add() built above.
 func (a *App) mentionCandidates(prefix string) []editor.Candidate {
+	if a.composerTarget != nil && a.composerTarget.kind == composerKindNewPRBody {
+		// No "current pull request" participants exist yet at all — see
+		// composerKindNewPRBody's own doc comment — so candidates come
+		// solely from the chosen repository's own mentionable users.
+		return a.newPRMentionCandidates(prefix)
+	}
 	pr := a.deps.Store.CurrentPR()
 	if pr == nil {
 		return nil
@@ -776,6 +840,32 @@ func (a *App) mentionCandidates(prefix string) []editor.Candidate {
 		add(u.Login, u.Name)
 	}
 
+	return fuzzyFilterCandidates(prefix, all)
+}
+
+// newPRMentionCandidates is mentionCandidates' counterpart for the
+// create-PR form's own body composer (composerKindNewPRBody): candidates
+// are solely the chosen repository's own mentionable users (Store.
+// MentionableUsersOf, App.createFormRepo), since there is no pull
+// request's own participants to draw from yet.
+func (a *App) newPRMentionCandidates(prefix string) []editor.Candidate {
+	users := a.deps.Store.MentionableUsersOf(a.createFormRepo)
+	all := make([]editor.Candidate, len(users))
+	for i, u := range users {
+		all[i] = editor.Candidate{Login: u.Login, Name: u.Name}
+	}
+	return fuzzyFilterCandidates(prefix, all)
+}
+
+// fuzzyFilterCandidates is mentionCandidates'/newPRMentionCandidates'
+// shared tail: an empty prefix returns every candidate as-is, in the
+// caller's own priority order; otherwise it fuzzy-matches
+// (github.com/sahilm/fuzzy) against "login name" for each candidate (see
+// candidateSource), so a query can hit either half and a scattered
+// subsequence — not just a strict prefix — still matches, ranked by the
+// library's own scoring (which also folds case itself, so no separate
+// lower-casing is needed here).
+func fuzzyFilterCandidates(prefix string, all []editor.Candidate) []editor.Candidate {
 	if prefix == "" {
 		return all
 	}

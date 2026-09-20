@@ -79,6 +79,7 @@ func (a *App) subscribeStore() {
 			a.onMutationChanged()
 			a.onSimpleMutationChanged()
 			a.onEditFormMutationChanged()
+			a.onCreateFormMutationChanged()
 			if a.overlay == "pending" {
 				a.rebuildPendingList()
 			}
@@ -114,9 +115,18 @@ func (a *App) subscribeStore() {
 		case store.EventRepositoryMetadataChanged:
 			if ev.Repo != nil {
 				a.onRepositoryMetadataChangedForMerge(*ev.Repo)
+				a.applyCreateFormRepositoryInfoIfResolved(*ev.Repo)
 			}
 			if a.overlay == "editlabels" && ev.Repo != nil && *ev.Repo == a.editFormRepo {
 				a.rebuildEditLabelsList()
+			}
+		case store.EventViewerRepositoriesChanged:
+			if a.overlay == "createform" && a.createFormRepoField != nil {
+				a.createFormRepoField.Autocomplete()
+			}
+		case store.EventPullRequestCreated:
+			if ev.Ref != nil {
+				a.onPullRequestCreated(*ev.Ref)
 			}
 		}
 	})

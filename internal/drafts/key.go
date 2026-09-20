@@ -28,6 +28,13 @@ const (
 	// KindEdit is an in-progress edit of an existing comment, keyed by
 	// that comment's ID.
 	KindEdit Kind = "edit"
+	// KindNewPR is the create-PR form's own in-progress body, for a pull
+	// request that does not exist yet. Key.PR for this kind is a
+	// repository, not an existing pull request: a model.PRRef built from
+	// the chosen repository with Number 0 (a number GitHub never actually
+	// issues), so its Key() ("host/owner/name#0") can never collide with a
+	// real pull request's own draft, whatever kind that is.
+	KindNewPR Kind = "new_pr"
 )
 
 // Key identifies one draft: the pull request it belongs to, what kind of
