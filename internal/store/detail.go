@@ -83,6 +83,11 @@ func (s *Store) OpenPR(ref model.PRRef) {
 	s.detailWarnings = nil
 	s.detailStale = false
 	s.detailFetchedAt = time.Time{}
+	// A different pull request's changed files must not linger under the
+	// new ref either: LoadFiles is not called here (loading files is
+	// lazy, left to the UI slice for when the Files tab is actually
+	// opened), but any previous PR's file list/highlight pool is reset.
+	s.resetFiles()
 	// Recomputed immediately, not left to whenever the next fetch
 	// resolves: without this, LastError() would keep reporting the
 	// *previous* pull request's standing error for however long the new
@@ -91,6 +96,15 @@ func (s *Store) OpenPR(ref model.PRRef) {
 	s.recomputeLastErr()
 	s.startDetailFetch(true)
 	s.emit(Event{Kind: EventPRChanged})
+	s.emit(Event{Kind: EventFilesChanged})
+	// resetFiles above may have just turned off a files fetch that was in
+	// flight for the *previous* pull request (filesLoading false again);
+	// its own dispatched result, once it arrives, will be dropped silently
+	// by the generation check before ever reaching a point that would emit
+	// this - see the identical reasoning in ClosePR - so a UI driven purely
+	// by these events would otherwise show a stuck files spinner across a
+	// PR switch.
+	s.emitFilesLoadingChanged()
 }
 
 // RefreshPR re-fetches the current pull request's detail in the
@@ -128,6 +142,22 @@ func (s *Store) ReloadPR() {
 	s.detailStale = true
 	s.emit(Event{Kind: EventPRChanged})
 	s.startDetailFetch(false)
+	// Reload files from the network only, but only if the Files tab has
+	// ever actually been opened for this pull request (filesStarted):
+	// without this guard, "R" on a pull request whose Files tab was never
+	// opened would start fetching every page for no reason, and the
+	// HeadOID/ChangedFiles-change coupling in applyDetailResult (which
+	// fires once the reload's own detail fetch resolves, and is itself
+	// guarded on filesStarted) could otherwise race this unconditional
+	// call into loading files twice for the same reload. cache.InvalidatePR
+	// above already wiped every cached files page (they live under the
+	// same PR cache directory as "detail" - see cache.Store's layout), so
+	// LoadFiles(true) (which also skips the now-pointless cache read) is
+	// enough on its own, with no separate cache-invalidation call needed
+	// here.
+	if s.filesStarted {
+		s.LoadFiles(true)
+	}
 }
 
 // ClosePR clears the current pull request and cancels any in-flight
@@ -147,9 +177,11 @@ func (s *Store) ClosePR() {
 	s.detailErr = nil
 	s.detailWarnings = nil
 	s.detailFetchedAt = time.Time{}
+	s.resetFiles()
 	s.recomputeLastErr()
 
 	s.emit(Event{Kind: EventPRChanged})
+	s.emit(Event{Kind: EventFilesChanged})
 	// A fetch that was in flight is cancelled above, but its own
 	// dispatched result — once it arrives — returns early at the
 	// generation check (gen != s.detailGen, bumped just above) before
@@ -160,6 +192,7 @@ func (s *Store) ClosePR() {
 	// keeps a UI driven purely by those events from showing a stuck
 	// spinner.
 	s.emitLoadingChanged()
+	s.emitFilesLoadingChanged()
 }
 
 // startDetailFetch starts a new detail-fetch generation for the current
@@ -308,6 +341,34 @@ func (s *Store) applyDetailResult(gen int, res gh.DetailResult, err error, cance
 	s.emit(Event{Kind: EventPRChanged})
 	s.emit(Event{Kind: EventRateLimitChanged})
 	s.emitLoadingChanged()
+
+	// LoadFiles was called before this pull request's detail (and so its
+	// HeadOID) was known at all: start the deferred load now, rather than
+	// leaving it silently stuck forever - see LoadFiles' own doc comment.
+	if s.filesWanted && !s.filesStarted {
+		s.filesWanted = false
+		s.LoadFiles(false)
+	}
+
+	// A detail refresh (OpenPR's own fetch, RefreshPR, or ReloadPR) landing
+	// with a different HeadOID than the files list is currently loaded/
+	// loading for means a force-push happened: reload files for the new
+	// commit rather than let a stale diff for the old one linger. The same
+	// applies when HeadOID is unchanged but the pull request's own
+	// ChangedFiles count has shifted (for example a base-branch advance
+	// GitHub recomputes the merge-base diff against without minting a new
+	// HeadOID): either signal alone is reason enough to reload. Guarded on
+	// filesStarted so this never fires the very first time a pull
+	// request's detail resolves (files have not been loaded at all yet, in
+	// which case there is nothing to reload - loading them is left to the
+	// UI slice for when the Files tab is actually opened, or to the
+	// filesWanted branch just above). force is always true: a cached
+	// files page is keyed only by page number, not by HeadOID (see
+	// cachedFilesPage), so showing it first would risk briefly displaying
+	// the *previous* commit's diff.
+	if s.filesStarted && (pr.HeadOID != s.filesHeadOID || pr.ChangedFiles != s.filesChangedFilesAt) {
+		s.LoadFiles(true)
+	}
 }
 
 // emitLoadingChanged emits both EventPRLoadingChanged (DetailState().Loading

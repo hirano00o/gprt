@@ -35,19 +35,26 @@ func (s *Store) Start(ctx context.Context) {
 	s.LoadList(false)
 }
 
-// Stop cancels every in-flight list fetch and the current pull request's
-// in-flight detail fetch, if any (unlike ClosePR, it leaves current/
-// currentPR/DetailState untouched — Stop is about halting background
-// work, not closing the pull request view). It does not wait for the
-// goroutines it cancels to exit: per docs/DESIGN.md's concurrency rules,
-// nothing may block on a store-started goroutine after the caller decides
-// to stop.
+// Stop cancels every in-flight list fetch, the current pull request's
+// in-flight detail fetch, and its files fetch/highlight pool, if any
+// (unlike ClosePR, it leaves current/currentPR/DetailState/Files/
+// FilesState untouched — Stop is about halting background work, not
+// closing the pull request view). It does not wait for the goroutines it
+// cancels to exit: per docs/DESIGN.md's concurrency rules, nothing may
+// block on a store-started goroutine after the caller decides to stop.
 func (s *Store) Stop() {
 	if s.cancelList != nil {
 		s.cancelList()
 	}
 	if s.detailCancel != nil {
 		s.detailCancel()
+	}
+	if s.filesCancel != nil {
+		// filesCancel's ctx is shared by the page-fetch chain and the
+		// highlight pool for the current files generation (see
+		// startFilesFetch/startHighlightPool), so this one call stops
+		// both.
+		s.filesCancel()
 	}
 }
 
@@ -594,10 +601,10 @@ func (s *Store) applyFetchResult(gen, i int, cursor string, res gh.SearchResult,
 }
 
 // recomputeLastErr sets lastErr to viewerLastErr if it is set, otherwise to
-// detailErr if it is set, otherwise to the first section (in priority
-// order) with a standing error, otherwise nil. It is called after every
-// viewer, detail, or section fetch outcome instead of assigning lastErr
-// directly, so a success clears it
+// detailErr, otherwise to filesErr, otherwise to the first section (in
+// priority order) with a standing error, otherwise nil. It is called after
+// every viewer, detail, files, or section fetch outcome instead of
+// assigning lastErr directly, so a success clears it
 // (or an error sets it) as a pure function of the current, persistent
 // per-source error state rather than "whichever dispatch happened to run
 // last": the viewer fetch and each section's fetch are independent,
@@ -616,11 +623,18 @@ func (s *Store) recomputeLastErr() {
 		return
 	}
 	if s.detailErr != nil {
-		// Ranked above section errors: the current pull request's detail
-		// is whatever the user is actively looking at, so its own
+		// Ranked above files/section errors: the current pull request's
+		// detail is whatever the user is actively looking at, so its own
 		// standing error is more immediately relevant than an unrelated
-		// list section's.
+		// list section's or its own files list's.
 		s.lastErr = s.detailErr
+		return
+	}
+	if s.filesErr != nil {
+		// Ranked above section errors for the same reason detailErr is:
+		// still scoped to the pull request the user has open, just one
+		// step further into it (the Files tab) than the detail itself.
+		s.lastErr = s.filesErr
 		return
 	}
 	for _, sec := range s.sections {

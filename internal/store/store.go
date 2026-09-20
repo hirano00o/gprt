@@ -17,6 +17,7 @@ import (
 	"github.com/hirano00o/gprt/internal/cache"
 	"github.com/hirano00o/gprt/internal/config"
 	"github.com/hirano00o/gprt/internal/gh"
+	"github.com/hirano00o/gprt/internal/highlight"
 	"github.com/hirano00o/gprt/internal/model"
 )
 
@@ -26,6 +27,14 @@ type GitHub interface {
 	Viewer(ctx context.Context) (model.User, model.RateLimit, error)
 	SearchPullRequests(ctx context.Context, query, cursor string) (gh.SearchResult, error)
 	PullRequest(ctx context.Context, ref model.PRRef, viewerLogin string) (gh.DetailResult, error)
+	ChangedFiles(ctx context.Context, ref model.PRRef, page int, etag string) (gh.FilesResult, error)
+}
+
+// lineHighlighter is the subset of *highlight.Highlighter the store depends
+// on for hunk highlighting (see the highlighter field's doc comment for why
+// this is an interface rather than the concrete type directly).
+type lineHighlighter interface {
+	Lines(path string, lines []string) ([][]highlight.Token, error)
 }
 
 // Deps are the Store's dependencies, supplied once at construction.
@@ -219,6 +228,95 @@ type Store struct {
 	detailCancel        context.CancelFunc
 	detailFetchInFlight bool
 
+	// Files: the open pull request's changed files (M2, data side only —
+	// see files.go). files holds every page fetched so far, in page
+	// order; filesPageLens records each page's length within files so a
+	// later page's own network result can replace exactly that page's
+	// slice of files (see replaceFilesPage) without disturbing the
+	// others. nextFileEntryID hands out the id every FileEntry appended or
+	// replaced into files gets (see assignFileEntryIDs): a highlight job's
+	// result is matched back to a file by this id, not by path, so a job
+	// still in flight for an entry that replaceFilesPage has since
+	// replaced (same path, new content) can never be mistaken for a
+	// result belonging to its replacement.
+	files            []FileEntry
+	filesPageLens    []int
+	nextFileEntryID  int
+	filesLoading     bool
+	filesStale       bool
+	filesErr         error
+	filesPagesLoaded int
+	filesHasNext     bool
+	// filesWarnings surfaces data-quality notes that do not fail a fetch
+	// (today: a truncation/base-advance mismatch between the fully-paged
+	// file count and the pull request's own ChangedFiles - see
+	// checkFilesTruncation).
+	filesWarnings []string
+	// filesHeadOID and filesStarted together answer "is LoadFiles already
+	// loaded/loading for the pull request's current head commit": a fresh
+	// force-push (a new HeadOID) must not be satisfied by a no-op that
+	// keeps showing the previous commit's diff. filesChangedFilesAt is the
+	// pull request's own ChangedFiles count at the moment the current
+	// files generation started, compared against a fresh detail fetch's
+	// value the same way HeadOID is (see applyDetailResult): the count can
+	// shift without HeadOID changing (for example a base-branch advance
+	// GitHub recomputes the merge-base diff against), and that alone is
+	// reason enough to reload.
+	filesHeadOID        string
+	filesChangedFilesAt int
+	filesStarted        bool
+	// filesWanted records that LoadFiles was called before the current
+	// pull request's own detail had resolved (CurrentPR() still nil, so
+	// there is no HeadOID yet to key a files generation on): rather than
+	// silently no-op forever, applyDetailResult's success path starts the
+	// deferred load once a HeadOID becomes known.
+	filesWanted bool
+	// filesShowCache is the showCache flag the current files generation
+	// was started with (LoadFiles(false) shows cache first; force/reload
+	// paths pass false): every sequential page fetch within one
+	// generation reuses it, since fetchFilesPage's later calls to itself
+	// (for page 2, 3, ...) happen from inside a Dispatch callback, not
+	// from LoadFiles' own call site.
+	filesShowCache     bool
+	filesGen           int
+	filesCtx           context.Context
+	filesCancel        context.CancelFunc
+	filesFetchInFlight bool
+
+	// highlighter tokenises hunk lines for syntax colouring; it is safe
+	// for concurrent use (see internal/highlight's own doc comments), so
+	// one instance is shared across every files generation's worker pool.
+	// Typed as the lineHighlighter interface (rather than the concrete
+	// *highlight.Highlighter New builds it as) purely so a test can
+	// substitute a fake that returns a controlled error, exercising
+	// processHighlightJob's Debug-logging path deterministically without
+	// depending on coaxing a real chroma lexer into failing.
+	highlighter lineHighlighter
+	// highlightJobs is the current files generation's mutex-protected,
+	// UI-goroutine-facing pending queue (see highlightQueue's own doc
+	// comment): enqueueHighlightJobs only ever pushes to it and never
+	// blocks. It is nil when no files generation is active. The worker
+	// pool's own bounded channel (what highlightFeeder actually drains
+	// this queue into) is a local variable inside startHighlightPool, not
+	// a Store field: nothing outside that function ever needs to read it
+	// back. There is no separate cancel function for the pool: filesCancel's
+	// ctx is shared by the page-fetch chain and the highlight pool for one
+	// files generation, so cancelling it (resetFiles/Stop) stops both
+	// together.
+	highlightJobs *highlightQueue
+	highlightWake chan struct{}
+	// filesHighlightPending is the total count of hunk highlight jobs
+	// still enqueued (in highlightJobs, in flight to a worker, or being
+	// processed) across every file, surfaced as FilesState().Highlighting.
+	filesHighlightPending int
+	// filesPendingByID tracks, per FileEntry.id, how many of its hunks
+	// still have no highlight result applied yet, so applyHighlightResult
+	// knows when a file's FileEntry.Highlighted should flip to true.
+	// Keyed by id rather than path so a page replacement (replaceFilesPage)
+	// can drop a superseded entry's own leftover count precisely, without
+	// disturbing its replacement's identically-pathed, freshly started one.
+	filesPendingByID map[int]int
+
 	subscribers []func(Event)
 }
 
@@ -253,6 +351,7 @@ func New(deps Deps) *Store {
 		inFlight:       make(map[inFlightKey]struct{}),
 		warnedMessages: make(map[warnedKey]struct{}),
 		baseCtx:        context.Background(),
+		highlighter:    highlight.New(highlight.Options{}),
 	}
 	return s
 }
@@ -350,10 +449,10 @@ func (s *Store) LastRefresh() time.Time {
 	return s.lastRefresh
 }
 
-// Loading reports whether any section, or the current pull request's
-// detail, currently has a fetch in flight.
+// Loading reports whether any section, the current pull request's detail,
+// or its changed files, currently has a fetch in flight.
 func (s *Store) Loading() bool {
-	if s.detailLoading {
+	if s.detailLoading || s.filesLoading {
 		return true
 	}
 	for _, sec := range s.sections {

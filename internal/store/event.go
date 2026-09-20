@@ -29,6 +29,18 @@ const (
 	EventPRChanged
 	// EventPRLoadingChanged fires whenever DetailState().Loading changes.
 	EventPRLoadingChanged
+	// EventFilesChanged fires whenever Files or FilesState (other than
+	// Loading, which has its own event below) would return different
+	// data: a page applied from cache or the network, a page replaced, or
+	// the files list reset (OpenPR/ClosePR).
+	EventFilesChanged
+	// EventFileHighlighted fires whenever one hunk's highlight result is
+	// applied to a file already in Files. Event.Path names the file.
+	EventFileHighlighted
+	// EventFilesLoadingChanged fires whenever FilesState().Loading
+	// changes. It always accompanies EventLoadingChanged, matching
+	// EventPRLoadingChanged's own pairing.
+	EventFilesLoadingChanged
 )
 
 // Event is published synchronously, on the UI goroutine, by Subscribe
@@ -39,6 +51,8 @@ type Event struct {
 	Kind    EventKind
 	Section *model.Section
 	Err     error
+	// Path names the file an EventFileHighlighted result belongs to.
+	Path string
 }
 
 // Subscribe registers fn to be called for every Event published from now

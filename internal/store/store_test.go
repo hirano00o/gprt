@@ -63,18 +63,27 @@ type detailCall struct {
 	viewerLogin string
 }
 
+// filesCall records one ChangedFiles invocation for assertions.
+type filesCall struct {
+	ref  model.PRRef
+	page int
+	etag string
+}
+
 // fakeGitHub is a test double for the GitHub interface. viewerFunc,
-// searchFunc, and detailFunc default to returning zero values with no
-// error; tests override any of them to control timing and results.
+// searchFunc, detailFunc, and filesFunc default to returning zero values
+// with no error; tests override any of them to control timing and results.
 type fakeGitHub struct {
 	mu sync.Mutex
 
 	viewerFunc func(ctx context.Context) (model.User, model.RateLimit, error)
 	searchFunc func(ctx context.Context, query, cursor string) (gh.SearchResult, error)
 	detailFunc func(ctx context.Context, ref model.PRRef, viewerLogin string) (gh.DetailResult, error)
+	filesFunc  func(ctx context.Context, ref model.PRRef, page int, etag string) (gh.FilesResult, error)
 
 	calls       []searchCall
 	detailCalls []detailCall
+	filesCalls  []filesCall
 }
 
 func newFakeGitHub() *fakeGitHub {
@@ -87,6 +96,9 @@ func newFakeGitHub() *fakeGitHub {
 		},
 		detailFunc: func(context.Context, model.PRRef, string) (gh.DetailResult, error) {
 			return gh.DetailResult{}, nil
+		},
+		filesFunc: func(context.Context, model.PRRef, int, string) (gh.FilesResult, error) {
+			return gh.FilesResult{}, nil
 		},
 	}
 }
@@ -117,6 +129,14 @@ func (f *fakeGitHub) PullRequest(ctx context.Context, ref model.PRRef, viewerLog
 	fn := f.detailFunc
 	f.mu.Unlock()
 	return fn(ctx, ref, viewerLogin)
+}
+
+func (f *fakeGitHub) ChangedFiles(ctx context.Context, ref model.PRRef, page int, etag string) (gh.FilesResult, error) {
+	f.mu.Lock()
+	f.filesCalls = append(f.filesCalls, filesCall{ref: ref, page: page, etag: etag})
+	fn := f.filesFunc
+	f.mu.Unlock()
+	return fn(ctx, ref, page, etag)
 }
 
 func (f *fakeGitHub) searchCalls() []searchCall {
@@ -154,6 +174,24 @@ func (f *fakeGitHub) setDetailFunc(fn func(ctx context.Context, ref model.PRRef,
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.detailFunc = fn
+}
+
+// setFilesFunc reassigns filesFunc under the lock, for the same reason
+// setSearchFunc does.
+func (f *fakeGitHub) setFilesFunc(fn func(ctx context.Context, ref model.PRRef, page int, etag string) (gh.FilesResult, error)) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.filesFunc = fn
+}
+
+// filesCallsSnapshot returns a copy of every ChangedFiles call recorded so
+// far, for assertions.
+func (f *fakeGitHub) filesCallsSnapshot() []filesCall {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]filesCall, len(f.filesCalls))
+	copy(out, f.filesCalls)
+	return out
 }
 
 // newTestStore builds a Store wired to a fakeGitHub and fakeDispatcher over
