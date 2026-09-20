@@ -18,6 +18,10 @@ type Icons struct {
 	Loading string
 
 	SectionMarker string
+	// DraftMarker is the diff gutter glyph drawn on a line with a saved
+	// comment draft anchored to it (see internal/ui/files.go's
+	// draftLinesForFile).
+	DraftMarker string
 }
 
 // Unicode returns gprt's default icon set: portable glyphs from the general
@@ -38,6 +42,7 @@ func Unicode() Icons {
 		Loading: "…",
 
 		SectionMarker: "▸",
+		DraftMarker:   "✎",
 	}
 }
 
@@ -61,6 +66,10 @@ func Nerd() Icons {
 		Loading: "", // hourglass-half
 
 		SectionMarker: "", // caret-right
+		// Reuses Draft's own pencil glyph: both mark "there is
+		// unfinished, unsaved comment text here", one for a whole pull
+		// request, the other for a single diff line.
+		DraftMarker: "",
 	}
 }
 

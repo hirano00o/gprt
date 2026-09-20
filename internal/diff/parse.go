@@ -309,16 +309,26 @@ func LocateThread(hunks []Hunk, t model.ReviewThread) (hunk, line int, ok bool) 
 	if t.IsOutdated || t.SubjectType == model.ThreadSubjectFile {
 		return 0, 0, false
 	}
+	return LocateLine(hunks, t.Side, t.Line)
+}
 
+// LocateLine finds the (hunk index, line index) of the diff line anchored at
+// side/lineNo — the same location model.ReviewThread's own Side/Line fields
+// name (LocateThread delegates here), and what a saved line/range-comment
+// draft's anchor (see internal/ui's draft anchor helpers) parses back into.
+// LEFT matches a Del/Context line by OldNo; RIGHT matches an Add/Context
+// line by NewNo. ok is false when no line matches (for example an outdated
+// anchor whose line no longer exists in the current diff).
+func LocateLine(hunks []Hunk, side model.DiffSide, lineNo int) (hunk, line int, ok bool) {
 	for hi, h := range hunks {
 		for li, l := range h.Lines {
-			switch t.Side {
+			switch side {
 			case model.DiffSideLeft:
-				if l.OldNo == t.Line && (l.Kind == Del || l.Kind == Context) {
+				if l.OldNo == lineNo && (l.Kind == Del || l.Kind == Context) {
 					return hi, li, true
 				}
 			case model.DiffSideRight:
-				if l.NewNo == t.Line && (l.Kind == Add || l.Kind == Context) {
+				if l.NewNo == lineNo && (l.Kind == Add || l.Kind == Context) {
 					return hi, li, true
 				}
 			}

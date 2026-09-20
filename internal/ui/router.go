@@ -2,6 +2,7 @@ package ui
 
 import (
 	"github.com/gdamore/tcell/v2"
+	"github.com/rivo/tview"
 
 	"github.com/hirano00o/gprt/internal/ui/editor"
 	"github.com/hirano00o/gprt/internal/ui/keys"
@@ -52,17 +53,26 @@ func (a *App) handleKey(ev *tcell.EventKey) *tcell.EventKey {
 	}
 
 	if a.overlay != "" {
-		if a.overlay == "confirm" {
+		switch a.overlay {
+		case "confirm", "pendingConfirm":
 			// A confirm dialog is a real focused *tview.Modal, not a
 			// scrollable TextView like help/messages: returning ev lets
 			// tview's own event loop hand it straight to the Modal's
 			// native InputHandler (arrow keys/Enter to pick a button,
 			// Escape to cancel), rather than routeOverlayKey's
 			// q/Esc-only handling, which would otherwise swallow every
-			// key the Modal itself needs.
+			// key the Modal itself needs. pendingConfirm is the same
+			// shape, stacked on top of the "pending" list overlay for
+			// its own d/D confirmations — see pendinglist.go's
+			// confirmWithinPendingList.
 			return ev
+		case "choice":
+			return a.routeChoiceKey(ev, normalized)
+		case "pending":
+			return a.routePendingKey(ev, normalized)
+		default:
+			return a.routeOverlayKey(ev, normalized)
 		}
-		return a.routeOverlayKey(ev, normalized)
 	}
 
 	// Ending an active visual selection on the diff needs its own, earlier
@@ -186,6 +196,54 @@ func (a *App) routeOverlayKey(ev *tcell.EventKey, normalized []keys.Key) *tcell.
 	return ev
 }
 
+// routeChoiceKey handles the "choice" overlay (dialogs.go's
+// showChoiceMenu): j/k move the selection, Enter chooses the current item,
+// q/Esc cancel. Every key is consumed (nil returned) while the menu is
+// open, matching routeOverlayKey's own confirm-dialog-adjacent shape.
+//
+// A close (Enter/q/Esc) returns immediately instead of continuing the loop:
+// keys.Normalize can expand one raw event into more than one Key (Alt+rune
+// -> [Esc, rune], and tcell itself reports a printable key typed within
+// ~50ms of Esc as Alt+that-key on some terminals) — continuing after
+// closeChoiceMenu has nilled a.choiceMenu would feed the remaining key(s)
+// to moveListSelection/GetCurrentItem against a nil *tview.List.
+func (a *App) routeChoiceKey(_ *tcell.EventKey, normalized []keys.Key) *tcell.EventKey {
+	for _, k := range normalized {
+		switch {
+		case isEscKey(k), isPlainRune(k, 'q'):
+			a.closeChoiceMenu(false, -1)
+			return nil
+		case isEnterKey(k):
+			a.closeChoiceMenu(true, a.choiceMenu.GetCurrentItem())
+			return nil
+		case isPlainRune(k, 'j'):
+			moveListSelection(a.choiceMenu, 1)
+		case isPlainRune(k, 'k'):
+			moveListSelection(a.choiceMenu, -1)
+		}
+	}
+	return nil
+}
+
+// moveListSelection moves list's current item by delta (+1/-1), clamped to
+// its item range — j/k navigation for the small tview.List-backed overlays
+// (the choice menu, the pending list) that do not otherwise bind j/k
+// themselves.
+func moveListSelection(list *tview.List, delta int) {
+	count := list.GetItemCount()
+	if count == 0 {
+		return
+	}
+	next := list.GetCurrentItem() + delta
+	if next < 0 {
+		next = 0
+	}
+	if next >= count {
+		next = count - 1
+	}
+	list.SetCurrentItem(next)
+}
+
 // currentContexts returns the context list Sequencer.Feed resolves the
 // current keypress against: whatever pane has focus, falling back to
 // ContextGlobal.
@@ -204,7 +262,20 @@ func (a *App) currentContexts() []keys.Context {
 	case a.treeView:
 		return []keys.Context{keys.ContextFiles, keys.ContextGlobal}
 	case a.diffView:
-		return []keys.Context{keys.ContextDiff, keys.ContextGlobal}
+		// ContextDiff first, so "c" (bound in both ContextDiff, as
+		// diff.comment, and ContextThread, as thread.reply) always
+		// resolves to diff.comment here — dispatch's own ActionDiffComment
+		// case then decides between "new comment"/"reply" from the
+		// cursor's actual row (see diffCommentOrReply), matching
+		// docs/KEYBINDINGS.md footnote 2 ("one physical key ... does not
+		// introduce a third action ID"). ContextThread/ContextComment are
+		// always included (not only when the cursor happens to be on a
+		// thread row) so "r"/"x"/"e"/"d" — none of which ContextDiff binds
+		// at all — resolve to their thread/comment actions regardless of
+		// cursor position; each handler itself toasts when the cursor is
+		// not actually on a thread, rather than the key falling through
+		// unconsumed with no feedback at all.
+		return []keys.Context{keys.ContextDiff, keys.ContextThread, keys.ContextComment, keys.ContextGlobal}
 	default:
 		return []keys.Context{keys.ContextGlobal}
 	}
@@ -254,12 +325,9 @@ func (a *App) focusedListPane() movablePane {
 }
 
 // dispatch runs the effect of a resolved Action. Actions not yet
-// implemented (comment/thread/pr mutation actions — diff.comment,
-// diff.comment_file, thread.reply, thread.toggle_resolved, comment.edit,
-// comment.delete, comment.react, pr.pending, pr.submit, pr.edit,
-// list.new_pr) are silently ignored rather than surfacing a toast for
-// every exploratory keypress — docs/REQUIREMENTS.md tracks their
-// milestone.
+// implemented (comment.react, pr.submit, pr.edit, list.new_pr) are silently
+// ignored rather than surfacing a toast for every exploratory keypress —
+// docs/REQUIREMENTS.md tracks their milestone.
 func (a *App) dispatch(action keys.Action, count int) {
 	switch action {
 	case keys.ActionListDown:
@@ -327,15 +395,40 @@ func (a *App) dispatch(action keys.Action, count int) {
 	case keys.ActionGlobalFocusDown, keys.ActionGlobalFocusUp:
 		a.toggleComposerFocus()
 	case keys.ActionDiffComment:
-		if a.app.GetFocus() == a.prView {
+		switch a.app.GetFocus() {
+		case a.prView:
 			a.openGeneralCommentComposer()
+		case a.diffView:
+			a.diffCommentOrReply()
 		}
-		// A diff-focused line/range comment is M3b scope; ActionDiffComment
-		// while the diff has focus is intentionally still a no-op here.
+	case keys.ActionDiffCommentFile:
+		if a.app.GetFocus() == a.diffView {
+			a.diffCommentFile()
+		}
+	case keys.ActionThreadReply:
+		if a.app.GetFocus() == a.diffView {
+			a.replyToCurrentThread()
+		}
+	case keys.ActionThreadToggleResolved:
+		if a.app.GetFocus() == a.diffView {
+			a.toggleCurrentThreadResolved()
+		}
 	case keys.ActionCommentEdit:
-		a.editCurrentComment()
+		switch a.app.GetFocus() {
+		case a.prView:
+			a.editCurrentComment()
+		case a.diffView:
+			a.editCurrentThreadComment()
+		}
 	case keys.ActionCommentDelete:
-		a.deleteCurrentComment()
+		switch a.app.GetFocus() {
+		case a.prView:
+			a.deleteCurrentComment()
+		case a.diffView:
+			a.deleteCurrentThreadComment()
+		}
+	case keys.ActionPRPending:
+		a.openPendingList()
 	}
 }
 

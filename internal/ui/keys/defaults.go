@@ -103,7 +103,10 @@ var defaultTable = []defaultEntry{
 	{[]Context{ContextThread}, "x", ActionThreadToggleResolved},
 	{[]Context{ContextComment, ContextPR}, "a", ActionCommentReact},
 
-	{[]Context{ContextPR}, "p", ActionPRPending},
+	// "PR open" (docs/KEYBINDINGS.md), not just the PR tab: the pending
+	// list is just as useful while looking at the diff, or with the tree
+	// focused.
+	{[]Context{ContextPR, ContextFiles, ContextDiff}, "p", ActionPRPending},
 	{[]Context{ContextPR}, "S", ActionPRSubmit},
 	{[]Context{ContextPR}, "E", ActionPREdit},
 

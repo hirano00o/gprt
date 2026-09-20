@@ -11,8 +11,10 @@ import (
 
 	"github.com/rivo/tview"
 
+	"github.com/hirano00o/gprt/internal/diff"
 	"github.com/hirano00o/gprt/internal/drafts"
 	"github.com/hirano00o/gprt/internal/model"
+	"github.com/hirano00o/gprt/internal/store"
 	"github.com/hirano00o/gprt/internal/ui/editor"
 	"github.com/hirano00o/gprt/internal/ui/theme"
 )
@@ -24,8 +26,21 @@ type composerKind int
 const (
 	// composerKindComment sends a new general (issue) comment.
 	composerKindComment composerKind = iota
-	// composerKindEdit updates an existing comment's body.
+	// composerKindEdit updates an existing (issue) comment's body.
 	composerKindEdit
+	// composerKindLineComment sends a new review comment anchored to a
+	// single diff line or a single-sided line range (target.path,
+	// target.anchor).
+	composerKindLineComment
+	// composerKindFileComment sends a new whole-file review comment
+	// (target.path).
+	composerKindFileComment
+	// composerKindReply sends a reply to an existing review thread
+	// (target.threadID).
+	composerKindReply
+	// composerKindReviewEdit updates an existing review comment's body
+	// (target.commentID).
+	composerKindReviewEdit
 )
 
 // composerTarget identifies what the currently open composer is editing.
@@ -39,8 +54,17 @@ type composerTarget struct {
 	// store for a pull request other than the one the composer was
 	// actually opened for.
 	ref model.PRRef
-	// commentID is the comment being edited, for composerKindEdit only.
+	// commentID is the comment being edited, for composerKindEdit and
+	// composerKindReviewEdit.
 	commentID string
+	// path is the file being commented on, for composerKindLineComment and
+	// composerKindFileComment.
+	path string
+	// anchor is the line/range being commented on, for
+	// composerKindLineComment only.
+	anchor diff.Range
+	// threadID is the thread being replied to, for composerKindReply only.
+	threadID string
 	// title is the composer's title line ("Comment on #12",
 	// "Edit comment by @alice", …).
 	title string
@@ -54,6 +78,11 @@ type composerTarget struct {
 type pendingSend struct {
 	text   string
 	target composerTarget
+	// notice is a store.EventNotice message (for example a SendSingle send
+	// silently coerced to "add to review") that arrived for this send —
+	// see storeevents.go's own EventNotice handler and onMutationChanged's
+	// use of it below. Empty when no notice fired for this send.
+	notice string
 }
 
 // openGeneralCommentComposer opens a composer for a new general PR
@@ -70,6 +99,83 @@ func (a *App) openGeneralCommentComposer() {
 		title:    fmt.Sprintf("Comment on #%d", ref.Number),
 		draftKey: drafts.Key{PR: ref.Key(), Kind: drafts.KindComment, Anchor: "issue"},
 	}, "")
+}
+
+// openLineOrRangeComposer opens a composer for a new review comment
+// anchored to a single diff line or a single-sided line range on path
+// (diff.comment, "c", while the diff has focus and the cursor is not on a
+// thread). r.StartLine == 0 or == r.Line renders the single-line title
+// form; otherwise the range form.
+func (a *App) openLineOrRangeComposer(path string, r diff.Range) {
+	ref, ok := a.deps.Store.CurrentRef()
+	if !ok {
+		return
+	}
+	var title string
+	if r.StartLine != 0 && r.StartLine != r.Line {
+		title = fmt.Sprintf("Comment on %s:%d-%d (%s)", path, r.StartLine, r.Line, r.Side)
+	} else {
+		title = fmt.Sprintf("Comment on %s:%d (%s)", path, r.Line, r.Side)
+	}
+	a.openComposer(composerTarget{
+		kind:     composerKindLineComment,
+		ref:      ref,
+		path:     path,
+		anchor:   r,
+		title:    title,
+		draftKey: drafts.Key{PR: ref.Key(), Kind: drafts.KindComment, Anchor: formatLineAnchor(path, r.Side, r.StartLine, r.Line)},
+	}, "")
+}
+
+// openFileCommentComposer opens a composer for a new whole-file review
+// comment on path (diff.comment_file, "C").
+func (a *App) openFileCommentComposer(path string) {
+	ref, ok := a.deps.Store.CurrentRef()
+	if !ok {
+		return
+	}
+	a.openComposer(composerTarget{
+		kind:     composerKindFileComment,
+		ref:      ref,
+		path:     path,
+		title:    "Comment on file " + path,
+		draftKey: drafts.Key{PR: ref.Key(), Kind: drafts.KindFile, Anchor: "file:" + path},
+	}, "")
+}
+
+// openReplyComposer opens a composer replying to threadID (thread.reply,
+// "r", or "c" on an existing thread); authorLogin names the thread's first
+// comment's author, for the title only.
+func (a *App) openReplyComposer(threadID, authorLogin string) {
+	ref, ok := a.deps.Store.CurrentRef()
+	if !ok {
+		return
+	}
+	a.openComposer(composerTarget{
+		kind:     composerKindReply,
+		ref:      ref,
+		threadID: threadID,
+		title:    "Reply to @" + authorLogin,
+		draftKey: drafts.Key{PR: ref.Key(), Kind: drafts.KindReply, Anchor: threadID},
+	}, "")
+}
+
+// openReviewCommentEditComposer opens an edit composer for an existing
+// review comment (comment.edit, "e", with the diff's cursor on a thread
+// row, or "Enter" on a pending item in the "p" list), prefilled with its
+// live body.
+func (a *App) openReviewCommentEditComposer(c model.ReviewComment) {
+	ref, ok := a.deps.Store.CurrentRef()
+	if !ok {
+		return
+	}
+	a.openComposer(composerTarget{
+		kind:      composerKindReviewEdit,
+		ref:       ref,
+		commentID: c.ID,
+		title:     "Edit review comment",
+		draftKey:  drafts.Key{PR: ref.Key(), Kind: drafts.KindEdit, Anchor: c.ID},
+	}, c.Body)
 }
 
 // editCurrentComment opens an edit composer for the issue comment block
@@ -188,6 +294,11 @@ func (a *App) openComposer(target composerTarget, prefill string) {
 	if text != "" {
 		a.composerEditor.SetText(text)
 	}
+	// Baseline for onComposerChange's own flip detection (see its doc
+	// comment): whether a draft already exists for target right now,
+	// exactly matching what Drafts.Save(target.draftKey, text)'s own
+	// empty-deletes-the-draft rule would compute for this same text.
+	a.composerDraftGutterMarked = text != ""
 
 	a.composerFlex = tview.NewFlex().SetDirection(tview.FlexRow)
 	a.composerFlex.AddItem(a.composerTitle, 1, 0, false)
@@ -204,11 +315,25 @@ func (a *App) openComposer(target composerTarget, prefill string) {
 // matches it. Called from EventPRChanged, so a composer for pull request
 // A can never still be open, let alone sent, once pull request B becomes
 // current — see composerTarget.ref's own doc comment.
+//
+// The composer's own send-mode choice menu (dialogs.go's showChoiceMenu,
+// a.overlay == "choice") stays open across this — it is a separate
+// overlay from the composer pane itself, and closeComposer alone does not
+// touch it — so it is cancelled here too (without invoking its stored
+// callback): otherwise a menu opened for this composer's target would
+// linger on screen after the composer underneath it is gone, and its own
+// "Add single/to review" choice would (harmlessly, since
+// performReviewSend re-checks the ref itself — see its own doc comment,
+// but confusingly) still be offered against a target that no longer
+// applies.
 func (a *App) closeComposerIfWrongPR() {
 	if a.composerTarget == nil {
 		return
 	}
 	if ref, ok := a.deps.Store.CurrentRef(); !ok || ref != a.composerTarget.ref {
+		if a.overlay == "choice" {
+			a.closeChoiceMenu(false, -1)
+		}
 		a.closeComposer(true)
 	}
 }
@@ -266,6 +391,7 @@ func (a *App) closeComposer(keepDraft bool) {
 				a.showErrorToast("draft delete failed: " + err.Error())
 			}
 		}
+		a.refreshDraftGutterIfNeeded(target)
 	}
 
 	if a.composerReturnFocus != nil {
@@ -295,6 +421,17 @@ func (a *App) onComposerChange(text string) {
 			a.showErrorToast("draft save failed: " + err.Error())
 		}
 		return
+	}
+	// refreshDraftGutterIfNeeded's own path (files.go) lists and decodes
+	// every draft for the whole pull request, then rebuilds the diff's
+	// entire row set — real work worth doing once a saved draft actually
+	// starts or stops existing on this line, but not once per keystroke
+	// while composing it (Drafts.Save's own empty-text-deletes rule means
+	// "has a draft" is exactly text != ""): only call it when that
+	// boolean actually flips.
+	if nowMarked := text != ""; nowMarked != a.composerDraftGutterMarked {
+		a.composerDraftGutterMarked = nowMarked
+		a.refreshDraftGutterIfNeeded(*a.composerTarget)
 	}
 	a.renderStatusBar(a.spinnerFrame)
 }
@@ -350,19 +487,80 @@ func (a *App) sendComposer() {
 	}
 
 	target := *a.composerTarget
-	var enqueued bool
 	switch target.kind {
 	case composerKindEdit:
-		enqueued = a.deps.Store.EditComment(target.commentID, text)
+		a.finishSend(target, text, a.deps.Store.EditComment(target.commentID, text))
+	case composerKindReviewEdit:
+		a.finishSend(target, text, a.deps.Store.EditReviewComment(target.commentID, text))
+	case composerKindLineComment, composerKindFileComment, composerKindReply:
+		a.sendReviewComposer(target, text)
 	default:
-		enqueued = a.deps.Store.AddComment(text)
+		a.finishSend(target, text, a.deps.Store.AddComment(text))
 	}
+}
+
+// finishSend closes the composer (deleting its draft) and starts tracking
+// App.pendingSend only when enqueued is true — see sendComposer's own doc
+// comment for why a false return (nothing was actually enqueued) must
+// leave the composer open with its text intact instead.
+func (a *App) finishSend(target composerTarget, text string, enqueued bool) {
 	if !enqueued {
 		return
 	}
-
 	a.pendingSend = &pendingSend{text: text, target: target}
 	a.closeComposer(false)
+}
+
+// sendReviewComposer implements Send for a review comment/reply target
+// (composerKindLineComment/composerKindFileComment/composerKindReply):
+// mirroring GitHub's own two buttons, it offers a choice between "Add
+// single comment" and "Add to review" whenever Store.CanSendSingle() is
+// true (no pending review exists yet); cancelling the menu (Esc/q) leaves
+// the composer open with text intact, exactly as a refused send does. Once
+// a pending review already exists, every new comment must attach to it —
+// GitHub's own UI hides the single-comment button in that state too — so
+// no menu is shown at all.
+func (a *App) sendReviewComposer(target composerTarget, text string) {
+	if !a.deps.Store.CanSendSingle() {
+		a.finishSend(target, text, a.performReviewSend(target, text, store.SendToReview))
+		return
+	}
+	a.showChoiceMenu("Send comment", []string{"Add single comment", "Add to review"}, func(i int) {
+		mode := store.SendSingle
+		if i == 1 {
+			mode = store.SendToReview
+		}
+		a.finishSend(target, text, a.performReviewSend(target, text, mode))
+	})
+}
+
+// performReviewSend calls the Store method matching target.kind with mode.
+// It re-checks target.ref against Store.CurrentRef() itself — the same
+// guard sendComposer applies before ever showing the send-mode menu — since
+// this runs from that menu's own onChoose callback, which can fire well
+// after the menu was shown (the user is looking at a modal list; nothing
+// stops EventPRChanged from landing in the meantime, for example a
+// background refresh or the list's own preview debounce switching the
+// current pull request): closeComposerIfWrongPR already cancels the menu
+// the instant that happens, but a Send must never depend on that reaching
+// the menu before the user's own Enter keypress does, for the same reason
+// sendComposer's own equality check does not depend on
+// closeComposerIfWrongPR alone.
+func (a *App) performReviewSend(target composerTarget, text string, mode store.SendMode) bool {
+	if ref, ok := a.deps.Store.CurrentRef(); !ok || ref != target.ref {
+		a.showToast("cannot send: a different pull request is now open", theme.Warning)
+		return false
+	}
+	switch target.kind {
+	case composerKindLineComment:
+		return a.deps.Store.CommentOnLines(target.path, target.anchor, text, mode)
+	case composerKindFileComment:
+		return a.deps.Store.CommentOnFile(target.path, text, mode)
+	case composerKindReply:
+		return a.deps.Store.ReplyToThread(target.threadID, text, mode)
+	default:
+		return false
+	}
 }
 
 // onMutationChanged reacts to store.EventMutationChanged for a send
@@ -412,13 +610,32 @@ func (a *App) onMutationChanged() {
 				a.deps.Logger.Error("draft re-save after failed send failed", "err", saveErr)
 			}
 		}
+		// The re-save above (or the merge-into-live-editor branch, whose
+		// own write-through already ran) may have just resurrected a
+		// draft the gutter marker had already stopped showing (send
+		// closed the composer and deleted it immediately — see
+		// sendComposer's own doc comment); a no-op when target's path is
+		// not the currently open file, or its kind is not a line/range/
+		// file comment at all.
+		a.refreshDraftGutterIfNeeded(ps.target)
 		a.showToast("not sent; draft kept ("+err.Error()+")", theme.Error)
 		a.renderStatusBar(a.spinnerFrame)
 		return
 	}
 
+	// ps.notice (store.EventNotice, stashed by storeevents.go's own
+	// handler) means the send did not do quite what the user asked —
+	// today, only a SendSingle silently coerced to "add to review"
+	// because a pending review already existed by run time — so it takes
+	// priority over the generic success toast, which would otherwise
+	// claim a single comment was posted when it was not.
+	if ps.notice != "" {
+		a.showToast(ps.notice, theme.Info)
+		return
+	}
 	verb := "posted"
-	if ps.target.kind == composerKindEdit {
+	switch ps.target.kind {
+	case composerKindEdit, composerKindReviewEdit:
 		verb = "updated"
 	}
 	a.showToast("comment "+verb, theme.Success)

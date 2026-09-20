@@ -23,6 +23,7 @@ var (
 	colorSuccess = tcell.ColorLimeGreen
 	colorWarning = tcell.ColorGold
 	colorPending = tcell.ColorOrange
+	colorInfo    = tcell.ColorAqua
 )
 
 // Named styles every gprt widget draws with. Base is the default row style;
@@ -40,6 +41,10 @@ var (
 	Success = tcell.StyleDefault.Foreground(colorSuccess).Background(colorBg)
 	Warning = tcell.StyleDefault.Foreground(colorWarning).Background(colorBg)
 	Pending = tcell.StyleDefault.Foreground(colorPending).Background(colorBg)
+	// Info is for a non-error, non-warning notice (EventNotice, for example
+	// a review-comment send silently coerced to "add to review"): distinct
+	// from Warning/Error, which both signal a problem.
+	Info = tcell.StyleDefault.Foreground(colorInfo).Background(colorBg)
 )
 
 // Apply sets tview's package-global Styles to gprt's dark theme. It must be

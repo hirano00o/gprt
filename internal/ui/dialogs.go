@@ -35,3 +35,47 @@ func (a *App) showConfirm(message, confirmLabel string, onConfirm func()) {
 	a.root.AddPage("confirm", modal, true, true)
 	a.app.SetFocus(modal)
 }
+
+// showChoiceMenu shows a small overlay list of items (labels only, no
+// secondary text) titled title; choosing one (Enter) calls onChoose with
+// its index. Cancelling (Esc/q, via routeChoiceKey) calls nothing and
+// restores focus to whatever had it before — the caller's own state (for
+// example a still-open composer's typed text) is untouched either way,
+// since onChoose is the only thing that acts on the choice. A no-op while
+// another overlay is already open, so choice menus never stack.
+func (a *App) showChoiceMenu(title string, items []string, onChoose func(index int)) {
+	if a.overlay != "" {
+		return
+	}
+	a.savedFocus = a.app.GetFocus()
+	a.overlay = "choice"
+	a.choiceOnChoose = onChoose
+
+	list := tview.NewList().ShowSecondaryText(false)
+	for _, item := range items {
+		list.AddItem(item, "", 0, nil)
+	}
+	list.SetBorder(true).SetTitle(" " + title + " ")
+	a.choiceMenu = list
+
+	a.root.AddPage("choice", list, true, true)
+	a.app.SetFocus(list)
+}
+
+// closeChoiceMenu closes the choice menu opened by showChoiceMenu. It
+// invokes the stored callback with index only when chosen is true (Enter);
+// Esc/q (chosen == false) close it without invoking anything at all.
+func (a *App) closeChoiceMenu(chosen bool, index int) {
+	if a.overlay != "choice" {
+		return
+	}
+	onChoose := a.choiceOnChoose
+	a.choiceOnChoose = nil
+	a.choiceMenu = nil
+	a.root.RemovePage("choice")
+	a.overlay = ""
+	a.restoreFocus()
+	if chosen && onChoose != nil {
+		onChoose(index)
+	}
+}

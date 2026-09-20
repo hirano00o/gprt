@@ -35,6 +35,9 @@ func (a *App) subscribeStore() {
 			// The status bar's "✎ N" draft count is scoped to whichever
 			// pull request is currently open.
 			a.renderStatusBar(a.spinnerFrame)
+			if a.overlay == "pending" {
+				a.rebuildPendingList()
+			}
 		case store.EventPRLoadingChanged:
 			a.renderStatusBar(0)
 			// A failed fetch changes DetailState().Err/Loading without
@@ -62,6 +65,28 @@ func (a *App) subscribeStore() {
 			a.renderStatusBar(0)
 		case store.EventMutationChanged:
 			a.onMutationChanged()
+			if a.overlay == "pending" {
+				a.rebuildPendingList()
+			}
+		case store.EventNotice:
+			// A notice for a send still tracked in pendingSend (a
+			// SendSingle silently coerced to "add to review") arrives
+			// synchronously, from the same mutation apply, strictly
+			// before the EventMutationChanged that follows it — see
+			// review.go's own run closures, which emit EventNotice then
+			// EventPRChanged before returning to finishMutation, which
+			// emits EventMutationChanged last. Stash it there instead of
+			// toasting immediately, so onMutationChanged's own success
+			// toast can show the coercion notice instead of a misleading
+			// "comment posted" (composer.go's own doc comment on this).
+			// Any other notice (there is no other source of one today,
+			// but a future one need not go through the composer) toasts
+			// directly.
+			if a.pendingSend != nil {
+				a.pendingSend.notice = ev.Message
+			} else {
+				a.showToast(ev.Message, theme.Info)
+			}
 		case store.EventError:
 			if ev.Err != nil {
 				a.showToast(ev.Err.Error(), theme.Error)

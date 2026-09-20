@@ -12,6 +12,8 @@ import (
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 
+	"github.com/hirano00o/gprt/internal/diff"
+	"github.com/hirano00o/gprt/internal/drafts"
 	"github.com/hirano00o/gprt/internal/model"
 	"github.com/hirano00o/gprt/internal/store"
 	"github.com/hirano00o/gprt/internal/ui/theme"
@@ -338,6 +340,11 @@ func (a *App) showFile(path string) {
 // reported as its own distinct error rather than silently reusing either
 // of the above.
 func (a *App) refreshCurrentFile() {
+	// refreshCurrentFileCalls exists only so tests can assert this is not
+	// called more often than it needs to be (see composer.go's
+	// onComposerChange, which used to call it once per keystroke) — never
+	// read outside a test.
+	a.refreshCurrentFileCalls++
 	if a.currentFilePath == "" {
 		var err error
 		if a.deps.Store.CurrentPR() == nil {
@@ -361,6 +368,8 @@ func (a *App) refreshCurrentFile() {
 			Tokens:       entry.Tokens,
 			Threads:      threadsForPath(a.deps.Store.CurrentPR(), entry.File.Path),
 			Err:          entry.ParseErr,
+			DraftLines:   a.draftLinesForFile(entry.Hunks, entry.File.Path),
+			DraftMarker:  a.deps.Icons.DraftMarker,
 		})
 		return
 	}
@@ -373,6 +382,72 @@ func (a *App) refreshCurrentFile() {
 		a.diffView.SetFile(widget.DiffFile{Path: a.currentFilePath, Loading: true})
 	default:
 		a.diffView.SetFile(widget.DiffFile{Path: a.currentFilePath, Err: fmt.Errorf("file not found: %s", a.currentFilePath)})
+	}
+}
+
+// draftLinesForFile returns the (hunk, line) markers for every saved
+// line/range-comment draft anchored to path, for the diff gutter's own "✎"
+// marker (widget.DiffFile.DraftLines) — O(drafts for the current pull
+// request) per call. Computed once whenever the file is (re-)shown
+// (refreshCurrentFile, this method's only caller) and once more after a
+// draft for path is saved or deleted (composer.go's
+// refreshDraftGutterIfNeeded), never per Draw. A range draft's marker sits
+// on its own end line (Line), matching parseLineAnchor's own convention.
+func (a *App) draftLinesForFile(hunks []diff.Hunk, path string) map[widget.DraftAnchor]bool {
+	if a.deps.Drafts == nil {
+		return nil
+	}
+	ref, ok := a.deps.Store.CurrentRef()
+	if !ok {
+		return nil
+	}
+	list, err := a.deps.Drafts.List(ref.Key())
+	if err != nil {
+		a.deps.Logger.Warn("draft list for gutter marker failed", "err", err)
+	}
+	if len(list) == 0 {
+		return nil
+	}
+
+	marks := make(map[widget.DraftAnchor]bool)
+	for _, d := range list {
+		if d.Key.Kind != drafts.KindComment {
+			continue
+		}
+		p, side, _, line, ok := parseLineAnchor(d.Key.Anchor)
+		if !ok || p != path {
+			continue
+		}
+		hi, li, ok := diff.LocateLine(hunks, side, line)
+		if !ok {
+			continue
+		}
+		marks[widget.DraftAnchor{Hunk: hi, Line: li}] = true
+	}
+	return marks
+}
+
+// refreshDraftGutterIfNeeded re-renders the diff (which recomputes
+// draftLinesForFile as a side effect) when target's own draft was just
+// saved or deleted and its path is the file currently shown — composer.go
+// calls this from onComposerChange (every keystroke) and closeComposer
+// (final save/delete), so the "✎" marker tracks a line/range/file draft's
+// text as it is written, not only once the composer closes. A no-op for
+// every other composer kind, or when target's path is not the open file.
+func (a *App) refreshDraftGutterIfNeeded(target composerTarget) {
+	switch target.kind {
+	case composerKindLineComment, composerKindFileComment:
+		a.refreshDraftGutterForPath(target.path)
+	}
+}
+
+// refreshDraftGutterForPath re-renders the diff when path is the file
+// currently shown — the same effect as refreshDraftGutterIfNeeded, for a
+// caller (the "p" pending-list dialog's own draft deletion) that has a
+// bare path rather than a composerTarget.
+func (a *App) refreshDraftGutterForPath(path string) {
+	if path == a.currentFilePath {
+		a.refreshCurrentFile()
 	}
 }
 
