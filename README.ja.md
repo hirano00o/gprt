@@ -22,6 +22,10 @@ GitHub のプルリクエストをターミナルで扱うための TUI です�
 - ログイン済みの [`gh` CLI](https://cli.github.com/)(`gh auth login`)、または環境変数 `GH_TOKEN` / `GITHUB_TOKEN`。GitHub Enterprise Server は `gh` のホスト設定を通じて利用できます。
 - ソースからインストールする場合は Go 1.26 以上。
 
+Linux / macOS / Windows(amd64、arm64)向けのビルド済みバイナリを各[リリース](https://github.com/hirano00o/gprt/releases)に添付しています。お使いのプラットフォームのアーカイブをダウンロードし、`gprt` を `PATH` の通った場所に置いてください。
+
+ソースからインストールする場合:
+
 ```sh
 go install github.com/hirano00o/gprt/cmd/gprt@latest
 ```

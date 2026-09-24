@@ -22,6 +22,10 @@ Requirements:
 - The [`gh` CLI](https://cli.github.com/) logged in (`gh auth login`), or a `GH_TOKEN` / `GITHUB_TOKEN` environment variable. GitHub Enterprise Server works through `gh`'s host configuration.
 - Go 1.26 or newer to install from source.
 
+Prebuilt binaries for Linux, macOS, and Windows (amd64 and arm64) are attached to each [release](https://github.com/hirano00o/gprt/releases). Download the archive for your platform and put `gprt` on your `PATH`.
+
+Or install from source:
+
 ```sh
 go install github.com/hirano00o/gprt/cmd/gprt@latest
 ```
