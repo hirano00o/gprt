@@ -815,6 +815,46 @@ func TestFilesTabCtrlWtFromDiffShowsTreeAgain(t *testing.T) {
 	waitFor(t, app.app, func() bool { return app.treeExpanded })
 }
 
+// TestFilesTabCtrlWtWithNestedDirectoriesDoesNotHang guards against
+// files.toggle_tree hiding the tree by shrinking it to zero width: tview
+// v0.42.0's TreeView.Draw never returns at width 0 once any node sits three
+// levels deep (root/dir/subdir/file — its ancestor-branch loop `continue`s
+// without advancing when graphicsX >= width), freezing the UI goroutine
+// for good. The shared fixture nests only one level (pkg/example.go), so
+// this test adds internal/ui/deep.go. The toggle is driven off-thread under
+// a deadline because a regression never returns; the stuck goroutine then
+// also blocks the app's own Stop, so go test's own timeout follows the
+// failure message.
+func TestFilesTabCtrlWtWithNestedDirectoriesDoesNotHang(t *testing.T) {
+	app, _, fake, screen := newTestApp(t, nil)
+	ref := fixtureRef(1)
+	fake.SetPRResult(ref, gh.DetailResult{PR: fixtureFilesPR(ref)})
+	pages := fixtureFilesPages()
+	last := &pages[len(pages)-1]
+	last.Files = append(last.Files, model.ChangedFile{Path: "internal/ui/deep.go", Status: model.FileStatusModified, Additions: 1})
+	fake.SetFilesPages(ref, pages)
+
+	sendSpecial(app.app, tcell.KeyEnter)
+	waitFor(t, app.app, func() bool { return app.deps.Store.CurrentPR() != nil })
+	sendRune(app.app, 'g')
+	sendRune(app.app, 't')
+	waitFor(t, app.app, func() bool { return strings.Contains(treeText(app, screen), "deep.go") })
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		sendKey(app.app, tcell.NewEventKey(tcell.KeyCtrlW, 0, tcell.ModCtrl))
+		sendRune(app.app, 't')
+		app.app.QueueUpdate(func() { app.app.ForceDraw() })
+	}()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("the UI goroutine never returned from drawing after Ctrl-w t hid a tree with nested directories")
+	}
+	waitFor(t, app.app, func() bool { return !app.treeExpanded && app.app.GetFocus() == app.diffView })
+}
+
 // TestFilesTabDiffHintReflectsTreeVisibility guards against the diff
 // pane's status-bar hint claiming "Ctrl-w h tree" when the tree is hidden
 // (Ctrl-w h from the diff then goes straight to the list, per
