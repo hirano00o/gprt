@@ -55,7 +55,20 @@ func (a *App) buildFilesTab() {
 	a.diffView = widget.NewDiffView()
 
 	a.filesFlex = tview.NewFlex().SetDirection(tview.FlexColumn)
-	a.filesFlex.AddItem(a.treeView, treeFileWidth, 0, true)
+	a.layoutFilesPanes()
+}
+
+// layoutFilesPanes lays the Files tab's columns out from treeExpanded: the
+// tree (when shown) followed by the diff. A hidden tree is left out of the
+// Flex entirely, never kept in it at zero width: tview v0.42.0's
+// TreeView.Draw never returns at width 0 once any node sits three levels
+// deep (its ancestor-branch loop `continue`s without advancing whenever
+// graphicsX >= width), which froze the whole UI on Ctrl-w t.
+func (a *App) layoutFilesPanes() {
+	a.filesFlex.Clear()
+	if a.treeExpanded {
+		a.filesFlex.AddItem(a.treeView, treeFileWidth, 0, true)
+	}
 	a.filesFlex.AddItem(a.diffView, 0, 1, false)
 }
 
@@ -291,19 +304,14 @@ func (a *App) treeOpen() {
 }
 
 // toggleTree shows or hides the file tree column (files.toggle_tree,
-// "Ctrl-w t"), moving focus to the diff first if the tree had it (a
-// hidden, zero-width pane cannot hold focus).
+// "Ctrl-w t"), moving focus to the diff first if the tree had it (a pane
+// no longer in the layout cannot hold focus).
 func (a *App) toggleTree() {
-	if a.treeExpanded {
-		if a.app.GetFocus() == a.treeView {
-			a.app.SetFocus(a.diffView)
-		}
-		a.filesFlex.ResizeItem(a.treeView, 0, 0)
-		a.treeExpanded = false
-		return
+	if a.treeExpanded && a.app.GetFocus() == a.treeView {
+		a.app.SetFocus(a.diffView)
 	}
-	a.filesFlex.ResizeItem(a.treeView, treeFileWidth, 0)
-	a.treeExpanded = true
+	a.treeExpanded = !a.treeExpanded
+	a.layoutFilesPanes()
 }
 
 // openFile makes path the file currently shown in the diff.
