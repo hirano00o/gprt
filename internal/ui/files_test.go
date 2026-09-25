@@ -767,6 +767,64 @@ func TestFilesTabNextThreadJumps(t *testing.T) {
 	})
 }
 
+// TestFilesTabPageDownMovesFurtherThanHalfDown guards list.page_down/
+// list.page_up's wiring through the router into the focused DiffView:
+// <PageDown> (a full page) must move the cursor further from the top than
+// <C-d> (half a page) does, and <PageUp> must return it to the top.
+func TestFilesTabPageDownMovesFurtherThanHalfDown(t *testing.T) {
+	app, _, screen, _ := openFilesTabForFixture(t)
+	waitFor(t, app.app, func() bool {
+		app.app.ForceDraw()
+		return containsSubstring(diffText(app, screen), "@@ -1,4 +1,5 @@")
+	})
+
+	sendKey(app.app, tcell.NewEventKey(tcell.KeyCtrlW, 0, tcell.ModCtrl))
+	sendRune(app.app, 'l')
+	waitFor(t, app.app, func() bool { return app.app.GetFocus() == app.diffView })
+
+	// cursorPos identifies the selectable row under the cursor without
+	// comparing model.ReviewThread directly (it holds a []ReviewComment,
+	// making it non-comparable with ==): a rowKindLine row's (OldNo, NewNo)
+	// together with a rowKindThreadHeader row's thread ID are each unique
+	// within this fixture's single file, so either one alone pins down the
+	// row down to identity.
+	type cursorPos struct {
+		lineOK   bool
+		oldNo    int
+		newNo    int
+		threadID string
+	}
+	cursor := func() cursorPos {
+		return query(app.app, func() cursorPos {
+			line, lineOK := app.diffView.CursorLine()
+			th, _ := app.diffView.CursorThread()
+			return cursorPos{lineOK: lineOK, oldNo: line.OldNo, newNo: line.NewNo, threadID: th.ID}
+		})
+	}
+
+	act(app.app, func() { app.diffView.MoveTop() })
+	top := cursor()
+	act(app.app, func() { app.diffView.MoveBottom() })
+	bottom := cursor()
+
+	act(app.app, func() { app.diffView.MoveTop() })
+	sendKey(app.app, tcell.NewEventKey(tcell.KeyCtrlD, 0, tcell.ModCtrl))
+	if halfDown := cursor(); halfDown == bottom {
+		t.Fatalf("<C-d> from the top already reached the bottom (%+v); fixture too short to distinguish half page from full page", halfDown)
+	}
+
+	act(app.app, func() { app.diffView.MoveTop() })
+	sendSpecial(app.app, tcell.KeyPgDn)
+	if pageDown := cursor(); pageDown != bottom {
+		t.Fatalf("<PageDown> from the top = %+v, want the bottom (%+v): a full page must move further than <C-d>", pageDown, bottom)
+	}
+
+	sendSpecial(app.app, tcell.KeyPgUp)
+	if backAtTop := cursor(); backAtTop != top {
+		t.Fatalf("<PageUp> after <PageDown> = %+v, want back at the top (%+v)", backAtTop, top)
+	}
+}
+
 func TestFilesTabHorizontalScroll(t *testing.T) {
 	app, _, screen, _ := openFilesTabForFixture(t)
 	waitFor(t, app.app, func() bool {

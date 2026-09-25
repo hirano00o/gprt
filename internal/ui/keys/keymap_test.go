@@ -17,6 +17,42 @@ func TestDefaultsBuildsWithoutError(t *testing.T) {
 	}
 }
 
+// TestDefaultsResolvesPageMovementInEveryMovableContext guards list.page_down/
+// list.page_up's four bound sequences (<PageDown>/<C-f> and <PageUp>/<C-b>)
+// resolve to the right action in every movable context, matching
+// list.half_down/half_up's own coverage.
+func TestDefaultsResolvesPageMovementInEveryMovableContext(t *testing.T) {
+	km := Defaults()
+	for _, ctx := range []Context{ContextList, ContextFiles, ContextDiff, ContextDetail} {
+		for _, seq := range []string{"<PageDown>", "<C-f>"} {
+			if action, kind := km.Lookup(ctx, mustParse(seq)); kind != Exact || action != ActionListPageDown {
+				t.Errorf("Lookup(%v, %s) = (%q, %v), want (%q, Exact)", ctx, seq, action, kind, ActionListPageDown)
+			}
+		}
+		for _, seq := range []string{"<PageUp>", "<C-b>"} {
+			if action, kind := km.Lookup(ctx, mustParse(seq)); kind != Exact || action != ActionListPageUp {
+				t.Errorf("Lookup(%v, %s) = (%q, %v), want (%q, Exact)", ctx, seq, action, kind, ActionListPageUp)
+			}
+		}
+	}
+}
+
+func TestAllActionsContainsPageMovement(t *testing.T) {
+	all := AllActions()
+	for _, want := range []Action{ActionListPageDown, ActionListPageUp} {
+		found := false
+		for _, a := range all {
+			if a == want {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("AllActions() does not contain %q", want)
+		}
+	}
+}
+
 func TestKeymapLookup(t *testing.T) {
 	km := Defaults()
 

@@ -60,6 +60,10 @@ var defaultTable = []defaultEntry{
 	{[]Context{ContextList, ContextFiles, ContextDiff, ContextDetail}, "G", ActionListBottom},
 	{[]Context{ContextList, ContextFiles, ContextDiff, ContextDetail}, "<C-d>", ActionListHalfDown},
 	{[]Context{ContextList, ContextFiles, ContextDiff, ContextDetail}, "<C-u>", ActionListHalfUp},
+	{[]Context{ContextList, ContextFiles, ContextDiff, ContextDetail}, "<PageDown>", ActionListPageDown},
+	{[]Context{ContextList, ContextFiles, ContextDiff, ContextDetail}, "<PageUp>", ActionListPageUp},
+	{[]Context{ContextList, ContextFiles, ContextDiff, ContextDetail}, "<C-f>", ActionListPageDown},
+	{[]Context{ContextList, ContextFiles, ContextDiff, ContextDetail}, "<C-b>", ActionListPageUp},
 
 	{[]Context{ContextGlobal}, "<C-w>h", ActionGlobalFocusLeft},
 	{[]Context{ContextGlobal}, "<C-w>l", ActionGlobalFocusRight},

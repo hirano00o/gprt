@@ -295,15 +295,16 @@ func (a *App) currentContexts() []keys.Context {
 
 // movablePane is the subset of widget.ListView's/widget.DiffView's movement
 // API (plus treeMovablePane's native-key-synthesising adaptation of it) that
-// list.down/up/top/bottom/half_down/half_up dispatch to, so those actions
-// route to whichever movable pane currently has focus (the PR list, the PR
-// tab's DetailView, the Files tab's tree, or its DiffView) rather than
-// always moving the list.
+// list.down/up/top/bottom/half_down/half_up/page_down/page_up dispatch to,
+// so those actions route to whichever movable pane currently has focus (the
+// PR list, the PR tab's DetailView, the Files tab's tree, or its DiffView)
+// rather than always moving the list.
 type movablePane interface {
 	MoveBy(n int)
 	MoveTop()
 	MoveBottom()
 	MoveHalfPage(dir int)
+	MovePage(dir int)
 }
 
 // noopMovablePane discards every movement: the default focusedListPane
@@ -316,6 +317,7 @@ func (noopMovablePane) MoveBy(int)       {}
 func (noopMovablePane) MoveTop()         {}
 func (noopMovablePane) MoveBottom()      {}
 func (noopMovablePane) MoveHalfPage(int) {}
+func (noopMovablePane) MovePage(int)     {}
 
 // focusedListPane returns the movable pane that currently has focus (the PR
 // list, the PR tab's DetailView, the Files tab's tree — wrapped in a
@@ -351,6 +353,10 @@ func (a *App) dispatch(action keys.Action, count int) {
 		a.focusedListPane().MoveHalfPage(1)
 	case keys.ActionListHalfUp:
 		a.focusedListPane().MoveHalfPage(-1)
+	case keys.ActionListPageDown:
+		a.focusedListPane().MovePage(1)
+	case keys.ActionListPageUp:
+		a.focusedListPane().MovePage(-1)
 	case keys.ActionListFilter:
 		a.openFilter()
 	case keys.ActionListOpen:

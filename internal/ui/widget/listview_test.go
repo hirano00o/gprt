@@ -302,6 +302,32 @@ func TestListViewMoveHalfPageCountsDisplayLinesNotRows(t *testing.T) {
 	}
 }
 
+// TestListViewMovePageByDisplayLines mirrors TestListViewMoveHalfPage/
+// TestListViewMoveHalfPageCountsDisplayLinesNotRows, but for a full page
+// (MovePage) instead of half a page: a page moves roughly twice as far as a
+// half page, clamps at the bottom, and returns to the top on MovePage(-1).
+func TestListViewMovePageByDisplayLines(t *testing.T) {
+	rows := make([]ListRow, 0, 10)
+	for i := range 10 {
+		rows = append(rows, ListRow{ID: string(rune('a' + i)), Selectable: true, Lines: [][]Span{{{Text: "x"}}}})
+	}
+	lv := NewListView()
+	lv.SetRect(0, 0, 40, 10) // 10 visible lines, all single-line rows
+	lv.SetRows(rows)
+
+	lv.MovePage(1)
+	// A full page (10 display lines) over 10 single-line rows reaches the
+	// last row, clamped there rather than overshooting.
+	if got := lv.CurrentID(); got != "j" {
+		t.Fatalf("MovePage(1) landed on %q, want the last row (j), clamped at the bottom", got)
+	}
+
+	lv.MovePage(-1)
+	if got := lv.CurrentID(); got != "a" {
+		t.Fatalf("MovePage(-1) after MovePage(1) = %q, want back at a", got)
+	}
+}
+
 func TestListViewCursorRowUsesCursorStyle(t *testing.T) {
 	screen := newTestScreen(t, 40, 10)
 	lv := NewListView()

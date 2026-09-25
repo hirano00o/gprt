@@ -189,6 +189,40 @@ func TestDiffViewMoveHalfPageByDisplayLines(t *testing.T) {
 	}
 }
 
+// TestDiffViewMovePageByDisplayLines mirrors
+// TestDiffViewMoveHalfPageByDisplayLines, but for a full page (MovePage)
+// instead of half a page.
+func TestDiffViewMovePageByDisplayLines(t *testing.T) {
+	// A patch with a single hunk of 10 context lines, so a full 10-line-tall
+	// view (10 display lines) reaches the last line exactly.
+	var patch string
+	patch = "@@ -1,10 +1,10 @@\n"
+	for i := 1; i <= 10; i++ {
+		patch += " line\n"
+	}
+	hunks, err := diff.Parse(patch)
+	if err != nil {
+		t.Fatalf("diff.Parse: %v", err)
+	}
+
+	dv := NewDiffView()
+	dv.SetFile(DiffFile{Path: "f.go", HasPatch: true, Hunks: hunks})
+	drawn(t, dv, 60, 12) // header(1) + hunk header(1) + 10 lines = 12 rows tall exactly
+
+	dv.MoveTop()
+	dv.MovePage(1)
+	movedDownLine, ok := dv.CursorLine()
+	if !ok || movedDownLine.NewNo != 10 {
+		t.Fatalf("MovePage(1) from the top landed on %+v, ok=%v, want the last line (NewNo 10)", movedDownLine, ok)
+	}
+
+	dv.MovePage(-1)
+	backAtTop, ok := dv.CursorLine()
+	if !ok || backAtTop.NewNo != 1 {
+		t.Fatalf("MovePage(-1) after MovePage(1) = %+v, want back at the first line", backAtTop)
+	}
+}
+
 func TestDiffViewVisualSelectionWithinAHunkAndClampAtBoundary(t *testing.T) {
 	dv := NewDiffView()
 	dv.SetFile(twoHunkFile(t))
