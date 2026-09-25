@@ -111,6 +111,10 @@ var defaultTable = []defaultEntry{
 	// list is just as useful while looking at the diff, or with the tree
 	// focused.
 	{[]Context{ContextPR, ContextFiles, ContextDiff}, "p", ActionPRPending},
+	// "t" is unbound in every one of these contexts and is not a global
+	// binding either, so it introduces no prefix/exact conflict; "<C-w>t"
+	// (files.toggle_tree) is a different sequence entirely.
+	{[]Context{ContextPR, ContextFiles, ContextDiff}, "t", ActionPRThreads},
 	{[]Context{ContextPR, ContextFiles, ContextDiff}, "S", ActionPRSubmit},
 	{[]Context{ContextPR, ContextFiles, ContextDiff}, "E", ActionPREdit},
 

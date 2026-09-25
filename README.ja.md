@@ -124,6 +124,7 @@ keys:                     # remap any action (vim notation); see docs/KEYBINDING
 | `E` | タイトル、base ブランチ、ラベル、レビュアー、ドラフト状態を編集 |
 | `S` | レビューを提出: Approve / Request changes / Comment |
 | `p` | ペンディング中のレビューコメントと保存済みの下書き |
+| `t` | レビュースレッド一覧(パス・行順、`Enter` で Files タブの該当箇所へジャンプ) |
 
 ### Files タブ
 
@@ -139,11 +140,11 @@ keys:                     # remap any action (vim notation); see docs/KEYBINDING
 | `e` / `d` | 自分のレビューコメントを編集 / 削除 |
 | `a` | リアクションの追加 / 削除 |
 | `za` / `zR` / `zM` | スレッドを折りたたむ / すべて展開 / すべて折りたたむ |
-| `]c` / `[c` | 次 / 前のスレッド |
+| `]c` / `[c` | 次 / 前のスレッド(現在のファイルになければ次 / 前のファイルへ移動) |
 | `]f` / `[f` | 次 / 前のファイル |
 | `zh` / `zl` | 水平スクロール |
 
-`E`、`S`、`p` はここでも使えます。
+`E`、`S`、`p`、`t` はここでも使えます。
 
 ### エディタ
 

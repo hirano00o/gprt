@@ -615,6 +615,89 @@ func TestFilesTabStepFileAtTheFirstFileToasts(t *testing.T) {
 	}
 }
 
+// TestFilesTabNextThreadCrossesFileBoundary covers "]c" (diff.next_thread)
+// falling forward into App.stepThread once widget.DiffView.NextThread runs
+// out of threads in the current file: fixtureFilesPR gives pkg/example.go
+// three threads (the last of which, in display order, is thread-open — see
+// widget.TestDiffViewJumpToThreadEdgeUsesDisplayOrder for why outdated
+// threads render first) and pkg/renamed_new.go (the next file with any,
+// alphabetically) a single file-level thread.
+func TestFilesTabNextThreadCrossesFileBoundary(t *testing.T) {
+	app, _, _, _ := openFilesTabForFixture(t)
+
+	sendKey(app.app, tcell.NewEventKey(tcell.KeyCtrlW, 0, tcell.ModCtrl))
+	sendRune(app.app, 'l')
+	waitFor(t, app.app, func() bool { return app.app.GetFocus() == app.diffView })
+
+	act(app.app, func() { app.openFile("pkg/example.go") })
+	waitFor(t, app.app, func() bool { return app.currentFilePath == "pkg/example.go" })
+	act(app.app, func() { app.diffView.MoveBottom() }) // past every thread in this file
+
+	sendRune(app.app, ']')
+	sendRune(app.app, 'c')
+	waitFor(t, app.app, func() bool { return app.currentFilePath == "pkg/renamed_new.go" })
+
+	th := query(app.app, func() model.ReviewThread { th, _ := app.diffView.CursorThread(); return th })
+	if th.ID != "thread-file" {
+		t.Fatalf("cursor thread after crossing = %+v, want thread-file (renamed_new.go's own, first/only in display order)", th)
+	}
+
+	node := query(app.app, func() *tview.TreeNode { return app.treeView.GetCurrentNode() })
+	if ref, ok := node.GetReference().(treeFileRef); !ok || ref.path != "pkg/renamed_new.go" {
+		t.Fatalf("tree node reference after crossing = %+v (ok=%v), want it selected on pkg/renamed_new.go", ref, ok)
+	}
+}
+
+// TestFilesTabPrevThreadCrossesFileBoundary mirrors
+// TestFilesTabNextThreadCrossesFileBoundary for "[c".
+func TestFilesTabPrevThreadCrossesFileBoundary(t *testing.T) {
+	app, _, _, _ := openFilesTabForFixture(t)
+
+	sendKey(app.app, tcell.NewEventKey(tcell.KeyCtrlW, 0, tcell.ModCtrl))
+	sendRune(app.app, 'l')
+	waitFor(t, app.app, func() bool { return app.app.GetFocus() == app.diffView })
+
+	act(app.app, func() { app.openFile("pkg/renamed_new.go") })
+	waitFor(t, app.app, func() bool { return app.currentFilePath == "pkg/renamed_new.go" })
+	act(app.app, func() { app.diffView.MoveTop() }) // renamed_new.go's own thread-file header row
+
+	sendRune(app.app, '[')
+	sendRune(app.app, 'c')
+	waitFor(t, app.app, func() bool { return app.currentFilePath == "pkg/example.go" })
+
+	th := query(app.app, func() model.ReviewThread { th, _ := app.diffView.CursorThread(); return th })
+	if th.ID != "thread-open" {
+		t.Fatalf("cursor thread after crossing = %+v, want thread-open (pkg/example.go's last thread in display order)", th)
+	}
+
+	node := query(app.app, func() *tview.TreeNode { return app.treeView.GetCurrentNode() })
+	if ref, ok := node.GetReference().(treeFileRef); !ok || ref.path != "pkg/example.go" {
+		t.Fatalf("tree node reference after crossing = %+v (ok=%v), want it selected on pkg/example.go", ref, ok)
+	}
+}
+
+// TestFilesTabNextThreadAtLastCommentToasts covers "]c" toasting instead of
+// moving once no file (current or later) has any thread left at all —
+// pkg/renamed_new.go is the last file, alphabetically, with one.
+func TestFilesTabNextThreadAtLastCommentToasts(t *testing.T) {
+	app, _, _, _ := openFilesTabForFixture(t)
+
+	sendKey(app.app, tcell.NewEventKey(tcell.KeyCtrlW, 0, tcell.ModCtrl))
+	sendRune(app.app, 'l')
+	waitFor(t, app.app, func() bool { return app.app.GetFocus() == app.diffView })
+
+	act(app.app, func() { app.openFile("pkg/renamed_new.go") })
+	waitFor(t, app.app, func() bool { return app.currentFilePath == "pkg/renamed_new.go" })
+	act(app.app, func() { app.diffView.MoveBottom() })
+
+	sendRune(app.app, ']')
+	sendRune(app.app, 'c')
+	waitFor(t, app.app, func() bool { return containsSubstring(app.statusBar.toast, "last comment") })
+	if got := query(app.app, func() string { return app.currentFilePath }); got != "pkg/renamed_new.go" {
+		t.Errorf("currentFilePath = %q after ]c at the last comment, want it unchanged", got)
+	}
+}
+
 func TestFilesTabVisualSelectAndEscClears(t *testing.T) {
 	app, _, screen, _ := openFilesTabForFixture(t)
 	waitFor(t, app.app, func() bool {
