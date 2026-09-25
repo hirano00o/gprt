@@ -219,7 +219,7 @@ func TestReactionPickerOnDiffThreadSeveralCommentsShowsChoiceMenu(t *testing.T) 
 // TestReactionPickerOnDiffOffThreadRowToasts covers "a" off a thread row.
 func TestReactionPickerOnDiffOffThreadRowToasts(t *testing.T) {
 	app, _, _ := openFilesTabWithReactionThreads(t)
-	act(app.app, func() { app.diffView.MoveBottom() })
+	act(app.app, func() { moveToLastDiffLine(app) })
 
 	sendRune(app.app, 'a')
 	waitFor(t, app.app, func() bool { return containsSubstring(app.statusBar.toast, "not on a comment thread") })

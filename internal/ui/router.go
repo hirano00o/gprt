@@ -481,6 +481,8 @@ func (a *App) dispatch(action keys.Action, count int) {
 		a.prevTab()
 	case keys.ActionFilesToggleTree:
 		a.toggleTree()
+	case keys.ActionDiffExpand:
+		a.expandGapAtCursor()
 	case keys.ActionDiffVisual:
 		a.diffView.StartVisual()
 	case keys.ActionDiffFold:

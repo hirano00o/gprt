@@ -51,6 +51,12 @@ type fakeGitHub struct {
 	filesErrs   map[string]map[int]error
 	filesBlock  chan struct{}
 
+	// fileContent backs FileContent (see SetFileContent): keyed by blob SHA
+	// rather than by ref/path, matching the real endpoint, which addresses
+	// a blob purely by its content hash.
+	fileContent      map[string][]string
+	fileContentCalls []string
+
 	addCommentErr      error
 	addCommentBodies   []string
 	addCommentBlock    chan struct{}
@@ -280,6 +286,37 @@ func (f *fakeGitHub) ChangedFiles(ctx context.Context, ref model.PRRef, page int
 		return gh.FilesResult{}, nil
 	}
 	return pages[page-1], nil
+}
+
+// SetFileContent registers the lines FileContent returns for sha.
+func (f *fakeGitHub) SetFileContent(sha string, lines []string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.fileContent == nil {
+		f.fileContent = make(map[string][]string)
+	}
+	f.fileContent[sha] = lines
+}
+
+// FileContentCalls returns every sha FileContent was called with, in call
+// order.
+func (f *fakeGitHub) FileContentCalls() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.fileContentCalls...)
+}
+
+// FileContent returns the lines registered for sha via SetFileContent, or a
+// not-found error for a sha nothing was registered for.
+func (f *fakeGitHub) FileContent(_ context.Context, _ model.RepoRef, sha string) (gh.FileContentResult, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.fileContentCalls = append(f.fileContentCalls, sha)
+	lines, ok := f.fileContent[sha]
+	if !ok {
+		return gh.FileContentResult{}, fmt.Errorf("fake: no file content registered for sha %q", sha)
+	}
+	return gh.FileContentResult{Lines: lines}, nil
 }
 
 // SetAddCommentBlock arms (or, passed nil, disarms) a gate every

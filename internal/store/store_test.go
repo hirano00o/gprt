@@ -70,6 +70,12 @@ type filesCall struct {
 	etag string
 }
 
+// fileContentCall records one FileContent invocation for assertions.
+type fileContentCall struct {
+	repo model.RepoRef
+	sha  string
+}
+
 // fakeGitHub is a test double for the GitHub interface. viewerFunc,
 // searchFunc, detailFunc, and filesFunc default to returning zero values
 // with no error; tests override any of them to control timing and results.
@@ -80,6 +86,7 @@ type fakeGitHub struct {
 	searchFunc        func(ctx context.Context, query, cursor string) (gh.SearchResult, error)
 	detailFunc        func(ctx context.Context, ref model.PRRef, viewerLogin string) (gh.DetailResult, error)
 	filesFunc         func(ctx context.Context, ref model.PRRef, page int, etag string) (gh.FilesResult, error)
+	fileContentFunc   func(ctx context.Context, repo model.RepoRef, sha string) (gh.FileContentResult, error)
 	addCommentFunc    func(ctx context.Context, subjectID, body string) (model.IssueComment, model.RateLimit, error)
 	updateCommentFunc func(ctx context.Context, id, body string) (model.IssueComment, model.RateLimit, error)
 	deleteCommentFunc func(ctx context.Context, id string) (model.RateLimit, error)
@@ -120,6 +127,7 @@ type fakeGitHub struct {
 	calls              []searchCall
 	detailCalls        []detailCall
 	filesCalls         []filesCall
+	fileContentCalls   []fileContentCall
 	addCommentCalls    []addCommentCall
 	updateCommentCalls []updateCommentCall
 	deleteCommentCalls []deleteCommentCall
@@ -288,6 +296,9 @@ func newFakeGitHub() *fakeGitHub {
 		filesFunc: func(context.Context, model.PRRef, int, string) (gh.FilesResult, error) {
 			return gh.FilesResult{}, nil
 		},
+		fileContentFunc: func(context.Context, model.RepoRef, string) (gh.FileContentResult, error) {
+			return gh.FileContentResult{}, nil
+		},
 		addCommentFunc: func(context.Context, string, string) (model.IssueComment, model.RateLimit, error) {
 			return model.IssueComment{}, model.RateLimit{}, nil
 		},
@@ -418,6 +429,14 @@ func (f *fakeGitHub) ChangedFiles(ctx context.Context, ref model.PRRef, page int
 	fn := f.filesFunc
 	f.mu.Unlock()
 	return fn(ctx, ref, page, etag)
+}
+
+func (f *fakeGitHub) FileContent(ctx context.Context, repo model.RepoRef, sha string) (gh.FileContentResult, error) {
+	f.mu.Lock()
+	f.fileContentCalls = append(f.fileContentCalls, fileContentCall{repo: repo, sha: sha})
+	fn := f.fileContentFunc
+	f.mu.Unlock()
+	return fn(ctx, repo, sha)
 }
 
 func (f *fakeGitHub) AddIssueComment(ctx context.Context, subjectID, body string) (model.IssueComment, model.RateLimit, error) {
@@ -1256,6 +1275,24 @@ func (f *fakeGitHub) filesCallsSnapshot() []filesCall {
 	defer f.mu.Unlock()
 	out := make([]filesCall, len(f.filesCalls))
 	copy(out, f.filesCalls)
+	return out
+}
+
+// setFileContentFunc reassigns fileContentFunc under the lock, for the same
+// reason setSearchFunc does.
+func (f *fakeGitHub) setFileContentFunc(fn func(ctx context.Context, repo model.RepoRef, sha string) (gh.FileContentResult, error)) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.fileContentFunc = fn
+}
+
+// fileContentCallsSnapshot returns a copy of every FileContent call
+// recorded so far, for assertions.
+func (f *fakeGitHub) fileContentCallsSnapshot() []fileContentCall {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]fileContentCall, len(f.fileContentCalls))
+	copy(out, f.fileContentCalls)
 	return out
 }
 

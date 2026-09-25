@@ -62,6 +62,13 @@ type DiffFile struct {
 	// marker column's glyph, but the column itself is always reserved so
 	// every line's gutter stays the same width.
 	DraftMarker string
+	// HeadLineCount is the file's head (new/right side) full line count,
+	// known once its content has been fetched once (see internal/store's
+	// ExpandGap) - meaningless while HeadKnown is false. Only used to size
+	// the trailing gap row (see diffBuilder.build): while unknown, that row
+	// shows an "expand" prompt with no line count instead of a number.
+	HeadLineCount int
+	HeadKnown     bool
 }
 
 // DraftAnchor identifies one diff line (by its Hunk/Line index into
@@ -103,6 +110,11 @@ const (
 	rowKindLine
 	rowKindThreadHeader
 	rowKindThreadComment
+	// rowKindGap is a collapsed-region row ("⋯ N lines hidden ⋯") between
+	// hunks, before the first, or after the last (see diffBuilder.build).
+	// Selectable: Enter on it expands the region (internal/ui's
+	// App.expandGapAtCursor).
+	rowKindGap
 )
 
 // diffRow is one row of DiffView's rebuilt content. Only rowKindLine and
@@ -124,6 +136,13 @@ type diffRow struct {
 	// cursor by identity across a rebuild.
 	threadID string
 
+	// gapStart/gapCount identify a rowKindGap row: gapStart is the new-side
+	// line number of the gap's first hidden line (its identity - see
+	// keyForRow's doc comment for why never a hunk index), gapCount is how
+	// many lines it hides (0 means not yet known - the trailing gap before
+	// the file's head content has ever been fetched).
+	gapStart, gapCount int
+
 	gutter  []Span
 	content []Span
 
@@ -131,7 +150,7 @@ type diffRow struct {
 }
 
 func (r diffRow) selectable() bool {
-	return r.kind == rowKindLine || r.kind == rowKindThreadHeader
+	return r.kind == rowKindLine || r.kind == rowKindThreadHeader || r.kind == rowKindGap
 }
 
 // lineCount is how many physical screen lines r occupies.
@@ -151,13 +170,28 @@ type diffRowKey struct {
 	hunk     int
 	line     int
 	threadID string
+	// isGap/gapStart identify a rowKindGap row by its new-side start line
+	// (never by hunk index): expanding one gap can merge hunks and shift
+	// every later hunk's index, while line numbers never change - see
+	// diff.ExpandGap's own doc comment for the same rule. This also means a
+	// gap row's key can never again match any row once it is expanded
+	// (there is no longer a gap at that start line at all), so rebuild's
+	// by-identity restore naturally falls through to its clamp(oldCursor)
+	// fallback, landing on whatever now occupies the gap row's old
+	// position - the first revealed line.
+	isGap    bool
+	gapStart int
 }
 
 func keyForRow(r diffRow) diffRowKey {
-	if r.kind == rowKindThreadHeader {
+	switch r.kind {
+	case rowKindThreadHeader:
 		return diffRowKey{isThread: true, threadID: r.threadID}
+	case rowKindGap:
+		return diffRowKey{isGap: true, gapStart: r.gapStart}
+	default:
+		return diffRowKey{hunk: r.hunk, line: r.line}
 	}
-	return diffRowKey{hunk: r.hunk, line: r.line}
 }
 
 // DiffView is the Files tab's diff pane: a custom tview primitive (never a
@@ -583,6 +617,17 @@ func (dv *DiffView) CursorThread() (model.ReviewThread, bool) {
 	return model.ReviewThread{}, false
 }
 
+// CursorGap returns the new-side start line of the collapsed region under
+// the cursor, if the cursor is currently on a gap row (see
+// diffBuilder.build/diff.ExpandGap).
+func (dv *DiffView) CursorGap() (gapStart int, ok bool) {
+	row, ok := dv.currentRow()
+	if !ok || row.kind != rowKindGap {
+		return 0, false
+	}
+	return row.gapStart, true
+}
+
 // ScrollHorizontal adjusts the diff content's horizontal scroll position by
 // delta cells (zh/zl), clamped to [0, the longest line's overflow past the
 // last-drawn content width].
@@ -861,7 +906,26 @@ func (b *diffBuilder) build() {
 	}
 
 	if !f.Loading && f.Err == nil && f.HasPatch {
+		// A file whose Status is Added/Removed has its entire content in
+		// the patch already (there is no "other side" to reveal), so gap
+		// rows never apply to it, regardless of HeadKnown/HeadLineCount.
+		gapsEligible := len(f.Hunks) > 0 &&
+			f.Status != model.FileStatusAdded && f.Status != model.FileStatusRemoved
+
+		if gapsEligible {
+			if first, _ := diff.NewRange(f.Hunks[0]); first > 1 {
+				b.appendGapRow(1, first-1)
+			}
+		}
+
 		for hi, h := range f.Hunks {
+			if gapsEligible && hi > 0 {
+				_, lastPrev := diff.NewRange(f.Hunks[hi-1])
+				first, _ := diff.NewRange(h)
+				if first > lastPrev+1 {
+					b.appendGapRow(lastPrev+1, first-lastPrev-1)
+				}
+			}
 			b.rows = append(b.rows, b.hunkHeaderRow(h))
 			for li, l := range h.Lines {
 				b.rows = append(b.rows, b.lineRow(f, hi, li, l))
@@ -870,7 +934,35 @@ func (b *diffBuilder) build() {
 				}
 			}
 		}
+
+		if gapsEligible {
+			_, last := diff.NewRange(f.Hunks[len(f.Hunks)-1])
+			switch {
+			case !f.HeadKnown:
+				b.appendGapRow(last+1, 0) // count unknown until fetched
+			case f.HeadLineCount > last:
+				b.appendGapRow(last+1, f.HeadLineCount-last)
+			}
+		}
 	}
+}
+
+// appendGapRow appends one collapsed-region row for the gap starting at
+// new-side line gapStart, gapCount lines long. gapCount == 0 means "not yet
+// known" (only ever the trailing gap, before the file's head content has
+// been fetched - a real gap is never empty, see diffBuilder.build's own
+// non-empty conditions), rendered as an "expand" prompt with no count.
+func (b *diffBuilder) appendGapRow(gapStart, gapCount int) {
+	text := "⋯ expand ⋯"
+	if gapCount > 0 {
+		text = fmt.Sprintf("⋯ %d lines hidden ⋯", gapCount)
+	}
+	b.rows = append(b.rows, diffRow{
+		kind:     rowKindGap,
+		gapStart: gapStart,
+		gapCount: gapCount,
+		lines:    [][]Span{{{Text: text, Style: theme.Muted}}},
+	})
 }
 
 type hunkLineKey struct{ hunk, line int }

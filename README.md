@@ -131,6 +131,7 @@ All keys below except the editor's own can be remapped. The full reference, incl
 | Key | Action |
 |-----|--------|
 | `Enter`, `l` | Open the file under the cursor (in the tree) |
+| `Enter` | On a collapsed region (`⋯ N lines hidden ⋯`), expand it |
 | `Ctrl-w t` | Show or hide the file tree |
 | `V` | Select lines for a range comment (`Esc` cancels) |
 | `c` | Comment on the line or the selection; on a thread, reply |

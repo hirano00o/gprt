@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -12,6 +13,10 @@ import (
 
 func testRef() model.PRRef {
 	return model.PRRef{Repo: model.RepoRef{Host: "example.com", Owner: "acme", Name: "widgets"}, Number: 42}
+}
+
+func testRepo() model.RepoRef {
+	return model.RepoRef{Host: "example.com", Owner: "acme", Name: "widgets"}
 }
 
 func TestChangedFiles_SuccessWithLinkHeaderAndPatch(t *testing.T) {
@@ -202,4 +207,151 @@ func TestChangedFiles_NoLinkHeaderMeansNoNextPage(t *testing.T) {
 	if res.HasNext {
 		t.Error("HasNext = true, want false when the response has no Link header")
 	}
+}
+
+func TestFileContent_SuccessSendsRawAcceptHeader(t *testing.T) {
+	c, srv := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		wantPath := "/api/v3/repos/acme/widgets/git/blobs/abc123"
+		if r.URL.Path != wantPath {
+			t.Errorf("request path = %q, want %q", r.URL.Path, wantPath)
+		}
+		if got := r.Header.Get("Accept"); got != "application/vnd.github.raw+json" {
+			t.Errorf("Accept = %q, want %q (raw bytes, no base64 envelope)", got, "application/vnd.github.raw+json")
+		}
+		w.Header().Set("X-RateLimit-Remaining", "4999")
+		w.Header().Set("X-RateLimit-Reset", "1893456000")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("line one\nline two\nline three"))
+	})
+	defer srv.Close()
+
+	res, err := c.FileContent(t.Context(), testRepo(), "abc123")
+	if err != nil {
+		t.Fatalf("FileContent() error = %v", err)
+	}
+	want := []string{"line one", "line two", "line three"}
+	if !slicesEqual(res.Lines, want) {
+		t.Errorf("Lines = %q, want %q", res.Lines, want)
+	}
+	if !res.RateLimit.Known || res.RateLimit.Remaining != 4999 {
+		t.Errorf("RateLimit = %+v, want Known=true Remaining=4999", res.RateLimit)
+	}
+}
+
+func TestFileContent_TrailingNewlineDropsFinalEmptyElement(t *testing.T) {
+	c, srv := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("line one\nline two\n"))
+	})
+	defer srv.Close()
+
+	res, err := c.FileContent(t.Context(), testRepo(), "abc123")
+	if err != nil {
+		t.Fatalf("FileContent() error = %v", err)
+	}
+	want := []string{"line one", "line two"}
+	if !slicesEqual(res.Lines, want) {
+		t.Errorf("Lines = %q, want %q", res.Lines, want)
+	}
+}
+
+func TestFileContent_EmptyBodyReturnsZeroLines(t *testing.T) {
+	c, srv := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	defer srv.Close()
+
+	res, err := c.FileContent(t.Context(), testRepo(), "abc123")
+	if err != nil {
+		t.Fatalf("FileContent() error = %v", err)
+	}
+	if len(res.Lines) != 0 {
+		t.Errorf("len(Lines) = %d, want 0 for an empty body", len(res.Lines))
+	}
+}
+
+func TestFileContent_NotFoundClassifiesError(t *testing.T) {
+	c, srv := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		_ = json.NewEncoder(w).Encode(map[string]any{"message": "Not Found"})
+	})
+	defer srv.Close()
+
+	_, err := c.FileContent(t.Context(), testRepo(), "missing-sha")
+	var ghErr *Error
+	if !errors.As(err, &ghErr) {
+		t.Fatalf("error = %v, want a *gh.Error", err)
+	}
+	if ghErr.Kind != KindNotFound {
+		t.Errorf("error Kind = %v, want %v", ghErr.Kind, KindNotFound)
+	}
+}
+
+// TestFileContent_ContentLengthOverCapReturnsSizeErrorWithoutReadingBody
+// asserts the too-large check uses the declared Content-Length header
+// rather than reading the body: the handler declares a length far past
+// maxBlobBytes but writes a short body, and the assertion on the error
+// message's size figure only holds if FileContent trusted the header.
+func TestFileContent_ContentLengthOverCapReturnsSizeErrorWithoutReadingBody(t *testing.T) {
+	c, srv := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Length", "20000000")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("short body, far less than the declared length"))
+	})
+	defer srv.Close()
+
+	_, err := c.FileContent(t.Context(), testRepo(), "abc123")
+	var ghErr *Error
+	if !errors.As(err, &ghErr) {
+		t.Fatalf("error = %v, want a *gh.Error", err)
+	}
+	if !strings.Contains(ghErr.Message, "20000000") {
+		t.Errorf("error message = %q, want it to mention the declared size (20000000)", ghErr.Message)
+	}
+}
+
+// TestFileContent_ChunkedResponseOverCapReturnsSizeError covers a response
+// with no Content-Length header at all (chunked transfer encoding,
+// resp.ContentLength == -1 client-side - common for the GitHub API): the
+// declared-length check above cannot catch this, so the body must still be
+// refused, not silently truncated, once actually read past maxBlobBytes.
+// maxBlobBytes is temporarily shrunk (it is a var for exactly this reason)
+// so the fixture body does not need to be a real 10 MiB.
+func TestFileContent_ChunkedResponseOverCapReturnsSizeError(t *testing.T) {
+	old := maxBlobBytes
+	maxBlobBytes = 16
+	defer func() { maxBlobBytes = old }()
+
+	c, srv := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		if f, ok := w.(http.Flusher); ok {
+			// Commits the header now, with no Content-Length set, forcing
+			// chunked transfer encoding for the write below.
+			f.Flush()
+		}
+		_, _ = w.Write([]byte("this body is deliberately longer than the shrunk maxBlobBytes cap"))
+	})
+	defer srv.Close()
+
+	_, err := c.FileContent(t.Context(), testRepo(), "abc123")
+	var ghErr *Error
+	if !errors.As(err, &ghErr) {
+		t.Fatalf("error = %v, want a *gh.Error", err)
+	}
+	if ghErr.Kind != KindUnknown {
+		t.Errorf("error Kind = %v, want %v", ghErr.Kind, KindUnknown)
+	}
+}
+
+// slicesEqual reports whether a and b contain the same elements in order.
+func slicesEqual(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
