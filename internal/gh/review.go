@@ -83,7 +83,6 @@ type addPullRequestReviewResponse struct {
 	AddPullRequestReview *struct {
 		PullRequestReview *reviewNode `json:"pullRequestReview"`
 	} `json:"addPullRequestReview"`
-	RateLimit *rateLimitFragment `json:"rateLimit"`
 }
 
 // runAddPullRequestReview executes query (either create_pending_review's or
@@ -92,16 +91,15 @@ type addPullRequestReviewResponse struct {
 // AddReviewNow, and AddReviewNowWithEvent.
 func (c *Client) runAddPullRequestReview(
 	ctx context.Context, query string, variables map[string]any,
-) (model.Review, model.RateLimit, error) {
+) (model.Review, error) {
 	var resp addPullRequestReviewResponse
 	if err := c.gql.DoWithContext(ctx, query, variables, &resp); err != nil {
-		return model.Review{}, model.RateLimit{}, classify(err)
+		return model.Review{}, classify(err)
 	}
 	if resp.AddPullRequestReview == nil || resp.AddPullRequestReview.PullRequestReview == nil {
-		return model.Review{}, resp.RateLimit.toModel(),
-			&Error{Kind: KindUnknown, Message: "addPullRequestReview: no review returned"}
+		return model.Review{}, &Error{Kind: KindUnknown, Message: "addPullRequestReview: no review returned"}
 	}
-	return resp.AddPullRequestReview.PullRequestReview.toModel(), resp.RateLimit.toModel(), nil
+	return resp.AddPullRequestReview.PullRequestReview.toModel(), nil
 }
 
 // CreatePendingReview starts the viewer's pending review on prID (GraphQL's
@@ -109,7 +107,7 @@ func (c *Client) runAddPullRequestReview(
 // PENDING). GitHub allows at most one pending review per user per pull
 // request; calling this while one already exists is a caller error (the
 // store's EnsurePendingReview-style callers check PendingReview() first).
-func (c *Client) CreatePendingReview(ctx context.Context, prID string) (model.Review, model.RateLimit, error) {
+func (c *Client) CreatePendingReview(ctx context.Context, prID string) (model.Review, error) {
 	variables := map[string]any{"id": prID}
 	return c.runAddPullRequestReview(ctx, createPendingReviewQuery(), variables)
 }
@@ -149,7 +147,7 @@ func (t DraftThread) toInput() map[string]any {
 // only the thread(s) it carries).
 func (c *Client) AddReviewNow(
 	ctx context.Context, prID string, threads []DraftThread, body string,
-) (model.Review, model.RateLimit, error) {
+) (model.Review, error) {
 	threadInputs := make([]map[string]any, 0, len(threads))
 	for _, t := range threads {
 		threadInputs = append(threadInputs, t.toInput())
@@ -168,7 +166,7 @@ func (c *Client) AddReviewNow(
 // submitPullRequestReview).
 func (c *Client) AddReviewNowWithEvent(
 	ctx context.Context, prID string, event model.ReviewEvent, body string,
-) (model.Review, model.RateLimit, error) {
+) (model.Review, error) {
 	variables := map[string]any{"id": prID, "event": string(event), "body": body, "threads": nil}
 	return c.runAddPullRequestReview(ctx, addReviewNowQuery(), variables)
 }
@@ -213,21 +211,19 @@ type addReviewThreadResponse struct {
 	AddPullRequestReviewThread *struct {
 		Thread *reviewThreadNode `json:"thread"`
 	} `json:"addPullRequestReviewThread"`
-	RateLimit *rateLimitFragment `json:"rateLimit"`
 }
 
 // AddReviewThread adds a new thread (line, range, or whole-file) to an
 // existing pending review.
-func (c *Client) AddReviewThread(ctx context.Context, in ThreadInput) (model.ReviewThread, model.RateLimit, error) {
+func (c *Client) AddReviewThread(ctx context.Context, in ThreadInput) (model.ReviewThread, error) {
 	var resp addReviewThreadResponse
 	if err := c.gql.DoWithContext(ctx, addReviewThreadQuery(), in.toVariables(), &resp); err != nil {
-		return model.ReviewThread{}, model.RateLimit{}, classify(err)
+		return model.ReviewThread{}, classify(err)
 	}
 	if resp.AddPullRequestReviewThread == nil || resp.AddPullRequestReviewThread.Thread == nil {
-		return model.ReviewThread{}, resp.RateLimit.toModel(),
-			&Error{Kind: KindUnknown, Message: "addPullRequestReviewThread: no thread returned"}
+		return model.ReviewThread{}, &Error{Kind: KindUnknown, Message: "addPullRequestReviewThread: no thread returned"}
 	}
-	return mapReviewThread(*resp.AddPullRequestReviewThread.Thread), resp.RateLimit.toModel(), nil
+	return mapReviewThread(*resp.AddPullRequestReviewThread.Thread), nil
 }
 
 // addThreadReplyResponse is the decoded shape of
@@ -239,7 +235,6 @@ type addThreadReplyResponse struct {
 	AddPullRequestReviewThreadReply *struct {
 		Comment *reviewCommentNode `json:"comment"`
 	} `json:"addPullRequestReviewThreadReply"`
-	RateLimit *rateLimitFragment `json:"rateLimit"`
 }
 
 // AddThreadReply replies to an existing review thread. pendingReviewID is
@@ -248,17 +243,16 @@ type addThreadReplyResponse struct {
 // review.
 func (c *Client) AddThreadReply(
 	ctx context.Context, threadID, body, pendingReviewID string,
-) (model.ReviewComment, model.RateLimit, error) {
+) (model.ReviewComment, error) {
 	variables := map[string]any{"threadId": threadID, "body": body, "reviewId": stringVariable(pendingReviewID)}
 	var resp addThreadReplyResponse
 	if err := c.gql.DoWithContext(ctx, addThreadReplyQuery(), variables, &resp); err != nil {
-		return model.ReviewComment{}, model.RateLimit{}, classify(err)
+		return model.ReviewComment{}, classify(err)
 	}
 	if resp.AddPullRequestReviewThreadReply == nil || resp.AddPullRequestReviewThreadReply.Comment == nil {
-		return model.ReviewComment{}, resp.RateLimit.toModel(),
-			&Error{Kind: KindUnknown, Message: "addPullRequestReviewThreadReply: no comment returned"}
+		return model.ReviewComment{}, &Error{Kind: KindUnknown, Message: "addPullRequestReviewThreadReply: no comment returned"}
 	}
-	return mapReviewComment(*resp.AddPullRequestReviewThreadReply.Comment), resp.RateLimit.toModel(), nil
+	return mapReviewComment(*resp.AddPullRequestReviewThreadReply.Comment), nil
 }
 
 // submitReviewResponse is the decoded shape of queries/submit_review.graphql.
@@ -266,42 +260,35 @@ type submitReviewResponse struct {
 	SubmitPullRequestReview *struct {
 		PullRequestReview *reviewNode `json:"pullRequestReview"`
 	} `json:"submitPullRequestReview"`
-	RateLimit *rateLimitFragment `json:"rateLimit"`
 }
 
 // SubmitReview submits an existing pending review (identified by reviewID)
 // with the given event (APPROVE, REQUEST_CHANGES, or COMMENT) and body.
 func (c *Client) SubmitReview(
 	ctx context.Context, reviewID string, event model.ReviewEvent, body string,
-) (model.Review, model.RateLimit, error) {
+) (model.Review, error) {
 	variables := map[string]any{"reviewId": reviewID, "event": string(event), "body": body}
 	var resp submitReviewResponse
 	if err := c.gql.DoWithContext(ctx, submitReviewQuery(), variables, &resp); err != nil {
-		return model.Review{}, model.RateLimit{}, classify(err)
+		return model.Review{}, classify(err)
 	}
 	if resp.SubmitPullRequestReview == nil || resp.SubmitPullRequestReview.PullRequestReview == nil {
-		return model.Review{}, resp.RateLimit.toModel(),
-			&Error{Kind: KindUnknown, Message: "submitPullRequestReview: no review returned"}
+		return model.Review{}, &Error{Kind: KindUnknown, Message: "submitPullRequestReview: no review returned"}
 	}
-	return resp.SubmitPullRequestReview.PullRequestReview.toModel(), resp.RateLimit.toModel(), nil
-}
-
-// deletePendingReviewResponse is the decoded shape of
-// queries/delete_pending_review.graphql. The payload carries nothing gprt
-// reads besides rateLimit, mirroring deleteIssueCommentResponse.
-type deletePendingReviewResponse struct {
-	RateLimit *rateLimitFragment `json:"rateLimit"`
+	return resp.SubmitPullRequestReview.PullRequestReview.toModel(), nil
 }
 
 // DeletePendingReview discards the viewer's pending review (GraphQL's
-// deletePullRequestReview), used by the "discard review" action.
-func (c *Client) DeletePendingReview(ctx context.Context, reviewID string) (model.RateLimit, error) {
+// deletePullRequestReview), used by the "discard review" action. The
+// mutation's payload carries nothing gprt reads, so the response decodes
+// into an empty struct purely to satisfy DoWithContext's signature.
+func (c *Client) DeletePendingReview(ctx context.Context, reviewID string) error {
 	variables := map[string]any{"reviewId": reviewID}
-	var resp deletePendingReviewResponse
+	var resp struct{}
 	if err := c.gql.DoWithContext(ctx, deletePendingReviewQuery(), variables, &resp); err != nil {
-		return model.RateLimit{}, classify(err)
+		return classify(err)
 	}
-	return resp.RateLimit.toModel(), nil
+	return nil
 }
 
 // updateReviewCommentResponse is the decoded shape of
@@ -312,38 +299,31 @@ type updateReviewCommentResponse struct {
 	UpdatePullRequestReviewComment *struct {
 		PullRequestReviewComment *reviewCommentNode `json:"pullRequestReviewComment"`
 	} `json:"updatePullRequestReviewComment"`
-	RateLimit *rateLimitFragment `json:"rateLimit"`
 }
 
 // UpdateReviewComment edits an existing review comment's body.
-func (c *Client) UpdateReviewComment(ctx context.Context, id, body string) (model.ReviewComment, model.RateLimit, error) {
+func (c *Client) UpdateReviewComment(ctx context.Context, id, body string) (model.ReviewComment, error) {
 	variables := map[string]any{"id": id, "body": body}
 	var resp updateReviewCommentResponse
 	if err := c.gql.DoWithContext(ctx, updateReviewCommentQuery(), variables, &resp); err != nil {
-		return model.ReviewComment{}, model.RateLimit{}, classify(err)
+		return model.ReviewComment{}, classify(err)
 	}
 	if resp.UpdatePullRequestReviewComment == nil || resp.UpdatePullRequestReviewComment.PullRequestReviewComment == nil {
-		return model.ReviewComment{}, resp.RateLimit.toModel(),
-			&Error{Kind: KindUnknown, Message: "updatePullRequestReviewComment: no comment returned"}
+		return model.ReviewComment{}, &Error{Kind: KindUnknown, Message: "updatePullRequestReviewComment: no comment returned"}
 	}
-	return mapReviewComment(*resp.UpdatePullRequestReviewComment.PullRequestReviewComment), resp.RateLimit.toModel(), nil
+	return mapReviewComment(*resp.UpdatePullRequestReviewComment.PullRequestReviewComment), nil
 }
 
-// deleteReviewCommentResponse is the decoded shape of
-// queries/delete_review_comment.graphql, mirroring
-// deletePendingReviewResponse.
-type deleteReviewCommentResponse struct {
-	RateLimit *rateLimitFragment `json:"rateLimit"`
-}
-
-// DeleteReviewComment deletes an existing review comment.
-func (c *Client) DeleteReviewComment(ctx context.Context, id string) (model.RateLimit, error) {
+// DeleteReviewComment deletes an existing review comment. The mutation's
+// payload carries nothing gprt reads, so the response decodes into an
+// empty struct purely to satisfy DoWithContext's signature.
+func (c *Client) DeleteReviewComment(ctx context.Context, id string) error {
 	variables := map[string]any{"id": id}
-	var resp deleteReviewCommentResponse
+	var resp struct{}
 	if err := c.gql.DoWithContext(ctx, deleteReviewCommentQuery(), variables, &resp); err != nil {
-		return model.RateLimit{}, classify(err)
+		return classify(err)
 	}
-	return resp.RateLimit.toModel(), nil
+	return nil
 }
 
 // threadResolutionNode mirrors the "thread { id isResolved viewerCanResolve
@@ -381,21 +361,19 @@ type resolveThreadResponse struct {
 	ResolveReviewThread *struct {
 		Thread *threadResolutionNode `json:"thread"`
 	} `json:"resolveReviewThread"`
-	RateLimit *rateLimitFragment `json:"rateLimit"`
 }
 
 // ResolveThread marks threadID resolved.
-func (c *Client) ResolveThread(ctx context.Context, threadID string) (model.ReviewThread, model.RateLimit, error) {
+func (c *Client) ResolveThread(ctx context.Context, threadID string) (model.ReviewThread, error) {
 	variables := map[string]any{"threadId": threadID}
 	var resp resolveThreadResponse
 	if err := c.gql.DoWithContext(ctx, resolveThreadQuery(), variables, &resp); err != nil {
-		return model.ReviewThread{}, model.RateLimit{}, classify(err)
+		return model.ReviewThread{}, classify(err)
 	}
 	if resp.ResolveReviewThread == nil || resp.ResolveReviewThread.Thread == nil {
-		return model.ReviewThread{}, resp.RateLimit.toModel(),
-			&Error{Kind: KindUnknown, Message: "resolveReviewThread: no thread returned"}
+		return model.ReviewThread{}, &Error{Kind: KindUnknown, Message: "resolveReviewThread: no thread returned"}
 	}
-	return resp.ResolveReviewThread.Thread.toModel(), resp.RateLimit.toModel(), nil
+	return resp.ResolveReviewThread.Thread.toModel(), nil
 }
 
 // unresolveThreadResponse is the decoded shape of
@@ -404,19 +382,17 @@ type unresolveThreadResponse struct {
 	UnresolveReviewThread *struct {
 		Thread *threadResolutionNode `json:"thread"`
 	} `json:"unresolveReviewThread"`
-	RateLimit *rateLimitFragment `json:"rateLimit"`
 }
 
 // UnresolveThread marks threadID unresolved.
-func (c *Client) UnresolveThread(ctx context.Context, threadID string) (model.ReviewThread, model.RateLimit, error) {
+func (c *Client) UnresolveThread(ctx context.Context, threadID string) (model.ReviewThread, error) {
 	variables := map[string]any{"threadId": threadID}
 	var resp unresolveThreadResponse
 	if err := c.gql.DoWithContext(ctx, unresolveThreadQuery(), variables, &resp); err != nil {
-		return model.ReviewThread{}, model.RateLimit{}, classify(err)
+		return model.ReviewThread{}, classify(err)
 	}
 	if resp.UnresolveReviewThread == nil || resp.UnresolveReviewThread.Thread == nil {
-		return model.ReviewThread{}, resp.RateLimit.toModel(),
-			&Error{Kind: KindUnknown, Message: "unresolveReviewThread: no thread returned"}
+		return model.ReviewThread{}, &Error{Kind: KindUnknown, Message: "unresolveReviewThread: no thread returned"}
 	}
-	return resp.UnresolveReviewThread.Thread.toModel(), resp.RateLimit.toModel(), nil
+	return resp.UnresolveReviewThread.Thread.toModel(), nil
 }

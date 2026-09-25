@@ -8,8 +8,4 @@ mutation SubmitReview($reviewId: ID!, $event: PullRequestReviewEvent!, $body: St
       body
     }
   }
-  rateLimit {
-    remaining
-    resetAt
-  }
 }

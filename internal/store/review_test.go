@@ -176,19 +176,19 @@ func TestCommentOnLines_SendToReview_CreatesPendingThenAddsThread(t *testing.T) 
 	})
 
 	var order []string
-	gitHub.setCreatePendingReviewFunc(func(_ context.Context, prID string) (model.Review, model.RateLimit, error) {
+	gitHub.setCreatePendingReviewFunc(func(_ context.Context, prID string) (model.Review, error) {
 		order = append(order, "create")
 		if prID != "PR_1" {
 			t.Errorf("CreatePendingReview prID = %q, want PR_1", prID)
 		}
-		return model.Review{ID: "PRR_1", State: model.ReviewStatePending}, model.RateLimit{Known: true, Remaining: 100}, nil
+		return model.Review{ID: "PRR_1", State: model.ReviewStatePending}, nil
 	})
-	gitHub.setAddReviewThreadFunc(func(_ context.Context, in gh.ThreadInput) (model.ReviewThread, model.RateLimit, error) {
+	gitHub.setAddReviewThreadFunc(func(_ context.Context, in gh.ThreadInput) (model.ReviewThread, error) {
 		order = append(order, "thread")
 		if in.PullRequestReviewID != "PRR_1" {
 			t.Errorf("AddReviewThread PullRequestReviewID = %q, want PRR_1", in.PullRequestReviewID)
 		}
-		return model.ReviewThread{ID: "RT_1", Path: in.Path, Line: in.Line, Side: in.Side}, model.RateLimit{}, nil
+		return model.ReviewThread{ID: "RT_1", Path: in.Path, Line: in.Line, Side: in.Side}, nil
 	})
 
 	if got := s.CommentOnLines("a.go", diff.Range{Side: model.DiffSideRight, Line: 10}, "hi", SendToReview); !got {
@@ -226,8 +226,8 @@ func TestCommentOnLines_PendingReviewExists_CoercesSendSingleToReview(t *testing
 		PendingReview: &model.Review{ID: "PRR_1", State: model.ReviewStatePending},
 	})
 
-	gitHub.setAddReviewThreadFunc(func(_ context.Context, in gh.ThreadInput) (model.ReviewThread, model.RateLimit, error) {
-		return model.ReviewThread{ID: "RT_1", Path: in.Path}, model.RateLimit{}, nil
+	gitHub.setAddReviewThreadFunc(func(_ context.Context, in gh.ThreadInput) (model.ReviewThread, error) {
+		return model.ReviewThread{ID: "RT_1", Path: in.Path}, nil
 	})
 
 	s.CommentOnLines("a.go", diff.Range{Side: model.DiffSideRight, Line: 1}, "x", SendSingle)
@@ -254,11 +254,11 @@ func TestCommentOnFile_SendSingle_CreatesThreadThenSubmits(t *testing.T) {
 	openPRWithDetail(t, s, gitHub, disp, ref, model.PullRequest{ID: "PR_1"})
 
 	var order []string
-	gitHub.setCreatePendingReviewFunc(func(_ context.Context, _ string) (model.Review, model.RateLimit, error) {
+	gitHub.setCreatePendingReviewFunc(func(_ context.Context, _ string) (model.Review, error) {
 		order = append(order, "create")
-		return model.Review{ID: "PRR_1"}, model.RateLimit{}, nil
+		return model.Review{ID: "PRR_1"}, nil
 	})
-	gitHub.setAddReviewThreadFunc(func(_ context.Context, in gh.ThreadInput) (model.ReviewThread, model.RateLimit, error) {
+	gitHub.setAddReviewThreadFunc(func(_ context.Context, in gh.ThreadInput) (model.ReviewThread, error) {
 		order = append(order, "thread")
 		if in.SubjectType != model.ThreadSubjectFile {
 			t.Errorf("SubjectType = %v, want FILE", in.SubjectType)
@@ -269,14 +269,14 @@ func TestCommentOnFile_SendSingle_CreatesThreadThenSubmits(t *testing.T) {
 		if in.PullRequestReviewID != "PRR_1" {
 			t.Errorf("PullRequestReviewID = %q, want PRR_1", in.PullRequestReviewID)
 		}
-		return model.ReviewThread{ID: "RT_1", SubjectType: model.ThreadSubjectFile}, model.RateLimit{}, nil
+		return model.ReviewThread{ID: "RT_1", SubjectType: model.ThreadSubjectFile}, nil
 	})
-	gitHub.setSubmitReviewFunc(func(_ context.Context, reviewID string, event model.ReviewEvent, body string) (model.Review, model.RateLimit, error) {
+	gitHub.setSubmitReviewFunc(func(_ context.Context, reviewID string, event model.ReviewEvent, body string) (model.Review, error) {
 		order = append(order, "submit")
 		if reviewID != "PRR_1" || event != model.ReviewEventComment || body != "" {
 			t.Errorf("SubmitReview(reviewID=%q, event=%v, body=%q), want PRR_1/COMMENT/\"\"", reviewID, event, body)
 		}
-		return model.Review{ID: "PRR_1", State: model.ReviewStateCommented}, model.RateLimit{}, nil
+		return model.Review{ID: "PRR_1", State: model.ReviewStateCommented}, nil
 	})
 
 	if got := s.CommentOnFile("a.go", "file comment", SendSingle); !got {
@@ -320,11 +320,11 @@ func TestCommentOnFile_SendSingle_FailureMidwayConvergesViaRefetch(t *testing.T)
 	runUntilIdle(t, disp)
 	events := collectEvents(s)
 
-	gitHub.setCreatePendingReviewFunc(func(_ context.Context, _ string) (model.Review, model.RateLimit, error) {
-		return model.Review{ID: "PRR_1"}, model.RateLimit{}, nil
+	gitHub.setCreatePendingReviewFunc(func(_ context.Context, _ string) (model.Review, error) {
+		return model.Review{ID: "PRR_1"}, nil
 	})
-	gitHub.setAddReviewThreadFunc(func(_ context.Context, _ gh.ThreadInput) (model.ReviewThread, model.RateLimit, error) {
-		return model.ReviewThread{}, model.RateLimit{}, &gh.Error{Kind: gh.KindValidation, Message: "boom"}
+	gitHub.setAddReviewThreadFunc(func(_ context.Context, _ gh.ThreadInput) (model.ReviewThread, error) {
+		return model.ReviewThread{}, &gh.Error{Kind: gh.KindValidation, Message: "boom"}
 	})
 
 	s.CommentOnFile("a.go", "file comment", SendSingle)
@@ -367,11 +367,11 @@ func TestCommentOnLines_SendToReview_PartialFailureTriggersRefetch(t *testing.T)
 	s.OpenPR(ref)
 	runUntilIdle(t, disp)
 
-	gitHub.setCreatePendingReviewFunc(func(_ context.Context, _ string) (model.Review, model.RateLimit, error) {
-		return model.Review{ID: "PRR_1"}, model.RateLimit{}, nil
+	gitHub.setCreatePendingReviewFunc(func(_ context.Context, _ string) (model.Review, error) {
+		return model.Review{ID: "PRR_1"}, nil
 	})
-	gitHub.setAddReviewThreadFunc(func(_ context.Context, _ gh.ThreadInput) (model.ReviewThread, model.RateLimit, error) {
-		return model.ReviewThread{}, model.RateLimit{}, &gh.Error{Kind: gh.KindValidation, Message: "line must be part of the diff"}
+	gitHub.setAddReviewThreadFunc(func(_ context.Context, _ gh.ThreadInput) (model.ReviewThread, error) {
+		return model.ReviewThread{}, &gh.Error{Kind: gh.KindValidation, Message: "line must be part of the diff"}
 	})
 
 	s.CommentOnLines("a.go", diff.Range{Side: model.DiffSideRight, Line: 999}, "x", SendToReview)
@@ -396,8 +396,8 @@ func TestCommentOnFile_SendToReview_WithExistingPending_OnlyAddsThread(t *testin
 		PendingReview: &model.Review{ID: "PRR_1", State: model.ReviewStatePending},
 	})
 
-	gitHub.setAddReviewThreadFunc(func(_ context.Context, in gh.ThreadInput) (model.ReviewThread, model.RateLimit, error) {
-		return model.ReviewThread{ID: "RT_1", SubjectType: in.SubjectType}, model.RateLimit{}, nil
+	gitHub.setAddReviewThreadFunc(func(_ context.Context, in gh.ThreadInput) (model.ReviewThread, error) {
+		return model.ReviewThread{ID: "RT_1", SubjectType: in.SubjectType}, nil
 	})
 
 	if got := s.CommentOnFile("a.go", "file comment", SendToReview); !got {
@@ -432,11 +432,11 @@ func TestReplyToThread_SendSingle(t *testing.T) {
 	s.OpenPR(ref)
 	runUntilIdle(t, disp)
 
-	gitHub.setAddThreadReplyFunc(func(_ context.Context, threadID, body, pendingReviewID string) (model.ReviewComment, model.RateLimit, error) {
+	gitHub.setAddThreadReplyFunc(func(_ context.Context, threadID, body, pendingReviewID string) (model.ReviewComment, error) {
 		if threadID != "RT_1" || body != "reply" || pendingReviewID != "" {
 			t.Errorf("AddThreadReply(%q, %q, %q), want RT_1/reply/\"\"", threadID, body, pendingReviewID)
 		}
-		return model.ReviewComment{ID: "RC_1", Body: body}, model.RateLimit{}, nil
+		return model.ReviewComment{ID: "RC_1", Body: body}, nil
 	})
 
 	if got := s.ReplyToThread("RT_1", "reply", SendSingle); !got {
@@ -473,16 +473,16 @@ func TestReplyToThread_SendToReview_EnsuresPendingReview(t *testing.T) {
 	runUntilIdle(t, disp)
 
 	var order []string
-	gitHub.setCreatePendingReviewFunc(func(_ context.Context, _ string) (model.Review, model.RateLimit, error) {
+	gitHub.setCreatePendingReviewFunc(func(_ context.Context, _ string) (model.Review, error) {
 		order = append(order, "create")
-		return model.Review{ID: "PRR_1"}, model.RateLimit{}, nil
+		return model.Review{ID: "PRR_1"}, nil
 	})
-	gitHub.setAddThreadReplyFunc(func(_ context.Context, threadID, body, pendingReviewID string) (model.ReviewComment, model.RateLimit, error) {
+	gitHub.setAddThreadReplyFunc(func(_ context.Context, threadID, body, pendingReviewID string) (model.ReviewComment, error) {
 		order = append(order, "reply")
 		if pendingReviewID != "PRR_1" {
 			t.Errorf("AddThreadReply pendingReviewID = %q, want PRR_1", pendingReviewID)
 		}
-		return model.ReviewComment{ID: "RC_1", Body: body}, model.RateLimit{}, nil
+		return model.ReviewComment{ID: "RC_1", Body: body}, nil
 	})
 
 	if got := s.ReplyToThread("RT_1", "reply", SendToReview); !got {
@@ -515,8 +515,8 @@ func TestEditReviewComment_Success_ReplacesInPlace(t *testing.T) {
 	s.OpenPR(ref)
 	runUntilIdle(t, disp)
 
-	gitHub.setUpdateReviewCommentFunc(func(_ context.Context, id, body string) (model.ReviewComment, model.RateLimit, error) {
-		return model.ReviewComment{ID: id, Body: body}, model.RateLimit{}, nil
+	gitHub.setUpdateReviewCommentFunc(func(_ context.Context, id, body string) (model.ReviewComment, error) {
+		return model.ReviewComment{ID: id, Body: body}, nil
 	})
 
 	if got := s.EditReviewComment("RC_1", "edited"); !got {
@@ -565,8 +565,8 @@ func TestDeleteReviewComment_Success_RemovesAndDropsEmptiedThread(t *testing.T) 
 	s.OpenPR(ref)
 	runUntilIdle(t, disp)
 
-	gitHub.setDeleteReviewCommentFunc(func(context.Context, string) (model.RateLimit, error) {
-		return model.RateLimit{}, nil
+	gitHub.setDeleteReviewCommentFunc(func(context.Context, string) error {
+		return nil
 	})
 
 	if got := s.DeleteReviewComment("RC_1"); !got {
@@ -671,8 +671,8 @@ func TestSetThreadResolved_ResolveAndUnresolve(t *testing.T) {
 	s.OpenPR(ref)
 	runUntilIdle(t, disp)
 
-	gitHub.setResolveThreadFunc(func(_ context.Context, threadID string) (model.ReviewThread, model.RateLimit, error) {
-		return model.ReviewThread{ID: threadID, IsResolved: true, ViewerCanResolve: false, ViewerCanUnresolve: true}, model.RateLimit{}, nil
+	gitHub.setResolveThreadFunc(func(_ context.Context, threadID string) (model.ReviewThread, error) {
+		return model.ReviewThread{ID: threadID, IsResolved: true, ViewerCanResolve: false, ViewerCanUnresolve: true}, nil
 	})
 
 	if got := s.SetThreadResolved("RT_1", true); !got {
@@ -688,8 +688,8 @@ func TestSetThreadResolved_ResolveAndUnresolve(t *testing.T) {
 		t.Fatalf("ReviewThreads after resolve = %+v, want IsResolved=true", pr.ReviewThreads)
 	}
 
-	gitHub.setUnresolveThreadFunc(func(_ context.Context, threadID string) (model.ReviewThread, model.RateLimit, error) {
-		return model.ReviewThread{ID: threadID, IsResolved: false, ViewerCanResolve: true, ViewerCanUnresolve: false}, model.RateLimit{}, nil
+	gitHub.setUnresolveThreadFunc(func(_ context.Context, threadID string) (model.ReviewThread, error) {
+		return model.ReviewThread{ID: threadID, IsResolved: false, ViewerCanResolve: true, ViewerCanUnresolve: false}, nil
 	})
 	if got := s.SetThreadResolved("RT_1", false); !got {
 		t.Fatal("SetThreadResolved(false) = false, want true")
@@ -730,8 +730,8 @@ func TestDiscardPendingReview_Success(t *testing.T) {
 	s.OpenPR(ref)
 	runUntilIdle(t, disp)
 
-	gitHub.setDeletePendingReviewFunc(func(context.Context, string) (model.RateLimit, error) {
-		return model.RateLimit{}, nil
+	gitHub.setDeletePendingReviewFunc(func(context.Context, string) error {
+		return nil
 	})
 
 	if got := s.DiscardPendingReview(); !got {
@@ -799,11 +799,11 @@ func TestSubmitReview_WithPendingReview_UsesSubmitReview(t *testing.T) {
 	s.OpenPR(ref)
 	runUntilIdle(t, disp)
 
-	gitHub.setSubmitReviewFunc(func(_ context.Context, reviewID string, event model.ReviewEvent, body string) (model.Review, model.RateLimit, error) {
+	gitHub.setSubmitReviewFunc(func(_ context.Context, reviewID string, event model.ReviewEvent, body string) (model.Review, error) {
 		if reviewID != "PRR_1" || event != model.ReviewEventApprove || body != "lgtm" {
 			t.Errorf("SubmitReview(%q, %v, %q), want PRR_1/APPROVE/lgtm", reviewID, event, body)
 		}
-		return model.Review{ID: reviewID, State: model.ReviewStateApproved}, model.RateLimit{}, nil
+		return model.Review{ID: reviewID, State: model.ReviewStateApproved}, nil
 	})
 
 	if got := s.SubmitReview(model.ReviewEventApprove, "lgtm"); !got {
@@ -831,11 +831,11 @@ func TestSubmitReview_NoPendingReview_UsesAddReviewNowWithEvent(t *testing.T) {
 	ref := reviewTestRef(1)
 	openPRWithDetail(t, s, gitHub, disp, ref, model.PullRequest{ID: "PR_1"})
 
-	gitHub.setAddReviewNowWithEventFunc(func(_ context.Context, prID string, event model.ReviewEvent, body string) (model.Review, model.RateLimit, error) {
+	gitHub.setAddReviewNowWithEventFunc(func(_ context.Context, prID string, event model.ReviewEvent, body string) (model.Review, error) {
 		if prID != "PR_1" || event != model.ReviewEventRequestChanges || body != "please fix" {
 			t.Errorf("AddReviewNowWithEvent(%q, %v, %q), want PR_1/REQUEST_CHANGES/please fix", prID, event, body)
 		}
-		return model.Review{ID: "PRR_2", State: model.ReviewStateChangesRequested}, model.RateLimit{}, nil
+		return model.Review{ID: "PRR_2", State: model.ReviewStateChangesRequested}, nil
 	})
 
 	if got := s.SubmitReview(model.ReviewEventRequestChanges, "please fix"); !got {
@@ -907,13 +907,13 @@ func TestCommentOnLines_GenerationGuard_SwitchPRSkipsApply(t *testing.T) {
 	runUntilIdle(t, disp)
 
 	block := make(chan struct{})
-	gitHub.setAddReviewNowFunc(func(ctx context.Context, _ string, _ []gh.DraftThread, _ string) (model.Review, model.RateLimit, error) {
+	gitHub.setAddReviewNowFunc(func(ctx context.Context, _ string, _ []gh.DraftThread, _ string) (model.Review, error) {
 		select {
 		case <-block:
 		case <-ctx.Done():
-			return model.Review{}, model.RateLimit{}, ctx.Err()
+			return model.Review{}, ctx.Err()
 		}
-		return model.Review{ID: "PRR_a"}, model.RateLimit{}, nil
+		return model.Review{ID: "PRR_a"}, nil
 	})
 
 	s.CommentOnLines("a.go", diff.Range{Side: model.DiffSideRight, Line: 1}, "for-a", SendSingle)
@@ -939,8 +939,8 @@ func TestCommentOnLines_Error_KeepsStateEmitsEventError(t *testing.T) {
 	events := collectEvents(s)
 
 	wantErr := &gh.Error{Kind: gh.KindValidation, Message: "line must be part of the diff"}
-	gitHub.setAddReviewNowFunc(func(context.Context, string, []gh.DraftThread, string) (model.Review, model.RateLimit, error) {
-		return model.Review{}, model.RateLimit{}, wantErr
+	gitHub.setAddReviewNowFunc(func(context.Context, string, []gh.DraftThread, string) (model.Review, error) {
+		return model.Review{}, wantErr
 	})
 
 	s.CommentOnLines("a.go", diff.Range{Side: model.DiffSideRight, Line: 1}, "x", SendSingle)
@@ -983,13 +983,13 @@ func TestQueuedSendToReview_ReusesPendingReviewCreatedByEarlierMutation(t *testi
 		ID: "PR_1", PendingReview: &model.Review{ID: "PRR_1", State: model.ReviewStatePending},
 	})
 
-	gitHub.setCreatePendingReviewFunc(func(_ context.Context, _ string) (model.Review, model.RateLimit, error) {
-		return model.Review{ID: "PRR_1", State: model.ReviewStatePending}, model.RateLimit{}, nil
+	gitHub.setCreatePendingReviewFunc(func(_ context.Context, _ string) (model.Review, error) {
+		return model.Review{ID: "PRR_1", State: model.ReviewStatePending}, nil
 	})
 	var threadReviewIDs []string
-	gitHub.setAddReviewThreadFunc(func(_ context.Context, in gh.ThreadInput) (model.ReviewThread, model.RateLimit, error) {
+	gitHub.setAddReviewThreadFunc(func(_ context.Context, in gh.ThreadInput) (model.ReviewThread, error) {
 		threadReviewIDs = append(threadReviewIDs, in.PullRequestReviewID)
-		return model.ReviewThread{ID: "RT_" + in.Body, Path: in.Path}, model.RateLimit{}, nil
+		return model.ReviewThread{ID: "RT_" + in.Body, Path: in.Path}, nil
 	})
 
 	s.CommentOnLines("a.go", diff.Range{Side: model.DiffSideRight, Line: 1}, "first", SendToReview)
@@ -1022,11 +1022,11 @@ func TestQueuedSendSingleBehindSendToReview_Coerces(t *testing.T) {
 		ID: "PR_1", PendingReview: &model.Review{ID: "PRR_1", State: model.ReviewStatePending},
 	})
 
-	gitHub.setCreatePendingReviewFunc(func(_ context.Context, _ string) (model.Review, model.RateLimit, error) {
-		return model.Review{ID: "PRR_1", State: model.ReviewStatePending}, model.RateLimit{}, nil
+	gitHub.setCreatePendingReviewFunc(func(_ context.Context, _ string) (model.Review, error) {
+		return model.Review{ID: "PRR_1", State: model.ReviewStatePending}, nil
 	})
-	gitHub.setAddReviewThreadFunc(func(_ context.Context, in gh.ThreadInput) (model.ReviewThread, model.RateLimit, error) {
-		return model.ReviewThread{ID: "RT", Path: in.Path}, model.RateLimit{}, nil
+	gitHub.setAddReviewThreadFunc(func(_ context.Context, in gh.ThreadInput) (model.ReviewThread, error) {
+		return model.ReviewThread{ID: "RT", Path: in.Path}, nil
 	})
 
 	s.CommentOnLines("a.go", diff.Range{Side: model.DiffSideRight, Line: 1}, "first", SendToReview)
@@ -1059,11 +1059,11 @@ func TestQueuedSubmitReviewBehindSendToReview_SubmitsTheCreatedReview(t *testing
 		ID: "PR_1", PendingReview: &model.Review{ID: "PRR_1", State: model.ReviewStatePending},
 	})
 
-	gitHub.setCreatePendingReviewFunc(func(_ context.Context, _ string) (model.Review, model.RateLimit, error) {
-		return model.Review{ID: "PRR_1", State: model.ReviewStatePending}, model.RateLimit{}, nil
+	gitHub.setCreatePendingReviewFunc(func(_ context.Context, _ string) (model.Review, error) {
+		return model.Review{ID: "PRR_1", State: model.ReviewStatePending}, nil
 	})
-	gitHub.setAddReviewThreadFunc(func(_ context.Context, in gh.ThreadInput) (model.ReviewThread, model.RateLimit, error) {
-		return model.ReviewThread{ID: "RT", Path: in.Path}, model.RateLimit{}, nil
+	gitHub.setAddReviewThreadFunc(func(_ context.Context, in gh.ThreadInput) (model.ReviewThread, error) {
+		return model.ReviewThread{ID: "RT", Path: in.Path}, nil
 	})
 
 	s.CommentOnLines("a.go", diff.Range{Side: model.DiffSideRight, Line: 1}, "first", SendToReview)
@@ -1100,13 +1100,13 @@ func TestBackToBackSendToReview_WhileFirstStillInFlight_CreatesPendingReviewOnce
 
 	var creates int32
 	release := make(chan struct{})
-	gitHub.setCreatePendingReviewFunc(func(_ context.Context, _ string) (model.Review, model.RateLimit, error) {
+	gitHub.setCreatePendingReviewFunc(func(_ context.Context, _ string) (model.Review, error) {
 		atomic.AddInt32(&creates, 1)
 		<-release // hold the first mutation in flight until both are enqueued
-		return model.Review{ID: "PRR_1", State: model.ReviewStatePending}, model.RateLimit{}, nil
+		return model.Review{ID: "PRR_1", State: model.ReviewStatePending}, nil
 	})
-	gitHub.setAddReviewThreadFunc(func(_ context.Context, in gh.ThreadInput) (model.ReviewThread, model.RateLimit, error) {
-		return model.ReviewThread{ID: "RT_" + in.Body, Path: in.Path}, model.RateLimit{}, nil
+	gitHub.setAddReviewThreadFunc(func(_ context.Context, in gh.ThreadInput) (model.ReviewThread, error) {
+		return model.ReviewThread{ID: "RT_" + in.Body, Path: in.Path}, nil
 	})
 
 	s.CommentOnLines("a.go", diff.Range{Side: model.DiffSideRight, Line: 1}, "one", SendToReview)
@@ -1142,13 +1142,13 @@ func TestReviewMutation_TargetChangedBeforeStart_NoGitHubCallEmitsError(t *testi
 	runUntilIdle(t, disp)
 
 	block := make(chan struct{})
-	gitHub.setAddCommentFunc(func(ctx context.Context, _, _ string) (model.IssueComment, model.RateLimit, error) {
+	gitHub.setAddCommentFunc(func(ctx context.Context, _, _ string) (model.IssueComment, error) {
 		select {
 		case <-block:
 		case <-ctx.Done():
-			return model.IssueComment{}, model.RateLimit{}, ctx.Err()
+			return model.IssueComment{}, ctx.Err()
 		}
-		return model.IssueComment{ID: "IC_a"}, model.RateLimit{}, nil
+		return model.IssueComment{ID: "IC_a"}, nil
 	})
 
 	// An unrelated AddComment mutation occupies the queue's single flight
@@ -1198,8 +1198,8 @@ func TestCommentOnLines_SendSingleCoercedToReview_EmitsEventNotice(t *testing.T)
 	})
 	events := collectEvents(s)
 
-	gitHub.setAddReviewThreadFunc(func(_ context.Context, in gh.ThreadInput) (model.ReviewThread, model.RateLimit, error) {
-		return model.ReviewThread{ID: "RT_1", Path: in.Path}, model.RateLimit{}, nil
+	gitHub.setAddReviewThreadFunc(func(_ context.Context, in gh.ThreadInput) (model.ReviewThread, error) {
+		return model.ReviewThread{ID: "RT_1", Path: in.Path}, nil
 	})
 
 	s.CommentOnLines("a.go", diff.Range{Side: model.DiffSideRight, Line: 1}, "x", SendSingle)
@@ -1225,8 +1225,8 @@ func TestCommentOnLines_SendToReview_NoCoercion_NoEventNotice(t *testing.T) {
 	})
 	events := collectEvents(s)
 
-	gitHub.setAddReviewThreadFunc(func(_ context.Context, in gh.ThreadInput) (model.ReviewThread, model.RateLimit, error) {
-		return model.ReviewThread{ID: "RT_1", Path: in.Path}, model.RateLimit{}, nil
+	gitHub.setAddReviewThreadFunc(func(_ context.Context, in gh.ThreadInput) (model.ReviewThread, error) {
+		return model.ReviewThread{ID: "RT_1", Path: in.Path}, nil
 	})
 
 	s.CommentOnLines("a.go", diff.Range{Side: model.DiffSideRight, Line: 1}, "x", SendToReview)
@@ -1333,8 +1333,8 @@ func TestSetThreadResolved_ThreadNotFound_NotRefusedLocally(t *testing.T) {
 	ref := reviewTestRef(1)
 	openPRWithDetail(t, s, gitHub, disp, ref, model.PullRequest{ID: "PR_1"})
 
-	gitHub.setResolveThreadFunc(func(_ context.Context, threadID string) (model.ReviewThread, model.RateLimit, error) {
-		return model.ReviewThread{ID: threadID, IsResolved: true}, model.RateLimit{}, nil
+	gitHub.setResolveThreadFunc(func(_ context.Context, threadID string) (model.ReviewThread, error) {
+		return model.ReviewThread{ID: threadID, IsResolved: true}, nil
 	})
 
 	if got := s.SetThreadResolved("RT_unknown", true); !got {
@@ -1371,17 +1371,17 @@ func TestCommentOnFile_SendSingle_KeepsThreadMarkedSubmitted(t *testing.T) {
 	s.OpenPR(ref)
 	runUntilIdle(t, disp)
 
-	gitHub.setCreatePendingReviewFunc(func(_ context.Context, _ string) (model.Review, model.RateLimit, error) {
-		return model.Review{ID: "PRR_1"}, model.RateLimit{}, nil
+	gitHub.setCreatePendingReviewFunc(func(_ context.Context, _ string) (model.Review, error) {
+		return model.Review{ID: "PRR_1"}, nil
 	})
-	gitHub.setAddReviewThreadFunc(func(_ context.Context, in gh.ThreadInput) (model.ReviewThread, model.RateLimit, error) {
+	gitHub.setAddReviewThreadFunc(func(_ context.Context, in gh.ThreadInput) (model.ReviewThread, error) {
 		return model.ReviewThread{
 			ID: "RT_1", Path: in.Path, SubjectType: model.ThreadSubjectFile,
 			Comments: []model.ReviewComment{{ID: "RC_1", State: model.ReviewCommentStatePending, Body: in.Body}},
-		}, model.RateLimit{}, nil
+		}, nil
 	})
-	gitHub.setSubmitReviewFunc(func(_ context.Context, reviewID string, _ model.ReviewEvent, _ string) (model.Review, model.RateLimit, error) {
-		return model.Review{ID: reviewID, State: model.ReviewStateCommented}, model.RateLimit{}, nil
+	gitHub.setSubmitReviewFunc(func(_ context.Context, reviewID string, _ model.ReviewEvent, _ string) (model.Review, error) {
+		return model.Review{ID: reviewID, State: model.ReviewStateCommented}, nil
 	})
 
 	s.CommentOnFile("a.go", "file comment", SendSingle)
@@ -1432,11 +1432,11 @@ func TestSetThreadResolved_ToggleAgainBeforeRefetchUsesFreshFlags(t *testing.T) 
 	s.OpenPR(ref)
 	runUntilIdle(t, disp)
 
-	gitHub.setResolveThreadFunc(func(_ context.Context, threadID string) (model.ReviewThread, model.RateLimit, error) {
-		return model.ReviewThread{ID: threadID, IsResolved: true, ViewerCanResolve: false, ViewerCanUnresolve: true}, model.RateLimit{}, nil
+	gitHub.setResolveThreadFunc(func(_ context.Context, threadID string) (model.ReviewThread, error) {
+		return model.ReviewThread{ID: threadID, IsResolved: true, ViewerCanResolve: false, ViewerCanUnresolve: true}, nil
 	})
-	gitHub.setUnresolveThreadFunc(func(_ context.Context, threadID string) (model.ReviewThread, model.RateLimit, error) {
-		return model.ReviewThread{ID: threadID, IsResolved: false, ViewerCanResolve: true, ViewerCanUnresolve: false}, model.RateLimit{}, nil
+	gitHub.setUnresolveThreadFunc(func(_ context.Context, threadID string) (model.ReviewThread, error) {
+		return model.ReviewThread{ID: threadID, IsResolved: false, ViewerCanResolve: true, ViewerCanUnresolve: false}, nil
 	})
 
 	if got := s.SetThreadResolved("RT_1", true); !got {
@@ -1484,8 +1484,8 @@ func TestDiscardPendingReview_QueuedTwice_SecondPrepareFailureDoesNotRefetch(t *
 	runUntilIdle(t, disp)
 	before := gitHub.detailCallCount()
 
-	gitHub.setDeletePendingReviewFunc(func(context.Context, string) (model.RateLimit, error) {
-		return model.RateLimit{}, nil
+	gitHub.setDeletePendingReviewFunc(func(context.Context, string) error {
+		return nil
 	})
 	events := collectEvents(s)
 
@@ -1544,13 +1544,13 @@ func TestReviewMutation_TargetChangedBeforeStart_DoesNotInvalidateCache(t *testi
 	runUntilIdle(t, disp)
 
 	block := make(chan struct{})
-	gitHub.setAddCommentFunc(func(ctx context.Context, _, _ string) (model.IssueComment, model.RateLimit, error) {
+	gitHub.setAddCommentFunc(func(ctx context.Context, _, _ string) (model.IssueComment, error) {
 		select {
 		case <-block:
 		case <-ctx.Done():
-			return model.IssueComment{}, model.RateLimit{}, ctx.Err()
+			return model.IssueComment{}, ctx.Err()
 		}
-		return model.IssueComment{ID: "IC_c"}, model.RateLimit{}, nil
+		return model.IssueComment{ID: "IC_c"}, nil
 	})
 	// Occupies the queue's single flight slot (blocked) so CommentOnLines
 	// below, enqueued for refA, is still queued rather than started when

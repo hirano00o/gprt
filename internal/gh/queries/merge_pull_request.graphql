@@ -20,8 +20,4 @@ mutation MergePullRequest(
       mergedAt
     }
   }
-  rateLimit {
-    remaining
-    resetAt
-  }
 }

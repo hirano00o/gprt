@@ -31,8 +31,7 @@ func TestClient_AddIssueComment_Success(t *testing.T) {
 						"viewerCanDelete": true
 					}
 				}
-			},
-			"rateLimit": {"remaining": 4998, "resetAt": "2026-09-12T01:00:00Z"}
+			}
 		}
 	}`)
 
@@ -51,7 +50,7 @@ func TestClient_AddIssueComment_Success(t *testing.T) {
 	})
 	defer srv.Close()
 
-	comment, rl, err := c.AddIssueComment(context.Background(), "PR_1", "hello")
+	comment, err := c.AddIssueComment(context.Background(), "PR_1", "hello")
 	if err != nil {
 		t.Fatalf("AddIssueComment() error = %v", err)
 	}
@@ -80,9 +79,6 @@ func TestClient_AddIssueComment_Success(t *testing.T) {
 		comment.ViewerCanDelete != want.ViewerCanDelete {
 		t.Errorf("AddIssueComment() comment = %+v, want %+v", comment, want)
 	}
-	if !rl.Known || rl.Remaining != 4998 {
-		t.Errorf("AddIssueComment() rate limit = %+v, want Remaining=4998, Known=true", rl)
-	}
 }
 
 func TestClient_AddIssueComment_ValidationError(t *testing.T) {
@@ -93,7 +89,7 @@ func TestClient_AddIssueComment_ValidationError(t *testing.T) {
 	})
 	defer srv.Close()
 
-	_, _, err := c.AddIssueComment(context.Background(), "PR_1", "")
+	_, err := c.AddIssueComment(context.Background(), "PR_1", "")
 	if err == nil {
 		t.Fatal("AddIssueComment() error = nil, want an error")
 	}
@@ -125,8 +121,7 @@ func TestClient_UpdateIssueComment_Success(t *testing.T) {
 					"viewerCanUpdate": true,
 					"viewerCanDelete": true
 				}
-			},
-			"rateLimit": {"remaining": 4997, "resetAt": "2026-09-12T01:00:00Z"}
+			}
 		}
 	}`)
 
@@ -142,7 +137,7 @@ func TestClient_UpdateIssueComment_Success(t *testing.T) {
 	})
 	defer srv.Close()
 
-	comment, rl, err := c.UpdateIssueComment(context.Background(), "IC_1", "edited")
+	comment, err := c.UpdateIssueComment(context.Background(), "IC_1", "edited")
 	if err != nil {
 		t.Fatalf("UpdateIssueComment() error = %v", err)
 	}
@@ -152,9 +147,6 @@ func TestClient_UpdateIssueComment_Success(t *testing.T) {
 	if comment.Body != "edited" {
 		t.Errorf("UpdateIssueComment() comment.Body = %q, want %q", comment.Body, "edited")
 	}
-	if !rl.Known || rl.Remaining != 4997 {
-		t.Errorf("UpdateIssueComment() rate limit = %+v, want Remaining=4997, Known=true", rl)
-	}
 }
 
 func TestClient_UpdateIssueComment_AuthError(t *testing.T) {
@@ -163,7 +155,7 @@ func TestClient_UpdateIssueComment_AuthError(t *testing.T) {
 	})
 	defer srv.Close()
 
-	_, _, err := c.UpdateIssueComment(context.Background(), "IC_1", "edited")
+	_, err := c.UpdateIssueComment(context.Background(), "IC_1", "edited")
 	if err == nil {
 		t.Fatal("UpdateIssueComment() error = nil, want an error")
 	}
@@ -181,8 +173,7 @@ func TestClient_DeleteIssueComment_Success(t *testing.T) {
 	var gotVars map[string]any
 	fixture := []byte(`{
 		"data": {
-			"deleteIssueComment": {"clientMutationId": null},
-			"rateLimit": {"remaining": 4996, "resetAt": "2026-09-12T01:00:00Z"}
+			"deleteIssueComment": {"clientMutationId": null}
 		}
 	}`)
 
@@ -199,7 +190,7 @@ func TestClient_DeleteIssueComment_Success(t *testing.T) {
 	})
 	defer srv.Close()
 
-	rl, err := c.DeleteIssueComment(context.Background(), "IC_1")
+	err := c.DeleteIssueComment(context.Background(), "IC_1")
 	if err != nil {
 		t.Fatalf("DeleteIssueComment() error = %v", err)
 	}
@@ -209,9 +200,6 @@ func TestClient_DeleteIssueComment_Success(t *testing.T) {
 	if gotVars["id"] != "IC_1" {
 		t.Errorf("request variables = %+v, want id=IC_1", gotVars)
 	}
-	if !rl.Known || rl.Remaining != 4996 {
-		t.Errorf("DeleteIssueComment() rate limit = %+v, want Remaining=4996, Known=true", rl)
-	}
 }
 
 func TestClient_DeleteIssueComment_NotFoundError(t *testing.T) {
@@ -220,7 +208,7 @@ func TestClient_DeleteIssueComment_NotFoundError(t *testing.T) {
 	})
 	defer srv.Close()
 
-	_, err := c.DeleteIssueComment(context.Background(), "IC_missing")
+	err := c.DeleteIssueComment(context.Background(), "IC_missing")
 	if err == nil {
 		t.Fatal("DeleteIssueComment() error = nil, want an error")
 	}

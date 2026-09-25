@@ -13,8 +13,4 @@ mutation AddReviewNow(
       body
     }
   }
-  rateLimit {
-    remaining
-    resetAt
-  }
 }

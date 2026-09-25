@@ -23,7 +23,6 @@ type addReactionResponse struct {
 	AddReaction *struct {
 		ReactionGroups []reactionGroupFragment `json:"reactionGroups"`
 	} `json:"addReaction"`
-	RateLimit *rateLimitFragment `json:"rateLimit"`
 }
 
 // AddReaction adds content to subjectID (a pull request, issue comment,
@@ -33,16 +32,16 @@ type addReactionResponse struct {
 // pull_request.graphql's own reactionGroups selection exactly).
 func (c *Client) AddReaction(
 	ctx context.Context, subjectID string, content model.ReactionContent,
-) ([]model.ReactionGroup, model.RateLimit, error) {
+) ([]model.ReactionGroup, error) {
 	variables := map[string]any{"subjectId": subjectID, "content": string(content)}
 	var resp addReactionResponse
 	if err := c.gql.DoWithContext(ctx, addReactionQuery(), variables, &resp); err != nil {
-		return nil, model.RateLimit{}, classify(err)
+		return nil, classify(err)
 	}
 	if resp.AddReaction == nil {
-		return nil, resp.RateLimit.toModel(), &Error{Kind: KindUnknown, Message: "addReaction: no payload returned"}
+		return nil, &Error{Kind: KindUnknown, Message: "addReaction: no payload returned"}
 	}
-	return toReactionGroups(resp.AddReaction.ReactionGroups), resp.RateLimit.toModel(), nil
+	return toReactionGroups(resp.AddReaction.ReactionGroups), nil
 }
 
 // removeReactionResponse is the decoded shape of
@@ -52,21 +51,20 @@ type removeReactionResponse struct {
 	RemoveReaction *struct {
 		ReactionGroups []reactionGroupFragment `json:"reactionGroups"`
 	} `json:"removeReaction"`
-	RateLimit *rateLimitFragment `json:"rateLimit"`
 }
 
 // RemoveReaction removes content from subjectID via GraphQL's
 // removeReaction mutation, mirroring AddReaction.
 func (c *Client) RemoveReaction(
 	ctx context.Context, subjectID string, content model.ReactionContent,
-) ([]model.ReactionGroup, model.RateLimit, error) {
+) ([]model.ReactionGroup, error) {
 	variables := map[string]any{"subjectId": subjectID, "content": string(content)}
 	var resp removeReactionResponse
 	if err := c.gql.DoWithContext(ctx, removeReactionQuery(), variables, &resp); err != nil {
-		return nil, model.RateLimit{}, classify(err)
+		return nil, classify(err)
 	}
 	if resp.RemoveReaction == nil {
-		return nil, resp.RateLimit.toModel(), &Error{Kind: KindUnknown, Message: "removeReaction: no payload returned"}
+		return nil, &Error{Kind: KindUnknown, Message: "removeReaction: no payload returned"}
 	}
-	return toReactionGroups(resp.RemoveReaction.ReactionGroups), resp.RateLimit.toModel(), nil
+	return toReactionGroups(resp.RemoveReaction.ReactionGroups), nil
 }

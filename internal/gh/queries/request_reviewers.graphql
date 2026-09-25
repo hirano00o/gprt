@@ -29,8 +29,4 @@ mutation RequestReviewers($id: ID!, $userIds: [ID!], $teamIds: [ID!], $union: Bo
       }
     }
   }
-  rateLimit {
-    remaining
-    resetAt
-  }
 }

@@ -4,8 +4,4 @@ mutation MarkPullRequestReadyForReview($id: ID!) {
       isDraft
     }
   }
-  rateLimit {
-    remaining
-    resetAt
-  }
 }

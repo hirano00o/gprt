@@ -17,17 +17,17 @@ func TestCreatePullRequest_Success_EmitsCreatedEventAndRefreshesList(t *testing.
 	events := collectEvents(s)
 
 	newRef := model.PRRef{Repo: model.RepoRef{Host: "example.com", Owner: "acme", Name: "widgets"}, Number: 7}
-	gitHub.setCreatePullRequestFunc(func(_ context.Context, in gh.CreatePullRequestInput) (model.PullRequest, model.RateLimit, error) {
+	gitHub.setCreatePullRequestFunc(func(_ context.Context, in gh.CreatePullRequestInput) (model.PullRequest, error) {
 		if in.Title != "Add feature" || in.RepositoryID != "R_1" {
 			t.Errorf("CreatePullRequest called with %+v", in)
 		}
-		return model.PullRequest{ID: "PR_new", Ref: newRef}, model.RateLimit{}, nil
+		return model.PullRequest{ID: "PR_new", Ref: newRef}, nil
 	})
-	gitHub.setRequestReviewersFunc(func(_ context.Context, id string, userIDs, teamIDs []string, union bool) ([]model.Reviewer, model.RateLimit, error) {
+	gitHub.setRequestReviewersFunc(func(_ context.Context, id string, userIDs, teamIDs []string, union bool) ([]model.Reviewer, error) {
 		if id != "PR_new" || !union || len(userIDs) != 1 || userIDs[0] != "U_1" {
 			t.Errorf("RequestReviewers called with id=%q userIDs=%v union=%v", id, userIDs, union)
 		}
-		return nil, model.RateLimit{}, nil
+		return nil, nil
 	})
 
 	if !s.CreatePullRequest(gh.CreatePullRequestInput{RepositoryID: "R_1", Title: "Add feature"}, []string{"U_1"}, nil) {
@@ -59,12 +59,12 @@ func TestCreatePullRequest_ReviewerFailure_StillEmitsCreatedEvent(t *testing.T) 
 	events := collectEvents(s)
 
 	newRef := model.PRRef{Repo: model.RepoRef{Host: "example.com", Owner: "acme", Name: "widgets"}, Number: 8}
-	gitHub.setCreatePullRequestFunc(func(context.Context, gh.CreatePullRequestInput) (model.PullRequest, model.RateLimit, error) {
-		return model.PullRequest{ID: "PR_new2", Ref: newRef}, model.RateLimit{}, nil
+	gitHub.setCreatePullRequestFunc(func(context.Context, gh.CreatePullRequestInput) (model.PullRequest, error) {
+		return model.PullRequest{ID: "PR_new2", Ref: newRef}, nil
 	})
 	reviewerErr := errors.New("reviewer rejected")
-	gitHub.setRequestReviewersFunc(func(context.Context, string, []string, []string, bool) ([]model.Reviewer, model.RateLimit, error) {
-		return nil, model.RateLimit{}, reviewerErr
+	gitHub.setRequestReviewersFunc(func(context.Context, string, []string, []string, bool) ([]model.Reviewer, error) {
+		return nil, reviewerErr
 	})
 
 	if !s.CreatePullRequest(gh.CreatePullRequestInput{RepositoryID: "R_1", Title: "Add feature"}, []string{"U_bad"}, nil) {
@@ -100,8 +100,8 @@ func TestCreatePullRequest_CreateFailure_NoEventEmitted(t *testing.T) {
 	events := collectEvents(s)
 
 	wantErr := errors.New("create failed")
-	gitHub.setCreatePullRequestFunc(func(context.Context, gh.CreatePullRequestInput) (model.PullRequest, model.RateLimit, error) {
-		return model.PullRequest{}, model.RateLimit{}, wantErr
+	gitHub.setCreatePullRequestFunc(func(context.Context, gh.CreatePullRequestInput) (model.PullRequest, error) {
+		return model.PullRequest{}, wantErr
 	})
 
 	if !s.CreatePullRequest(gh.CreatePullRequestInput{RepositoryID: "R_1", Title: "Add feature"}, nil, nil) {

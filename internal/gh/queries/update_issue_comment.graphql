@@ -20,8 +20,4 @@ mutation UpdateIssueComment($id: ID!, $body: String!) {
       viewerCanDelete
     }
   }
-  rateLimit {
-    remaining
-    resetAt
-  }
 }

@@ -60,24 +60,22 @@ type addCommentResponse struct {
 			Node issueCommentNode `json:"node"`
 		} `json:"commentEdge"`
 	} `json:"addComment"`
-	RateLimit *rateLimitFragment `json:"rateLimit"`
 }
 
 // AddIssueComment adds a general (non-review) comment to subjectID, most
 // commonly a pull request's own node ID for a PR-tab general comment
 // (GraphQL's addComment mutation accepts any commentable subject, though
 // gprt only ever calls it with a pull request ID today).
-func (c *Client) AddIssueComment(ctx context.Context, subjectID, body string) (model.IssueComment, model.RateLimit, error) {
+func (c *Client) AddIssueComment(ctx context.Context, subjectID, body string) (model.IssueComment, error) {
 	variables := map[string]any{"id": subjectID, "body": body}
 	var resp addCommentResponse
 	if err := c.gql.DoWithContext(ctx, addCommentQuery(), variables, &resp); err != nil {
-		return model.IssueComment{}, model.RateLimit{}, classify(err)
+		return model.IssueComment{}, classify(err)
 	}
 	if resp.AddComment == nil || resp.AddComment.CommentEdge == nil {
-		return model.IssueComment{}, resp.RateLimit.toModel(),
-			&Error{Kind: KindUnknown, Message: "addComment: no comment returned"}
+		return model.IssueComment{}, &Error{Kind: KindUnknown, Message: "addComment: no comment returned"}
 	}
-	return resp.AddComment.CommentEdge.Node.toModel(), resp.RateLimit.toModel(), nil
+	return resp.AddComment.CommentEdge.Node.toModel(), nil
 }
 
 // updateIssueCommentResponse is the decoded shape of
@@ -86,38 +84,30 @@ type updateIssueCommentResponse struct {
 	UpdateIssueComment *struct {
 		IssueComment issueCommentNode `json:"issueComment"`
 	} `json:"updateIssueComment"`
-	RateLimit *rateLimitFragment `json:"rateLimit"`
 }
 
 // UpdateIssueComment edits an existing issue comment's body.
-func (c *Client) UpdateIssueComment(ctx context.Context, id, body string) (model.IssueComment, model.RateLimit, error) {
+func (c *Client) UpdateIssueComment(ctx context.Context, id, body string) (model.IssueComment, error) {
 	variables := map[string]any{"id": id, "body": body}
 	var resp updateIssueCommentResponse
 	if err := c.gql.DoWithContext(ctx, updateIssueCommentQuery(), variables, &resp); err != nil {
-		return model.IssueComment{}, model.RateLimit{}, classify(err)
+		return model.IssueComment{}, classify(err)
 	}
 	if resp.UpdateIssueComment == nil {
-		return model.IssueComment{}, resp.RateLimit.toModel(),
-			&Error{Kind: KindUnknown, Message: "updateIssueComment: no comment returned"}
+		return model.IssueComment{}, &Error{Kind: KindUnknown, Message: "updateIssueComment: no comment returned"}
 	}
-	return resp.UpdateIssueComment.IssueComment.toModel(), resp.RateLimit.toModel(), nil
+	return resp.UpdateIssueComment.IssueComment.toModel(), nil
 }
 
-// deleteIssueCommentResponse is the decoded shape of
-// queries/delete_issue_comment.graphql. The payload carries nothing
-// besides clientMutationId, which gprt never sets and so never reads back;
-// the struct exists only to decode rateLimit alongside a successful
-// response.
-type deleteIssueCommentResponse struct {
-	RateLimit *rateLimitFragment `json:"rateLimit"`
-}
-
-// DeleteIssueComment deletes an existing issue comment.
-func (c *Client) DeleteIssueComment(ctx context.Context, id string) (model.RateLimit, error) {
+// DeleteIssueComment deletes an existing issue comment. The mutation's
+// payload carries nothing gprt reads (only clientMutationId, which gprt
+// never sets), so the response decodes into an empty struct purely to
+// satisfy DoWithContext's signature.
+func (c *Client) DeleteIssueComment(ctx context.Context, id string) error {
 	variables := map[string]any{"id": id}
-	var resp deleteIssueCommentResponse
+	var resp struct{}
 	if err := c.gql.DoWithContext(ctx, deleteIssueCommentQuery(), variables, &resp); err != nil {
-		return model.RateLimit{}, classify(err)
+		return classify(err)
 	}
-	return resp.RateLimit.toModel(), nil
+	return nil
 }
