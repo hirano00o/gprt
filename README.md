@@ -131,7 +131,7 @@ All keys below except the editor's own can be remapped. The full reference, incl
 |-----|--------|
 | `Enter`, `l` | Open the file under the cursor (in the tree) |
 | `Ctrl-w t` | Show or hide the file tree |
-| `V` | Select lines for a range comment (`Esc` cancels) |
+| `V` | Select lines for a range comment (`V` again or `Esc` cancels) |
 | `c` | Comment on the line or the selection; on a thread, reply |
 | `C` | Comment on the whole file |
 | `r` | Reply to the thread |

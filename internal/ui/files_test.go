@@ -653,6 +653,43 @@ func TestFilesTabVisualSelectAndEscClears(t *testing.T) {
 	})
 }
 
+// TestFilesTabVAgainClearsVisual guards against diff.visual only ever
+// starting a selection: vim's V leaves visual-line mode when pressed again,
+// and users reach for it before Esc.
+func TestFilesTabVAgainClearsVisual(t *testing.T) {
+	app, _, screen, _ := openFilesTabForFixture(t)
+	waitFor(t, app.app, func() bool {
+		app.app.ForceDraw()
+		return containsSubstring(diffText(app, screen), "@@ -1,4 +1,5 @@")
+	})
+
+	sendKey(app.app, tcell.NewEventKey(tcell.KeyCtrlW, 0, tcell.ModCtrl))
+	sendRune(app.app, 'l')
+	waitFor(t, app.app, func() bool { return app.app.GetFocus() == app.diffView })
+
+	act(app.app, func() {
+		app.diffView.MoveBottom()
+		app.diffView.MoveBy(-1)
+	})
+	waitFor(t, app.app, func() bool {
+		_, ok := app.diffView.CursorLine()
+		return ok
+	})
+
+	sendRune(app.app, 'V')
+	sendRune(app.app, 'j')
+	waitFor(t, app.app, func() bool {
+		s, ok := app.diffView.Selection()
+		return ok && len(s) == 2
+	})
+
+	sendRune(app.app, 'V')
+	waitFor(t, app.app, func() bool {
+		_, ok := app.diffView.Selection()
+		return !ok
+	})
+}
+
 func TestFilesTabFoldUnfoldThreadAndFoldAll(t *testing.T) {
 	app, _, screen, _ := openFilesTabForFixture(t)
 	waitFor(t, app.app, func() bool {

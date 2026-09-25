@@ -382,7 +382,12 @@ func (a *App) dispatch(action keys.Action, count int) {
 	case keys.ActionFilesToggleTree:
 		a.toggleTree()
 	case keys.ActionDiffVisual:
-		a.diffView.StartVisual()
+		// V toggles, as vim's own visual-line mode does.
+		if a.diffView.InVisual() {
+			a.diffView.EndVisual()
+		} else {
+			a.diffView.StartVisual()
+		}
 	case keys.ActionDiffFold:
 		a.diffView.ToggleFoldAtCursor()
 	case keys.ActionDiffUnfoldAll:
