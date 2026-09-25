@@ -50,7 +50,7 @@ The vim editor's own keys (listed at the bottom of this document) are **fixed** 
 | `R` | global | reload the list and the current PR, ignoring cache | `global.reload` | Done |
 | `/` | list | open the filter input (`Esc` clears) | `list.filter` | Done (M1a) |
 | `Enter`, `l` | list / tree | open the selected PR and focus the detail pane; in the tree: expand a directory, or open a file and focus the diff | `list.open` | Done (M1a PR list; M2 tree) |
-| `V` | diff | start visual line selection for a range comment; `Esc` cancels | `diff.visual` | Done (M2 selection; comment creation M3b) |
+| `V` | diff | start visual line selection for a range comment; `V` again or `Esc` cancels | `diff.visual` | Done (M2 selection; comment creation M3b) |
 | `c` | diff (not on a thread) | new comment on the current line, or the active `V` selection as a range (a mix of added and removed lines is refused with a toast — "select lines on one side only" — leaving the selection active); toasts "no file open" with nothing open | `diff.comment` | Done (M3b) |
 | `c` | PR tab | new general (issue) comment on the PR, via the composer | `diff.comment`² | Done (M3a) |
 | `c` | on a thread | reply (same as `r`) | `thread.reply`² | Done (M3b) |
