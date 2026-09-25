@@ -103,7 +103,7 @@ All keys below except the editor's own can be remapped. The full reference, incl
 | `o` | Open the current item in the browser |
 | `R` | Reload, ignoring the cache |
 | `:` | Command line: `:merge`, `:close`, `:reopen`, `:reload`, `:messages`, `:help`, `:q` |
-| `?` | Help |
+| `?` | Help (`/` inside it searches the binding list, `n` / `N` cycle matches) |
 | `q`, `Ctrl-c` | Close the open dialog, or quit |
 
 ### PR list
@@ -143,6 +143,8 @@ All keys below except the editor's own can be remapped. The full reference, incl
 | `]c` / `[c` | Next / previous thread, crossing into the next / previous file that has one |
 | `]f` / `[f` | Next / previous file |
 | `zh` / `zl` | Scroll horizontally |
+| `/` | Search the diff across every changed file (regexp, smartcase; `Enter` runs it, `Esc` cancels or clears the highlight) |
+| `n` / `N` | Next / previous search match, wrapping with a toast |
 
 `E`, `S`, `p`, and `t` work here too.
 

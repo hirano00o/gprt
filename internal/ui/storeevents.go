@@ -32,6 +32,7 @@ func (a *App) subscribeStore() {
 			a.closeComposerIfWrongPR()
 			a.closeEditFormIfWrongPR()
 			a.closeMergeDialogIfWrongPR()
+			a.clearDiffSearchIfWrongPR()
 			a.renderPRTab()
 			a.onPRChangedForFiles()
 			// The status bar's "✎ N" draft count is scoped to whichever
@@ -61,6 +62,14 @@ func (a *App) subscribeStore() {
 			a.rebuildFileTree()
 			a.refreshCurrentFile()
 			a.checkFilesWarnings()
+			// Recompute in place, not clear: a page arriving (ordinary
+			// pagination) or a force reload fires this too, and an
+			// in-progress search should survive both — only a genuine PR
+			// switch (clearDiffSearchIfWrongPR above) drops it outright.
+			if a.searchRE != nil {
+				a.searchMatches = a.computeSearchMatches(a.searchRE)
+				a.searchIdx = -1
+			}
 		case store.EventFileHighlighted:
 			// FilesState().Highlighting (the status bar's "highlighting N"
 			// segment) decrements on every hunk highlight job's

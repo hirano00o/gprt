@@ -277,3 +277,38 @@ func TestKeymapLookupLoneLessThanIsNotAFalsePrefixOfEnter(t *testing.T) {
 		t.Fatalf("Lookup(list, <) kind = %v, want NoMatch", kind)
 	}
 }
+
+// TestDefaultsResolvesDiffSearchInDiffAndFilesContexts covers "/" (diff.search),
+// "n" (diff.search_next), and "N" (diff.search_prev), bound in both
+// ContextDiff and ContextFiles (the search acts on the diff regardless of
+// which Files-tab pane has focus).
+func TestDefaultsResolvesDiffSearchInDiffAndFilesContexts(t *testing.T) {
+	km := Defaults()
+	for _, ctx := range []Context{ContextDiff, ContextFiles} {
+		if action, kind := km.Lookup(ctx, mustParse("/")); kind != Exact || action != ActionDiffSearch {
+			t.Errorf("Lookup(%v, /) = (%q, %v), want (%q, Exact)", ctx, action, kind, ActionDiffSearch)
+		}
+		if action, kind := km.Lookup(ctx, mustParse("n")); kind != Exact || action != ActionDiffSearchNext {
+			t.Errorf("Lookup(%v, n) = (%q, %v), want (%q, Exact)", ctx, action, kind, ActionDiffSearchNext)
+		}
+		if action, kind := km.Lookup(ctx, mustParse("N")); kind != Exact || action != ActionDiffSearchPrev {
+			t.Errorf("Lookup(%v, N) = (%q, %v), want (%q, Exact)", ctx, action, kind, ActionDiffSearchPrev)
+		}
+	}
+}
+
+func TestAllActionsContainsDiffSearch(t *testing.T) {
+	all := AllActions()
+	for _, want := range []Action{ActionDiffSearch, ActionDiffSearchNext, ActionDiffSearchPrev} {
+		found := false
+		for _, a := range all {
+			if a == want {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("AllActions() does not contain %q", want)
+		}
+	}
+}

@@ -43,6 +43,10 @@ func (a *App) handleKey(ev *tcell.EventKey) *tcell.EventKey {
 		return a.routeFilterKey(ev, normalized)
 	case a.cmdLine:
 		return a.routeCommandKey(ev, normalized)
+	case a.searchInput:
+		return a.routeSearchKey(ev, normalized)
+	case a.helpSearchInput:
+		return a.routeHelpSearchKey(ev, normalized)
 	}
 	// Not a switch case: tview.Flex.Focus (which Editor inherits, like
 	// tview.Form) delegates keyboard focus straight down to its TextArea
@@ -89,6 +93,15 @@ func (a *App) handleKey(ev *tcell.EventKey) *tcell.EventKey {
 		}
 	}
 
+	// wasVisual is captured before the visual-Esc block below (which may
+	// call EndVisual) so the search-clear block after it can tell "no
+	// visual selection was active for this keypress" apart from "the
+	// visual-Esc block above just ended one" — checking InVisual() again
+	// after EndVisual has already flipped it to false would let a single
+	// Esc do both jobs at once, contradicting the "only one Esc job per
+	// keypress" rule both blocks document.
+	wasVisual := a.app.GetFocus() == a.diffView && a.diffView.InVisual()
+
 	// Ending an active visual selection on the diff needs its own, earlier
 	// check: Esc is not a dispatchable Action, so it would never otherwise
 	// reach diffView.EndVisual(). It still falls through to the Sequencer
@@ -97,10 +110,31 @@ func (a *App) handleKey(ev *tcell.EventKey) *tcell.EventKey {
 	// (see keys.validateSequenceStart) — since skipping that would let a
 	// half-typed sequence like "z" (a prefix of za/zM/zR/zh/zl) survive
 	// across the Esc keypress and combine with whatever key comes next.
-	if a.app.GetFocus() == a.diffView && a.diffView.InVisual() {
+	if wasVisual {
 		for _, k := range normalized {
 			if isEscKey(k) {
 				a.diffView.EndVisual()
+				break
+			}
+		}
+	}
+
+	// Esc on the diff also clears an active "/" search highlight, for the
+	// same reason as the visual-selection block above: ClearSearch is not
+	// reachable through a dispatchable Action either. Gated on !wasVisual
+	// (not a live InVisual() check — see wasVisual's own doc comment above):
+	// only one Esc job happens per keypress, ending the visual selection
+	// first if both apply, and clearing the search on a following, separate
+	// Esc. searchMatches/searchPattern are deliberately left alone (see
+	// DiffView.ClearSearch's own doc comment) so n/N still work afterward —
+	// diffSearchStep re-enables the highlight via SetSearch before it jumps.
+	// Falls through to the Sequencer below for the same reason the
+	// visual-Esc block does: a half-typed prefix sequence (e.g. "z") must
+	// not survive across this Esc.
+	if a.app.GetFocus() == a.diffView && !wasVisual && a.diffView.HasSearch() {
+		for _, k := range normalized {
+			if isEscKey(k) {
+				a.diffView.ClearSearch()
 				break
 			}
 		}
@@ -191,12 +225,70 @@ func (a *App) routeCommandKey(ev *tcell.EventKey, normalized []keys.Key) *tcell.
 	return ev
 }
 
+// routeSearchKey handles the "/" diff-search InputField: Esc cancels
+// (closeDiffSearch, leaving any already-active search untouched), Enter
+// runs it (submitDiffSearch); everything else is left to the InputField's
+// own InputHandler. Mirrors routeCommandKey, minus history — a diff search
+// has no equivalent of the command line's Up/Down recall.
+func (a *App) routeSearchKey(ev *tcell.EventKey, normalized []keys.Key) *tcell.EventKey {
+	for _, k := range normalized {
+		switch {
+		case isEscKey(k):
+			a.closeDiffSearch()
+			return nil
+		case isEnterKey(k):
+			a.submitDiffSearch()
+			return nil
+		}
+	}
+	return ev
+}
+
+// routeHelpSearchKey handles the help overlay's own "/" search InputField:
+// Esc returns focus to the help TextView (closeHelpSearch — not
+// restoreFocus, since the outer overlay's own savedFocus must survive
+// until the overlay itself closes), Enter runs it (submitHelpSearch);
+// everything else is left to the InputField's own InputHandler.
+func (a *App) routeHelpSearchKey(ev *tcell.EventKey, normalized []keys.Key) *tcell.EventKey {
+	for _, k := range normalized {
+		switch {
+		case isEscKey(k):
+			a.closeHelpSearch()
+			return nil
+		case isEnterKey(k):
+			a.submitHelpSearch()
+			return nil
+		}
+	}
+	return ev
+}
+
 // routeOverlayKey handles a help/messages overlay: q or Esc close it
 // (pressing "?" again also closes the help overlay specifically, toggling
 // it like the key that opened it); every other key is returned unchanged
 // so the overlay's own scrollable TextView can handle it (j/k/gg/G,
 // PgUp/PgDn, ...).
 func (a *App) routeOverlayKey(ev *tcell.EventKey, normalized []keys.Key) *tcell.EventKey {
+	// "/"/n/N inside the help overlay open/cycle its own search, checked
+	// before the close handling below so they never fall through to it —
+	// "messages" (the only other overlay routed here) has no search of its
+	// own and is untouched.
+	if a.overlay == "help" {
+		for _, k := range normalized {
+			isRune := k.Kind == keys.KindRune && k.Mod == tcell.ModNone
+			switch {
+			case isRune && k.Rune == '/':
+				a.openHelpSearch()
+				return nil
+			case isRune && k.Rune == 'n' && a.helpMatchCount > 0:
+				a.helpSearchStep(1)
+				return nil
+			case isRune && k.Rune == 'N' && a.helpMatchCount > 0:
+				a.helpSearchStep(-1)
+				return nil
+			}
+		}
+	}
 	for _, k := range normalized {
 		isRune := k.Kind == keys.KindRune && k.Mod == tcell.ModNone
 		closes := isEscKey(k) ||
@@ -413,6 +505,12 @@ func (a *App) dispatch(action keys.Action, count int) {
 		a.stepFile(1)
 	case keys.ActionDiffPrevFile:
 		a.stepFile(-1)
+	case keys.ActionDiffSearch:
+		a.openDiffSearch()
+	case keys.ActionDiffSearchNext:
+		a.diffSearchStep(1)
+	case keys.ActionDiffSearchPrev:
+		a.diffSearchStep(-1)
 	case keys.ActionGlobalFocusDown, keys.ActionGlobalFocusUp:
 		a.toggleComposerFocus()
 	case keys.ActionDiffComment:

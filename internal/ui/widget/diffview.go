@@ -9,6 +9,7 @@ package widget
 
 import (
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -210,6 +211,34 @@ type DiffView struct {
 	pendingThreadSet  bool
 	pendingThreadID   string
 	pendingThreadEdge int
+
+	// searchRE is the currently active "/" search's compiled pattern (see
+	// SetSearch/ClearSearch), or nil when no search is active. Applied at
+	// rebuild time only (lineRow, once per rebuild), not per Draw — the
+	// same span-precomputation rule every other line decoration here
+	// follows.
+	searchRE *regexp.Regexp
+}
+
+// SetSearch activates re: every line matching it is highlighted (see
+// lineRow) starting at the next rebuild.
+func (dv *DiffView) SetSearch(re *regexp.Regexp) {
+	dv.searchRE = re
+	dv.lastWidth = -1
+}
+
+// ClearSearch deactivates the current search highlight (for example Esc on
+// the diff outside visual mode). It does not touch any other search state
+// (the caller's own match list/cursor, kept so a later n/N can reactivate
+// the same search via SetSearch without recomputing it).
+func (dv *DiffView) ClearSearch() {
+	dv.searchRE = nil
+	dv.lastWidth = -1
+}
+
+// HasSearch reports whether a search highlight is currently active.
+func (dv *DiffView) HasSearch() bool {
+	return dv.searchRE != nil
 }
 
 // JumpToLine arranges for the cursor to move to the line anchored at
@@ -920,6 +949,11 @@ func (b *diffBuilder) lineRow(f DiffFile, hunkIdx, lineIdx int, l diff.Line) dif
 	}
 	row.gutter = gutterSpansFor(l, b.gutterWidth, draftMark)
 	row.content = contentSpansFor(f, hunkIdx, lineIdx, l)
+	if b.dv.searchRE != nil {
+		if ranges := b.dv.searchRE.FindAllStringIndex(l.Text, -1); len(ranges) > 0 {
+			row.content = highlightRanges(row.content, l.Text, ranges, theme.SearchMatch)
+		}
+	}
 	if w := SpanWidth(row.content); w > b.longestContent {
 		b.longestContent = w
 	}

@@ -2,9 +2,12 @@ package widget
 
 import (
 	"errors"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/gdamore/tcell/v2"
 
 	"github.com/hirano00o/gprt/internal/diff"
 	"github.com/hirano00o/gprt/internal/highlight"
@@ -1017,5 +1020,48 @@ func TestDiffViewJumpToThreadEdgeUsesDisplayOrder(t *testing.T) {
 	last, ok := dv.CursorThread()
 	if !ok || last.ID != "inline" {
 		t.Fatalf("JumpToThreadEdge(-1) landed on %+v, ok=%v, want the inline thread (rendered last)", last, ok)
+	}
+}
+
+// TestDiffViewSearchHighlightsMatchedCellsOnly guards SetSearch/ClearSearch
+// end to end: only the cells covered by an actual regexp match are drawn
+// Reverse (theme.SearchMatch), never a neighbouring cell on the same line or
+// content on a different line, and ClearSearch removes it again.
+func TestDiffViewSearchHighlightsMatchedCellsOnly(t *testing.T) {
+	dv := NewDiffView()
+	dv.SetFile(twoHunkFile(t))
+	dv.SetSearch(regexp.MustCompile("new2"))
+	dv.SetRect(0, 0, 60, 20)
+	screen := newTestScreen(t, 60, 20)
+	dv.Draw(screen)
+
+	// Row layout for twoHunkFile: file header(0), hunk header(1),
+	// " line1"(2), "-old2"(3), "+new2"(4) — the only line "new2" matches.
+	row := dv.rows[4]
+	if row.kind != rowKindLine || row.line != 2 {
+		t.Fatalf("rows[4] = %+v, want the +new2 line (hunk 0, line index 2)", row)
+	}
+	gw := SpanWidth(row.gutter)
+
+	x, y, _, _ := dv.GetRect()
+	for i := range 4 { // "new2" is 4 runes wide
+		_, _, attr := cellStyle(screen, x+gw+i, y+4).Decompose()
+		if attr&tcell.AttrReverse == 0 {
+			t.Errorf("match cell %d not drawn Reverse", i)
+		}
+	}
+	if _, _, attr := cellStyle(screen, x+gw+4, y+4).Decompose(); attr&tcell.AttrReverse != 0 {
+		t.Error("cell right after the match must not be drawn Reverse")
+	}
+	if _, _, attr := cellStyle(screen, x+gw, y+2).Decompose(); attr&tcell.AttrReverse != 0 {
+		t.Error("a neighbouring, non-matching line must not be drawn Reverse")
+	}
+
+	dv.ClearSearch()
+	dv.Draw(screen)
+	for i := range 4 {
+		if _, _, attr := cellStyle(screen, x+gw+i, y+4).Decompose(); attr&tcell.AttrReverse != 0 {
+			t.Errorf("match cell %d still Reverse after ClearSearch", i)
+		}
 	}
 }

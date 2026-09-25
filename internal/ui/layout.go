@@ -72,8 +72,16 @@ func (a *App) buildStatusBar() {
 	a.statusBar = newStatusBarView()
 
 	a.cmdLine = tview.NewInputField().SetLabel(":")
+	a.searchInput = tview.NewInputField().SetLabel("/")
+	// helpSearchInput backs the help overlay's own "/" search row (see
+	// overlay.go's openHelpSearch); built here, alongside searchInput,
+	// rather than lazily by openHelp, so the router's focus-switch
+	// comparison against it (handleKey) is never made against a nil
+	// primitive before help has ever been opened.
+	a.helpSearchInput = tview.NewInputField().SetLabel("/")
 
 	a.bottomPages = tview.NewPages()
 	a.bottomPages.AddPage("status", a.statusBar, true, true)
 	a.bottomPages.AddPage("command", a.cmdLine, true, false)
+	a.bottomPages.AddPage("search", a.searchInput, true, false)
 }

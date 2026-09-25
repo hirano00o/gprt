@@ -162,3 +162,106 @@ func TestDrawSpansZeroWidthIsANoOp(t *testing.T) {
 		t.Errorf("DrawSpans() with maxWidth 0 returned %d, want 0", got)
 	}
 }
+
+// TestHighlightRanges covers highlightRanges' span-splitting: it must
+// reconstruct the original text exactly (concatenating every returned
+// span's Text), applying style only to the byte ranges named by ranges.
+func TestHighlightRanges(t *testing.T) {
+	plain := tcell.StyleDefault.Foreground(tcell.ColorWhite)
+	styleA := tcell.StyleDefault.Foreground(tcell.ColorRed)
+	styleB := tcell.StyleDefault.Foreground(tcell.ColorBlue)
+	hi := tcell.StyleDefault.Foreground(tcell.ColorYellow)
+
+	tests := []struct {
+		name   string
+		spans  []Span
+		text   string
+		ranges [][]int
+		want   []Span
+	}{
+		{
+			name:   "single plain span with a middle match",
+			spans:  []Span{{Text: "hello world", Style: plain}},
+			text:   "hello world",
+			ranges: [][]int{{6, 11}},
+			want: []Span{
+				{Text: "hello ", Style: plain},
+				{Text: "world", Style: hi},
+			},
+		},
+		{
+			name:   "match at start",
+			spans:  []Span{{Text: "abcde", Style: plain}},
+			text:   "abcde",
+			ranges: [][]int{{0, 2}},
+			want: []Span{
+				{Text: "ab", Style: hi},
+				{Text: "cde", Style: plain},
+			},
+		},
+		{
+			name:   "match at end",
+			spans:  []Span{{Text: "abcde", Style: plain}},
+			text:   "abcde",
+			ranges: [][]int{{3, 5}},
+			want: []Span{
+				{Text: "abc", Style: plain},
+				{Text: "de", Style: hi},
+			},
+		},
+		{
+			name:   "match spanning two token spans",
+			spans:  []Span{{Text: "ab", Style: styleA}, {Text: "cd", Style: styleB}},
+			text:   "abcd",
+			ranges: [][]int{{1, 3}},
+			want: []Span{
+				{Text: "a", Style: styleA},
+				{Text: "b", Style: hi},
+				{Text: "c", Style: hi},
+				{Text: "d", Style: styleB},
+			},
+		},
+		{
+			name:   "two matches in one line",
+			spans:  []Span{{Text: "abcde", Style: plain}},
+			text:   "abcde",
+			ranges: [][]int{{1, 2}, {4, 5}},
+			want: []Span{
+				{Text: "a", Style: plain},
+				{Text: "b", Style: hi},
+				{Text: "cd", Style: plain},
+				{Text: "e", Style: hi},
+			},
+		},
+		{
+			name:   "multibyte text",
+			spans:  []Span{{Text: "日本語 foo 語", Style: plain}},
+			text:   "日本語 foo 語",
+			ranges: [][]int{{0, len("日本語")}},
+			want: []Span{
+				{Text: "日本語", Style: hi},
+				{Text: " foo 語", Style: plain},
+			},
+		},
+		{
+			name:   "mismatched total length is unchanged",
+			spans:  []Span{{Text: "short", Style: plain}},
+			text:   "a longer string",
+			ranges: [][]int{{0, 1}},
+			want:   []Span{{Text: "short", Style: plain}},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := highlightRanges(tc.spans, tc.text, tc.ranges, hi)
+			if len(got) != len(tc.want) {
+				t.Fatalf("highlightRanges() = %+v, want %+v", got, tc.want)
+			}
+			for i := range got {
+				if got[i] != tc.want[i] {
+					t.Errorf("span[%d] = %+v, want %+v", i, got[i], tc.want[i])
+				}
+			}
+		})
+	}
+}

@@ -76,6 +76,65 @@ func DrawSpans(screen tcell.Screen, x, y, maxWidth int, spans []Span) int {
 	return cursor + 1 - x
 }
 
+// highlightRanges splits spans at the byte boundaries named by ranges (each
+// a [start, end) pair, as returned by regexp.FindAllStringIndex against the
+// concatenation of every span's own Text, i.e. text) and applies style to
+// the pieces that fall inside a range; pieces outside keep their own span's
+// original style. ranges must be sorted and non-overlapping (true of
+// FindAllStringIndex's own output). Byte offsets are rune-safe here because
+// both a span boundary and a regexp match boundary always land on a UTF-8
+// rune boundary.
+//
+// Returns spans unchanged if the spans' concatenated text does not
+// reconstruct text exactly: defensive only (a diff line's token spans
+// always do reconstruct it), so a caller's assumption drifting never
+// mis-highlights a line instead of failing loudly elsewhere.
+func highlightRanges(spans []Span, text string, ranges [][]int, style tcell.Style) []Span {
+	total := 0
+	for _, s := range spans {
+		total += len(s.Text)
+	}
+	if total != len(text) || len(ranges) == 0 {
+		return spans
+	}
+
+	out := make([]Span, 0, len(spans)+2*len(ranges))
+	offset := 0 // byte offset of the current span's start within text
+	ri := 0     // index of the range currently being consumed
+	for _, s := range spans {
+		spanStart := offset
+		spanEnd := offset + len(s.Text)
+		cut := 0 // bytes of s.Text already emitted into out
+		for ri < len(ranges) && ranges[ri][0] < spanEnd {
+			hiStart := ranges[ri][0]
+			if hiStart < spanStart {
+				hiStart = spanStart
+			}
+			hiEnd := ranges[ri][1]
+			if hiEnd > spanEnd {
+				hiEnd = spanEnd
+			}
+			if localStart := hiStart - spanStart; localStart > cut {
+				out = append(out, Span{Text: s.Text[cut:localStart], Style: s.Style})
+				cut = localStart
+			}
+			if localEnd := hiEnd - spanStart; localEnd > cut {
+				out = append(out, Span{Text: s.Text[cut:localEnd], Style: style})
+				cut = localEnd
+			}
+			if ranges[ri][1] > spanEnd {
+				break // the range continues into the next span
+			}
+			ri++
+		}
+		if cut < len(s.Text) {
+			out = append(out, Span{Text: s.Text[cut:], Style: s.Style})
+		}
+		offset = spanEnd
+	}
+	return out
+}
+
 // drawText draws s at (x, y), one grapheme cluster at a time, and returns
 // the display width consumed.
 func drawText(screen tcell.Screen, x, y int, s string, style tcell.Style) int {
