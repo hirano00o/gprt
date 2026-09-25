@@ -24,6 +24,15 @@ Requirements:
 
 Prebuilt binaries for Linux, macOS, and Windows (amd64 and arm64) are attached to each [release](https://github.com/hirano00o/gprt/releases). Download the archive for your platform and put `gprt` on your `PATH`.
 
+With Nix (flakes enabled):
+
+```sh
+nix run github:hirano00o/gprt          # try it without installing
+nix profile add github:hirano00o/gprt  # install into your profile
+```
+
+In a NixOS or Home Manager configuration, add this repository as a flake input and use `inputs.gprt.packages.<system>.default`. Append a tag or commit to pin a version, for example `github:hirano00o/gprt/v0.1.0`.
+
 Or install from source:
 
 ```sh

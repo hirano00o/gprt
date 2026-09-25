@@ -24,6 +24,15 @@ GitHub のプルリクエストをターミナルで扱うための TUI です�
 
 Linux / macOS / Windows(amd64、arm64)向けのビルド済みバイナリを各[リリース](https://github.com/hirano00o/gprt/releases)に添付しています。お使いのプラットフォームのアーカイブをダウンロードし、`gprt` を `PATH` の通った場所に置いてください。
 
+Nix(flakes 有効)の場合:
+
+```sh
+nix run github:hirano00o/gprt          # インストールせずに試す
+nix profile add github:hirano00o/gprt  # プロファイルにインストール
+```
+
+NixOS や Home Manager の設定で使うには、このリポジトリを flake の input に追加し、`inputs.gprt.packages.<system>.default` を参照してください。`github:hirano00o/gprt/v0.1.0` のようにタグやコミットを末尾に付けるとバージョンを固定できます。
+
 ソースからインストールする場合:
 
 ```sh
