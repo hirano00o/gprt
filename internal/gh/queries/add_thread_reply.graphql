@@ -29,8 +29,4 @@ mutation AddThreadReply($threadId: ID!, $body: String!, $reviewId: ID) {
       }
     }
   }
-  rateLimit {
-    remaining
-    resetAt
-  }
 }

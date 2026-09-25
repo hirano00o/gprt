@@ -80,23 +80,23 @@ type fakeGitHub struct {
 	searchFunc        func(ctx context.Context, query, cursor string) (gh.SearchResult, error)
 	detailFunc        func(ctx context.Context, ref model.PRRef, viewerLogin string) (gh.DetailResult, error)
 	filesFunc         func(ctx context.Context, ref model.PRRef, page int, etag string) (gh.FilesResult, error)
-	addCommentFunc    func(ctx context.Context, subjectID, body string) (model.IssueComment, model.RateLimit, error)
-	updateCommentFunc func(ctx context.Context, id, body string) (model.IssueComment, model.RateLimit, error)
-	deleteCommentFunc func(ctx context.Context, id string) (model.RateLimit, error)
+	addCommentFunc    func(ctx context.Context, subjectID, body string) (model.IssueComment, error)
+	updateCommentFunc func(ctx context.Context, id, body string) (model.IssueComment, error)
+	deleteCommentFunc func(ctx context.Context, id string) error
 
-	createPendingReviewFunc   func(ctx context.Context, prID string) (model.Review, model.RateLimit, error)
-	addReviewNowFunc          func(ctx context.Context, prID string, threads []gh.DraftThread, body string) (model.Review, model.RateLimit, error)
-	addReviewNowWithEventFunc func(ctx context.Context, prID string, event model.ReviewEvent, body string) (model.Review, model.RateLimit, error)
-	addReviewThreadFunc       func(ctx context.Context, in gh.ThreadInput) (model.ReviewThread, model.RateLimit, error)
-	addThreadReplyFunc        func(ctx context.Context, threadID, body, pendingReviewID string) (model.ReviewComment, model.RateLimit, error)
-	submitReviewFunc          func(ctx context.Context, reviewID string, event model.ReviewEvent, body string) (model.Review, model.RateLimit, error)
-	deletePendingReviewFunc   func(ctx context.Context, reviewID string) (model.RateLimit, error)
-	updateReviewCommentFunc   func(ctx context.Context, id, body string) (model.ReviewComment, model.RateLimit, error)
-	deleteReviewCommentFunc   func(ctx context.Context, id string) (model.RateLimit, error)
-	resolveThreadFunc         func(ctx context.Context, threadID string) (model.ReviewThread, model.RateLimit, error)
-	unresolveThreadFunc       func(ctx context.Context, threadID string) (model.ReviewThread, model.RateLimit, error)
-	addReactionFunc           func(ctx context.Context, subjectID string, content model.ReactionContent) ([]model.ReactionGroup, model.RateLimit, error)
-	removeReactionFunc        func(ctx context.Context, subjectID string, content model.ReactionContent) ([]model.ReactionGroup, model.RateLimit, error)
+	createPendingReviewFunc   func(ctx context.Context, prID string) (model.Review, error)
+	addReviewNowFunc          func(ctx context.Context, prID string, threads []gh.DraftThread, body string) (model.Review, error)
+	addReviewNowWithEventFunc func(ctx context.Context, prID string, event model.ReviewEvent, body string) (model.Review, error)
+	addReviewThreadFunc       func(ctx context.Context, in gh.ThreadInput) (model.ReviewThread, error)
+	addThreadReplyFunc        func(ctx context.Context, threadID, body, pendingReviewID string) (model.ReviewComment, error)
+	submitReviewFunc          func(ctx context.Context, reviewID string, event model.ReviewEvent, body string) (model.Review, error)
+	deletePendingReviewFunc   func(ctx context.Context, reviewID string) error
+	updateReviewCommentFunc   func(ctx context.Context, id, body string) (model.ReviewComment, error)
+	deleteReviewCommentFunc   func(ctx context.Context, id string) error
+	resolveThreadFunc         func(ctx context.Context, threadID string) (model.ReviewThread, error)
+	unresolveThreadFunc       func(ctx context.Context, threadID string) (model.ReviewThread, error)
+	addReactionFunc           func(ctx context.Context, subjectID string, content model.ReactionContent) ([]model.ReactionGroup, error)
+	removeReactionFunc        func(ctx context.Context, subjectID string, content model.ReactionContent) ([]model.ReactionGroup, error)
 	mentionableUsersFunc      func(ctx context.Context, repo model.RepoRef, query string, first int) ([]model.User, model.RateLimit, error)
 
 	// M5 repository metadata / branch / team / edit-merge-create reads and
@@ -108,14 +108,14 @@ type fakeGitHub struct {
 	viewerRepositoriesFunc   func(ctx context.Context, first int) ([]model.RepositorySummary, model.RateLimit, error)
 	branchesFunc             func(ctx context.Context, repo model.RepoRef, query string, first int) ([]model.Branch, model.RateLimit, error)
 	teamsFunc                func(ctx context.Context, org, query string, first int) ([]model.Team, model.RateLimit, error)
-	updatePullRequestFunc    func(ctx context.Context, id string, in gh.UpdatePullRequestInput) (model.PullRequest, model.RateLimit, error)
-	requestReviewersFunc     func(ctx context.Context, id string, userIDs, teamIDs []string, union bool) ([]model.Reviewer, model.RateLimit, error)
-	markReadyForReviewFunc   func(ctx context.Context, id string) (bool, model.RateLimit, error)
-	convertToDraftFunc       func(ctx context.Context, id string) (bool, model.RateLimit, error)
-	mergePullRequestFunc     func(ctx context.Context, id string, method model.MergeMethod, commitHeadline, commitBody *string, expectedHeadOID string) (model.PullRequest, model.RateLimit, error)
-	closePullRequestFunc     func(ctx context.Context, id string) (model.PRState, model.RateLimit, error)
-	reopenPullRequestFunc    func(ctx context.Context, id string) (model.PRState, model.RateLimit, error)
-	createPullRequestFunc    func(ctx context.Context, in gh.CreatePullRequestInput) (model.PullRequest, model.RateLimit, error)
+	updatePullRequestFunc    func(ctx context.Context, id string, in gh.UpdatePullRequestInput) (model.PullRequest, error)
+	requestReviewersFunc     func(ctx context.Context, id string, userIDs, teamIDs []string, union bool) ([]model.Reviewer, error)
+	markReadyForReviewFunc   func(ctx context.Context, id string) (bool, error)
+	convertToDraftFunc       func(ctx context.Context, id string) (bool, error)
+	mergePullRequestFunc     func(ctx context.Context, id string, method model.MergeMethod, commitHeadline, commitBody *string, expectedHeadOID string) (model.PullRequest, error)
+	closePullRequestFunc     func(ctx context.Context, id string) (model.PRState, error)
+	reopenPullRequestFunc    func(ctx context.Context, id string) (model.PRState, error)
+	createPullRequestFunc    func(ctx context.Context, in gh.CreatePullRequestInput) (model.PullRequest, error)
 
 	calls              []searchCall
 	detailCalls        []detailCall
@@ -288,53 +288,53 @@ func newFakeGitHub() *fakeGitHub {
 		filesFunc: func(context.Context, model.PRRef, int, string) (gh.FilesResult, error) {
 			return gh.FilesResult{}, nil
 		},
-		addCommentFunc: func(context.Context, string, string) (model.IssueComment, model.RateLimit, error) {
-			return model.IssueComment{}, model.RateLimit{}, nil
+		addCommentFunc: func(context.Context, string, string) (model.IssueComment, error) {
+			return model.IssueComment{}, nil
 		},
-		updateCommentFunc: func(context.Context, string, string) (model.IssueComment, model.RateLimit, error) {
-			return model.IssueComment{}, model.RateLimit{}, nil
+		updateCommentFunc: func(context.Context, string, string) (model.IssueComment, error) {
+			return model.IssueComment{}, nil
 		},
-		deleteCommentFunc: func(context.Context, string) (model.RateLimit, error) {
-			return model.RateLimit{}, nil
+		deleteCommentFunc: func(context.Context, string) error {
+			return nil
 		},
-		createPendingReviewFunc: func(context.Context, string) (model.Review, model.RateLimit, error) {
-			return model.Review{}, model.RateLimit{}, nil
+		createPendingReviewFunc: func(context.Context, string) (model.Review, error) {
+			return model.Review{}, nil
 		},
-		addReviewNowFunc: func(context.Context, string, []gh.DraftThread, string) (model.Review, model.RateLimit, error) {
-			return model.Review{}, model.RateLimit{}, nil
+		addReviewNowFunc: func(context.Context, string, []gh.DraftThread, string) (model.Review, error) {
+			return model.Review{}, nil
 		},
-		addReviewNowWithEventFunc: func(context.Context, string, model.ReviewEvent, string) (model.Review, model.RateLimit, error) {
-			return model.Review{}, model.RateLimit{}, nil
+		addReviewNowWithEventFunc: func(context.Context, string, model.ReviewEvent, string) (model.Review, error) {
+			return model.Review{}, nil
 		},
-		addReviewThreadFunc: func(context.Context, gh.ThreadInput) (model.ReviewThread, model.RateLimit, error) {
-			return model.ReviewThread{}, model.RateLimit{}, nil
+		addReviewThreadFunc: func(context.Context, gh.ThreadInput) (model.ReviewThread, error) {
+			return model.ReviewThread{}, nil
 		},
-		addThreadReplyFunc: func(context.Context, string, string, string) (model.ReviewComment, model.RateLimit, error) {
-			return model.ReviewComment{}, model.RateLimit{}, nil
+		addThreadReplyFunc: func(context.Context, string, string, string) (model.ReviewComment, error) {
+			return model.ReviewComment{}, nil
 		},
-		submitReviewFunc: func(context.Context, string, model.ReviewEvent, string) (model.Review, model.RateLimit, error) {
-			return model.Review{}, model.RateLimit{}, nil
+		submitReviewFunc: func(context.Context, string, model.ReviewEvent, string) (model.Review, error) {
+			return model.Review{}, nil
 		},
-		deletePendingReviewFunc: func(context.Context, string) (model.RateLimit, error) {
-			return model.RateLimit{}, nil
+		deletePendingReviewFunc: func(context.Context, string) error {
+			return nil
 		},
-		updateReviewCommentFunc: func(context.Context, string, string) (model.ReviewComment, model.RateLimit, error) {
-			return model.ReviewComment{}, model.RateLimit{}, nil
+		updateReviewCommentFunc: func(context.Context, string, string) (model.ReviewComment, error) {
+			return model.ReviewComment{}, nil
 		},
-		deleteReviewCommentFunc: func(context.Context, string) (model.RateLimit, error) {
-			return model.RateLimit{}, nil
+		deleteReviewCommentFunc: func(context.Context, string) error {
+			return nil
 		},
-		resolveThreadFunc: func(context.Context, string) (model.ReviewThread, model.RateLimit, error) {
-			return model.ReviewThread{}, model.RateLimit{}, nil
+		resolveThreadFunc: func(context.Context, string) (model.ReviewThread, error) {
+			return model.ReviewThread{}, nil
 		},
-		unresolveThreadFunc: func(context.Context, string) (model.ReviewThread, model.RateLimit, error) {
-			return model.ReviewThread{}, model.RateLimit{}, nil
+		unresolveThreadFunc: func(context.Context, string) (model.ReviewThread, error) {
+			return model.ReviewThread{}, nil
 		},
-		addReactionFunc: func(context.Context, string, model.ReactionContent) ([]model.ReactionGroup, model.RateLimit, error) {
-			return nil, model.RateLimit{}, nil
+		addReactionFunc: func(context.Context, string, model.ReactionContent) ([]model.ReactionGroup, error) {
+			return nil, nil
 		},
-		removeReactionFunc: func(context.Context, string, model.ReactionContent) ([]model.ReactionGroup, model.RateLimit, error) {
-			return nil, model.RateLimit{}, nil
+		removeReactionFunc: func(context.Context, string, model.ReactionContent) ([]model.ReactionGroup, error) {
+			return nil, nil
 		},
 		mentionableUsersFunc: func(context.Context, model.RepoRef, string, int) ([]model.User, model.RateLimit, error) {
 			return nil, model.RateLimit{}, nil
@@ -357,29 +357,29 @@ func newFakeGitHub() *fakeGitHub {
 		teamsFunc: func(context.Context, string, string, int) ([]model.Team, model.RateLimit, error) {
 			return nil, model.RateLimit{}, nil
 		},
-		updatePullRequestFunc: func(context.Context, string, gh.UpdatePullRequestInput) (model.PullRequest, model.RateLimit, error) {
-			return model.PullRequest{}, model.RateLimit{}, nil
+		updatePullRequestFunc: func(context.Context, string, gh.UpdatePullRequestInput) (model.PullRequest, error) {
+			return model.PullRequest{}, nil
 		},
-		requestReviewersFunc: func(context.Context, string, []string, []string, bool) ([]model.Reviewer, model.RateLimit, error) {
-			return nil, model.RateLimit{}, nil
+		requestReviewersFunc: func(context.Context, string, []string, []string, bool) ([]model.Reviewer, error) {
+			return nil, nil
 		},
-		markReadyForReviewFunc: func(context.Context, string) (bool, model.RateLimit, error) {
-			return false, model.RateLimit{}, nil
+		markReadyForReviewFunc: func(context.Context, string) (bool, error) {
+			return false, nil
 		},
-		convertToDraftFunc: func(context.Context, string) (bool, model.RateLimit, error) {
-			return true, model.RateLimit{}, nil
+		convertToDraftFunc: func(context.Context, string) (bool, error) {
+			return true, nil
 		},
-		mergePullRequestFunc: func(context.Context, string, model.MergeMethod, *string, *string, string) (model.PullRequest, model.RateLimit, error) {
-			return model.PullRequest{}, model.RateLimit{}, nil
+		mergePullRequestFunc: func(context.Context, string, model.MergeMethod, *string, *string, string) (model.PullRequest, error) {
+			return model.PullRequest{}, nil
 		},
-		closePullRequestFunc: func(context.Context, string) (model.PRState, model.RateLimit, error) {
-			return model.PRStateClosed, model.RateLimit{}, nil
+		closePullRequestFunc: func(context.Context, string) (model.PRState, error) {
+			return model.PRStateClosed, nil
 		},
-		reopenPullRequestFunc: func(context.Context, string) (model.PRState, model.RateLimit, error) {
-			return model.PRStateOpen, model.RateLimit{}, nil
+		reopenPullRequestFunc: func(context.Context, string) (model.PRState, error) {
+			return model.PRStateOpen, nil
 		},
-		createPullRequestFunc: func(context.Context, gh.CreatePullRequestInput) (model.PullRequest, model.RateLimit, error) {
-			return model.PullRequest{}, model.RateLimit{}, nil
+		createPullRequestFunc: func(context.Context, gh.CreatePullRequestInput) (model.PullRequest, error) {
+			return model.PullRequest{}, nil
 		},
 	}
 }
@@ -420,7 +420,7 @@ func (f *fakeGitHub) ChangedFiles(ctx context.Context, ref model.PRRef, page int
 	return fn(ctx, ref, page, etag)
 }
 
-func (f *fakeGitHub) AddIssueComment(ctx context.Context, subjectID, body string) (model.IssueComment, model.RateLimit, error) {
+func (f *fakeGitHub) AddIssueComment(ctx context.Context, subjectID, body string) (model.IssueComment, error) {
 	f.mu.Lock()
 	f.addCommentCalls = append(f.addCommentCalls, addCommentCall{subjectID: subjectID, body: body})
 	fn := f.addCommentFunc
@@ -428,7 +428,7 @@ func (f *fakeGitHub) AddIssueComment(ctx context.Context, subjectID, body string
 	return fn(ctx, subjectID, body)
 }
 
-func (f *fakeGitHub) UpdateIssueComment(ctx context.Context, id, body string) (model.IssueComment, model.RateLimit, error) {
+func (f *fakeGitHub) UpdateIssueComment(ctx context.Context, id, body string) (model.IssueComment, error) {
 	f.mu.Lock()
 	f.updateCommentCalls = append(f.updateCommentCalls, updateCommentCall{id: id, body: body})
 	fn := f.updateCommentFunc
@@ -436,7 +436,7 @@ func (f *fakeGitHub) UpdateIssueComment(ctx context.Context, id, body string) (m
 	return fn(ctx, id, body)
 }
 
-func (f *fakeGitHub) DeleteIssueComment(ctx context.Context, id string) (model.RateLimit, error) {
+func (f *fakeGitHub) DeleteIssueComment(ctx context.Context, id string) error {
 	f.mu.Lock()
 	f.deleteCommentCalls = append(f.deleteCommentCalls, deleteCommentCall{id: id})
 	fn := f.deleteCommentFunc
@@ -444,7 +444,7 @@ func (f *fakeGitHub) DeleteIssueComment(ctx context.Context, id string) (model.R
 	return fn(ctx, id)
 }
 
-func (f *fakeGitHub) CreatePendingReview(ctx context.Context, prID string) (model.Review, model.RateLimit, error) {
+func (f *fakeGitHub) CreatePendingReview(ctx context.Context, prID string) (model.Review, error) {
 	f.mu.Lock()
 	f.createPendingReviewCalls = append(f.createPendingReviewCalls, createPendingReviewCall{prID: prID})
 	fn := f.createPendingReviewFunc
@@ -454,7 +454,7 @@ func (f *fakeGitHub) CreatePendingReview(ctx context.Context, prID string) (mode
 
 func (f *fakeGitHub) AddReviewNow(
 	ctx context.Context, prID string, threads []gh.DraftThread, body string,
-) (model.Review, model.RateLimit, error) {
+) (model.Review, error) {
 	f.mu.Lock()
 	f.addReviewNowCalls = append(f.addReviewNowCalls, addReviewNowCall{prID: prID, threads: threads, body: body})
 	fn := f.addReviewNowFunc
@@ -464,7 +464,7 @@ func (f *fakeGitHub) AddReviewNow(
 
 func (f *fakeGitHub) AddReviewNowWithEvent(
 	ctx context.Context, prID string, event model.ReviewEvent, body string,
-) (model.Review, model.RateLimit, error) {
+) (model.Review, error) {
 	f.mu.Lock()
 	f.addReviewNowWithEventCalls = append(f.addReviewNowWithEventCalls, addReviewNowWithEventCall{prID: prID, event: event, body: body})
 	fn := f.addReviewNowWithEventFunc
@@ -472,7 +472,7 @@ func (f *fakeGitHub) AddReviewNowWithEvent(
 	return fn(ctx, prID, event, body)
 }
 
-func (f *fakeGitHub) AddReviewThread(ctx context.Context, in gh.ThreadInput) (model.ReviewThread, model.RateLimit, error) {
+func (f *fakeGitHub) AddReviewThread(ctx context.Context, in gh.ThreadInput) (model.ReviewThread, error) {
 	f.mu.Lock()
 	f.addReviewThreadCalls = append(f.addReviewThreadCalls, addReviewThreadCall{in: in})
 	fn := f.addReviewThreadFunc
@@ -482,7 +482,7 @@ func (f *fakeGitHub) AddReviewThread(ctx context.Context, in gh.ThreadInput) (mo
 
 func (f *fakeGitHub) AddThreadReply(
 	ctx context.Context, threadID, body, pendingReviewID string,
-) (model.ReviewComment, model.RateLimit, error) {
+) (model.ReviewComment, error) {
 	f.mu.Lock()
 	f.addThreadReplyCalls = append(f.addThreadReplyCalls, addThreadReplyCall{
 		threadID: threadID, body: body, pendingReviewID: pendingReviewID,
@@ -494,7 +494,7 @@ func (f *fakeGitHub) AddThreadReply(
 
 func (f *fakeGitHub) SubmitReview(
 	ctx context.Context, reviewID string, event model.ReviewEvent, body string,
-) (model.Review, model.RateLimit, error) {
+) (model.Review, error) {
 	f.mu.Lock()
 	f.submitReviewCalls = append(f.submitReviewCalls, submitReviewCall{reviewID: reviewID, event: event, body: body})
 	fn := f.submitReviewFunc
@@ -502,7 +502,7 @@ func (f *fakeGitHub) SubmitReview(
 	return fn(ctx, reviewID, event, body)
 }
 
-func (f *fakeGitHub) DeletePendingReview(ctx context.Context, reviewID string) (model.RateLimit, error) {
+func (f *fakeGitHub) DeletePendingReview(ctx context.Context, reviewID string) error {
 	f.mu.Lock()
 	f.deletePendingReviewCalls = append(f.deletePendingReviewCalls, deletePendingReviewCall{reviewID: reviewID})
 	fn := f.deletePendingReviewFunc
@@ -510,7 +510,7 @@ func (f *fakeGitHub) DeletePendingReview(ctx context.Context, reviewID string) (
 	return fn(ctx, reviewID)
 }
 
-func (f *fakeGitHub) UpdateReviewComment(ctx context.Context, id, body string) (model.ReviewComment, model.RateLimit, error) {
+func (f *fakeGitHub) UpdateReviewComment(ctx context.Context, id, body string) (model.ReviewComment, error) {
 	f.mu.Lock()
 	f.updateReviewCommentCalls = append(f.updateReviewCommentCalls, updateReviewCommentCall{id: id, body: body})
 	fn := f.updateReviewCommentFunc
@@ -518,7 +518,7 @@ func (f *fakeGitHub) UpdateReviewComment(ctx context.Context, id, body string) (
 	return fn(ctx, id, body)
 }
 
-func (f *fakeGitHub) DeleteReviewComment(ctx context.Context, id string) (model.RateLimit, error) {
+func (f *fakeGitHub) DeleteReviewComment(ctx context.Context, id string) error {
 	f.mu.Lock()
 	f.deleteReviewCommentCalls = append(f.deleteReviewCommentCalls, deleteReviewCommentCall{id: id})
 	fn := f.deleteReviewCommentFunc
@@ -526,7 +526,7 @@ func (f *fakeGitHub) DeleteReviewComment(ctx context.Context, id string) (model.
 	return fn(ctx, id)
 }
 
-func (f *fakeGitHub) ResolveThread(ctx context.Context, threadID string) (model.ReviewThread, model.RateLimit, error) {
+func (f *fakeGitHub) ResolveThread(ctx context.Context, threadID string) (model.ReviewThread, error) {
 	f.mu.Lock()
 	f.resolveThreadCalls = append(f.resolveThreadCalls, resolveThreadCall{threadID: threadID})
 	fn := f.resolveThreadFunc
@@ -534,7 +534,7 @@ func (f *fakeGitHub) ResolveThread(ctx context.Context, threadID string) (model.
 	return fn(ctx, threadID)
 }
 
-func (f *fakeGitHub) UnresolveThread(ctx context.Context, threadID string) (model.ReviewThread, model.RateLimit, error) {
+func (f *fakeGitHub) UnresolveThread(ctx context.Context, threadID string) (model.ReviewThread, error) {
 	f.mu.Lock()
 	f.unresolveThreadCalls = append(f.unresolveThreadCalls, unresolveThreadCall{threadID: threadID})
 	fn := f.unresolveThreadFunc
@@ -544,7 +544,7 @@ func (f *fakeGitHub) UnresolveThread(ctx context.Context, threadID string) (mode
 
 func (f *fakeGitHub) AddReaction(
 	ctx context.Context, subjectID string, content model.ReactionContent,
-) ([]model.ReactionGroup, model.RateLimit, error) {
+) ([]model.ReactionGroup, error) {
 	f.mu.Lock()
 	f.addReactionCalls = append(f.addReactionCalls, addReactionCall{subjectID: subjectID, content: content})
 	fn := f.addReactionFunc
@@ -554,7 +554,7 @@ func (f *fakeGitHub) AddReaction(
 
 func (f *fakeGitHub) RemoveReaction(
 	ctx context.Context, subjectID string, content model.ReactionContent,
-) ([]model.ReactionGroup, model.RateLimit, error) {
+) ([]model.ReactionGroup, error) {
 	f.mu.Lock()
 	f.removeReactionCalls = append(f.removeReactionCalls, removeReactionCall{subjectID: subjectID, content: content})
 	fn := f.removeReactionFunc
@@ -624,7 +624,7 @@ func (f *fakeGitHub) Teams(ctx context.Context, org, query string, first int) ([
 
 func (f *fakeGitHub) UpdatePullRequest(
 	ctx context.Context, id string, in gh.UpdatePullRequestInput,
-) (model.PullRequest, model.RateLimit, error) {
+) (model.PullRequest, error) {
 	f.mu.Lock()
 	f.updatePullRequestCalls = append(f.updatePullRequestCalls, updatePullRequestCall{id: id, in: in})
 	fn := f.updatePullRequestFunc
@@ -634,7 +634,7 @@ func (f *fakeGitHub) UpdatePullRequest(
 
 func (f *fakeGitHub) RequestReviewers(
 	ctx context.Context, id string, userIDs, teamIDs []string, union bool,
-) ([]model.Reviewer, model.RateLimit, error) {
+) ([]model.Reviewer, error) {
 	f.mu.Lock()
 	f.requestReviewersCalls = append(
 		f.requestReviewersCalls, requestReviewersCall{id: id, userIDs: userIDs, teamIDs: teamIDs, union: union},
@@ -644,7 +644,7 @@ func (f *fakeGitHub) RequestReviewers(
 	return fn(ctx, id, userIDs, teamIDs, union)
 }
 
-func (f *fakeGitHub) MarkReadyForReview(ctx context.Context, id string) (bool, model.RateLimit, error) {
+func (f *fakeGitHub) MarkReadyForReview(ctx context.Context, id string) (bool, error) {
 	f.mu.Lock()
 	f.markReadyForReviewCalls = append(f.markReadyForReviewCalls, id)
 	fn := f.markReadyForReviewFunc
@@ -652,7 +652,7 @@ func (f *fakeGitHub) MarkReadyForReview(ctx context.Context, id string) (bool, m
 	return fn(ctx, id)
 }
 
-func (f *fakeGitHub) ConvertToDraft(ctx context.Context, id string) (bool, model.RateLimit, error) {
+func (f *fakeGitHub) ConvertToDraft(ctx context.Context, id string) (bool, error) {
 	f.mu.Lock()
 	f.convertToDraftCalls = append(f.convertToDraftCalls, id)
 	fn := f.convertToDraftFunc
@@ -662,7 +662,7 @@ func (f *fakeGitHub) ConvertToDraft(ctx context.Context, id string) (bool, model
 
 func (f *fakeGitHub) MergePullRequest(
 	ctx context.Context, id string, method model.MergeMethod, commitHeadline, commitBody *string, expectedHeadOID string,
-) (model.PullRequest, model.RateLimit, error) {
+) (model.PullRequest, error) {
 	f.mu.Lock()
 	f.mergePullRequestCalls = append(f.mergePullRequestCalls, mergePullRequestCall{
 		id: id, method: method, commitHeadline: commitHeadline, commitBody: commitBody, expectedHeadOID: expectedHeadOID,
@@ -672,7 +672,7 @@ func (f *fakeGitHub) MergePullRequest(
 	return fn(ctx, id, method, commitHeadline, commitBody, expectedHeadOID)
 }
 
-func (f *fakeGitHub) ClosePullRequest(ctx context.Context, id string) (model.PRState, model.RateLimit, error) {
+func (f *fakeGitHub) ClosePullRequest(ctx context.Context, id string) (model.PRState, error) {
 	f.mu.Lock()
 	f.closePullRequestCalls = append(f.closePullRequestCalls, id)
 	fn := f.closePullRequestFunc
@@ -680,7 +680,7 @@ func (f *fakeGitHub) ClosePullRequest(ctx context.Context, id string) (model.PRS
 	return fn(ctx, id)
 }
 
-func (f *fakeGitHub) ReopenPullRequest(ctx context.Context, id string) (model.PRState, model.RateLimit, error) {
+func (f *fakeGitHub) ReopenPullRequest(ctx context.Context, id string) (model.PRState, error) {
 	f.mu.Lock()
 	f.reopenPullRequestCalls = append(f.reopenPullRequestCalls, id)
 	fn := f.reopenPullRequestFunc
@@ -688,7 +688,7 @@ func (f *fakeGitHub) ReopenPullRequest(ctx context.Context, id string) (model.PR
 	return fn(ctx, id)
 }
 
-func (f *fakeGitHub) CreatePullRequest(ctx context.Context, in gh.CreatePullRequestInput) (model.PullRequest, model.RateLimit, error) {
+func (f *fakeGitHub) CreatePullRequest(ctx context.Context, in gh.CreatePullRequestInput) (model.PullRequest, error) {
 	f.mu.Lock()
 	f.createPullRequestCalls = append(f.createPullRequestCalls, in)
 	fn := f.createPullRequestFunc
@@ -838,7 +838,7 @@ func (f *fakeGitHub) mentionableUsersCallsSnapshot() []mentionableUsersCall {
 
 // setCreatePendingReviewFunc reassigns createPendingReviewFunc under the
 // lock, for the same reason setSearchFunc does.
-func (f *fakeGitHub) setCreatePendingReviewFunc(fn func(ctx context.Context, prID string) (model.Review, model.RateLimit, error)) {
+func (f *fakeGitHub) setCreatePendingReviewFunc(fn func(ctx context.Context, prID string) (model.Review, error)) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.createPendingReviewFunc = fn
@@ -847,7 +847,7 @@ func (f *fakeGitHub) setCreatePendingReviewFunc(fn func(ctx context.Context, prI
 // setAddReviewNowFunc reassigns addReviewNowFunc under the lock, for the
 // same reason setSearchFunc does.
 func (f *fakeGitHub) setAddReviewNowFunc(
-	fn func(ctx context.Context, prID string, threads []gh.DraftThread, body string) (model.Review, model.RateLimit, error),
+	fn func(ctx context.Context, prID string, threads []gh.DraftThread, body string) (model.Review, error),
 ) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -857,7 +857,7 @@ func (f *fakeGitHub) setAddReviewNowFunc(
 // setAddReviewNowWithEventFunc reassigns addReviewNowWithEventFunc under the
 // lock, for the same reason setSearchFunc does.
 func (f *fakeGitHub) setAddReviewNowWithEventFunc(
-	fn func(ctx context.Context, prID string, event model.ReviewEvent, body string) (model.Review, model.RateLimit, error),
+	fn func(ctx context.Context, prID string, event model.ReviewEvent, body string) (model.Review, error),
 ) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -867,7 +867,7 @@ func (f *fakeGitHub) setAddReviewNowWithEventFunc(
 // setAddReviewThreadFunc reassigns addReviewThreadFunc under the lock, for
 // the same reason setSearchFunc does.
 func (f *fakeGitHub) setAddReviewThreadFunc(
-	fn func(ctx context.Context, in gh.ThreadInput) (model.ReviewThread, model.RateLimit, error),
+	fn func(ctx context.Context, in gh.ThreadInput) (model.ReviewThread, error),
 ) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -877,7 +877,7 @@ func (f *fakeGitHub) setAddReviewThreadFunc(
 // setAddThreadReplyFunc reassigns addThreadReplyFunc under the lock, for
 // the same reason setSearchFunc does.
 func (f *fakeGitHub) setAddThreadReplyFunc(
-	fn func(ctx context.Context, threadID, body, pendingReviewID string) (model.ReviewComment, model.RateLimit, error),
+	fn func(ctx context.Context, threadID, body, pendingReviewID string) (model.ReviewComment, error),
 ) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -887,7 +887,7 @@ func (f *fakeGitHub) setAddThreadReplyFunc(
 // setSubmitReviewFunc reassigns submitReviewFunc under the lock, for the
 // same reason setSearchFunc does.
 func (f *fakeGitHub) setSubmitReviewFunc(
-	fn func(ctx context.Context, reviewID string, event model.ReviewEvent, body string) (model.Review, model.RateLimit, error),
+	fn func(ctx context.Context, reviewID string, event model.ReviewEvent, body string) (model.Review, error),
 ) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -896,7 +896,7 @@ func (f *fakeGitHub) setSubmitReviewFunc(
 
 // setDeletePendingReviewFunc reassigns deletePendingReviewFunc under the
 // lock, for the same reason setSearchFunc does.
-func (f *fakeGitHub) setDeletePendingReviewFunc(fn func(ctx context.Context, reviewID string) (model.RateLimit, error)) {
+func (f *fakeGitHub) setDeletePendingReviewFunc(fn func(ctx context.Context, reviewID string) error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.deletePendingReviewFunc = fn
@@ -905,7 +905,7 @@ func (f *fakeGitHub) setDeletePendingReviewFunc(fn func(ctx context.Context, rev
 // setUpdateReviewCommentFunc reassigns updateReviewCommentFunc under the
 // lock, for the same reason setSearchFunc does.
 func (f *fakeGitHub) setUpdateReviewCommentFunc(
-	fn func(ctx context.Context, id, body string) (model.ReviewComment, model.RateLimit, error),
+	fn func(ctx context.Context, id, body string) (model.ReviewComment, error),
 ) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -914,7 +914,7 @@ func (f *fakeGitHub) setUpdateReviewCommentFunc(
 
 // setDeleteReviewCommentFunc reassigns deleteReviewCommentFunc under the
 // lock, for the same reason setSearchFunc does.
-func (f *fakeGitHub) setDeleteReviewCommentFunc(fn func(ctx context.Context, id string) (model.RateLimit, error)) {
+func (f *fakeGitHub) setDeleteReviewCommentFunc(fn func(ctx context.Context, id string) error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.deleteReviewCommentFunc = fn
@@ -923,7 +923,7 @@ func (f *fakeGitHub) setDeleteReviewCommentFunc(fn func(ctx context.Context, id 
 // setResolveThreadFunc reassigns resolveThreadFunc under the lock, for the
 // same reason setSearchFunc does.
 func (f *fakeGitHub) setResolveThreadFunc(
-	fn func(ctx context.Context, threadID string) (model.ReviewThread, model.RateLimit, error),
+	fn func(ctx context.Context, threadID string) (model.ReviewThread, error),
 ) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -933,7 +933,7 @@ func (f *fakeGitHub) setResolveThreadFunc(
 // setUnresolveThreadFunc reassigns unresolveThreadFunc under the lock, for
 // the same reason setSearchFunc does.
 func (f *fakeGitHub) setUnresolveThreadFunc(
-	fn func(ctx context.Context, threadID string) (model.ReviewThread, model.RateLimit, error),
+	fn func(ctx context.Context, threadID string) (model.ReviewThread, error),
 ) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -943,7 +943,7 @@ func (f *fakeGitHub) setUnresolveThreadFunc(
 // setAddReactionFunc reassigns addReactionFunc under the lock, for the same
 // reason setSearchFunc does.
 func (f *fakeGitHub) setAddReactionFunc(
-	fn func(ctx context.Context, subjectID string, content model.ReactionContent) ([]model.ReactionGroup, model.RateLimit, error),
+	fn func(ctx context.Context, subjectID string, content model.ReactionContent) ([]model.ReactionGroup, error),
 ) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -953,7 +953,7 @@ func (f *fakeGitHub) setAddReactionFunc(
 // setRemoveReactionFunc reassigns removeReactionFunc under the lock, for
 // the same reason setSearchFunc does.
 func (f *fakeGitHub) setRemoveReactionFunc(
-	fn func(ctx context.Context, subjectID string, content model.ReactionContent) ([]model.ReactionGroup, model.RateLimit, error),
+	fn func(ctx context.Context, subjectID string, content model.ReactionContent) ([]model.ReactionGroup, error),
 ) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -1027,7 +1027,7 @@ func (f *fakeGitHub) setTeamsFunc(fn func(ctx context.Context, org, query string
 // setUpdatePullRequestFunc reassigns updatePullRequestFunc under the lock,
 // for the same reason setSearchFunc does.
 func (f *fakeGitHub) setUpdatePullRequestFunc(
-	fn func(ctx context.Context, id string, in gh.UpdatePullRequestInput) (model.PullRequest, model.RateLimit, error),
+	fn func(ctx context.Context, id string, in gh.UpdatePullRequestInput) (model.PullRequest, error),
 ) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -1037,7 +1037,7 @@ func (f *fakeGitHub) setUpdatePullRequestFunc(
 // setRequestReviewersFunc reassigns requestReviewersFunc under the lock,
 // for the same reason setSearchFunc does.
 func (f *fakeGitHub) setRequestReviewersFunc(
-	fn func(ctx context.Context, id string, userIDs, teamIDs []string, union bool) ([]model.Reviewer, model.RateLimit, error),
+	fn func(ctx context.Context, id string, userIDs, teamIDs []string, union bool) ([]model.Reviewer, error),
 ) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -1046,7 +1046,7 @@ func (f *fakeGitHub) setRequestReviewersFunc(
 
 // setMarkReadyForReviewFunc reassigns markReadyForReviewFunc under the
 // lock, for the same reason setSearchFunc does.
-func (f *fakeGitHub) setMarkReadyForReviewFunc(fn func(ctx context.Context, id string) (bool, model.RateLimit, error)) {
+func (f *fakeGitHub) setMarkReadyForReviewFunc(fn func(ctx context.Context, id string) (bool, error)) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.markReadyForReviewFunc = fn
@@ -1054,7 +1054,7 @@ func (f *fakeGitHub) setMarkReadyForReviewFunc(fn func(ctx context.Context, id s
 
 // setConvertToDraftFunc reassigns convertToDraftFunc under the lock, for
 // the same reason setSearchFunc does.
-func (f *fakeGitHub) setConvertToDraftFunc(fn func(ctx context.Context, id string) (bool, model.RateLimit, error)) {
+func (f *fakeGitHub) setConvertToDraftFunc(fn func(ctx context.Context, id string) (bool, error)) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.convertToDraftFunc = fn
@@ -1063,7 +1063,7 @@ func (f *fakeGitHub) setConvertToDraftFunc(fn func(ctx context.Context, id strin
 // setMergePullRequestFunc reassigns mergePullRequestFunc under the lock,
 // for the same reason setSearchFunc does.
 func (f *fakeGitHub) setMergePullRequestFunc(
-	fn func(ctx context.Context, id string, method model.MergeMethod, commitHeadline, commitBody *string, expectedHeadOID string) (model.PullRequest, model.RateLimit, error),
+	fn func(ctx context.Context, id string, method model.MergeMethod, commitHeadline, commitBody *string, expectedHeadOID string) (model.PullRequest, error),
 ) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -1072,7 +1072,7 @@ func (f *fakeGitHub) setMergePullRequestFunc(
 
 // setClosePullRequestFunc reassigns closePullRequestFunc under the lock,
 // for the same reason setSearchFunc does.
-func (f *fakeGitHub) setClosePullRequestFunc(fn func(ctx context.Context, id string) (model.PRState, model.RateLimit, error)) {
+func (f *fakeGitHub) setClosePullRequestFunc(fn func(ctx context.Context, id string) (model.PRState, error)) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.closePullRequestFunc = fn
@@ -1080,7 +1080,7 @@ func (f *fakeGitHub) setClosePullRequestFunc(fn func(ctx context.Context, id str
 
 // setReopenPullRequestFunc reassigns reopenPullRequestFunc under the lock,
 // for the same reason setSearchFunc does.
-func (f *fakeGitHub) setReopenPullRequestFunc(fn func(ctx context.Context, id string) (model.PRState, model.RateLimit, error)) {
+func (f *fakeGitHub) setReopenPullRequestFunc(fn func(ctx context.Context, id string) (model.PRState, error)) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.reopenPullRequestFunc = fn
@@ -1089,7 +1089,7 @@ func (f *fakeGitHub) setReopenPullRequestFunc(fn func(ctx context.Context, id st
 // setCreatePullRequestFunc reassigns createPullRequestFunc under the lock,
 // for the same reason setSearchFunc does.
 func (f *fakeGitHub) setCreatePullRequestFunc(
-	fn func(ctx context.Context, in gh.CreatePullRequestInput) (model.PullRequest, model.RateLimit, error),
+	fn func(ctx context.Context, in gh.CreatePullRequestInput) (model.PullRequest, error),
 ) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -1196,7 +1196,7 @@ func (f *fakeGitHub) deleteCommentCallsSnapshot() []deleteCommentCall {
 
 // setAddCommentFunc reassigns addCommentFunc under the lock, for the same
 // reason setSearchFunc does.
-func (f *fakeGitHub) setAddCommentFunc(fn func(ctx context.Context, subjectID, body string) (model.IssueComment, model.RateLimit, error)) {
+func (f *fakeGitHub) setAddCommentFunc(fn func(ctx context.Context, subjectID, body string) (model.IssueComment, error)) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.addCommentFunc = fn
@@ -1204,7 +1204,7 @@ func (f *fakeGitHub) setAddCommentFunc(fn func(ctx context.Context, subjectID, b
 
 // setUpdateCommentFunc reassigns updateCommentFunc under the lock, for the
 // same reason setSearchFunc does.
-func (f *fakeGitHub) setUpdateCommentFunc(fn func(ctx context.Context, id, body string) (model.IssueComment, model.RateLimit, error)) {
+func (f *fakeGitHub) setUpdateCommentFunc(fn func(ctx context.Context, id, body string) (model.IssueComment, error)) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.updateCommentFunc = fn
@@ -1212,7 +1212,7 @@ func (f *fakeGitHub) setUpdateCommentFunc(fn func(ctx context.Context, id, body 
 
 // setDeleteCommentFunc reassigns deleteCommentFunc under the lock, for the
 // same reason setSearchFunc does.
-func (f *fakeGitHub) setDeleteCommentFunc(fn func(ctx context.Context, id string) (model.RateLimit, error)) {
+func (f *fakeGitHub) setDeleteCommentFunc(fn func(ctx context.Context, id string) error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.deleteCommentFunc = fn

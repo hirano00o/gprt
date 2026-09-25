@@ -112,20 +112,18 @@ func (s *Store) ToggleReaction(subjectID string, content model.ReactionContent) 
 
 	run := func(ctx context.Context) (func(), error) {
 		var groups []model.ReactionGroup
-		var rl model.RateLimit
 		var err error
 		if remove {
 			s.deps.Logger.Debug("toggle_reaction: remove", "subject", subjectID, "content", content)
-			groups, rl, err = s.deps.GitHub.RemoveReaction(ctx, subjectID, content)
+			groups, err = s.deps.GitHub.RemoveReaction(ctx, subjectID, content)
 		} else {
 			s.deps.Logger.Debug("toggle_reaction: add", "subject", subjectID, "content", content)
-			groups, rl, err = s.deps.GitHub.AddReaction(ctx, subjectID, content)
+			groups, err = s.deps.GitHub.AddReaction(ctx, subjectID, content)
 		}
 		if err != nil {
 			return nil, err
 		}
 		return func() {
-			s.setRateLimit(rl)
 			s.applyReactionGroups(subjectID, groups)
 			s.emit(Event{Kind: EventPRChanged})
 		}, nil

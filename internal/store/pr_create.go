@@ -12,7 +12,6 @@ import (
 	"context"
 
 	"github.com/hirano00o/gprt/internal/gh"
-	"github.com/hirano00o/gprt/internal/model"
 )
 
 // CreatePullRequest opens a new pull request via GitHub's createPullRequest
@@ -33,30 +32,21 @@ import (
 // own EventError (see the run closure below).
 func (s *Store) CreatePullRequest(in gh.CreatePullRequestInput, reviewerUserIDs, reviewerTeamIDs []string) bool {
 	run := func(ctx context.Context) (func(), error) {
-		pr, createRL, err := s.deps.GitHub.CreatePullRequest(ctx, in)
+		pr, err := s.deps.GitHub.CreatePullRequest(ctx, in)
 		if err != nil {
 			return nil, err
 		}
 
 		var reviewerErr error
-		var reviewersRL model.RateLimit
-		haveReviewersRL := false
 		if len(reviewerUserIDs) > 0 || len(reviewerTeamIDs) > 0 {
-			_, rl, rerr := s.deps.GitHub.RequestReviewers(ctx, pr.ID, reviewerUserIDs, reviewerTeamIDs, true)
+			_, rerr := s.deps.GitHub.RequestReviewers(ctx, pr.ID, reviewerUserIDs, reviewerTeamIDs, true)
 			if rerr != nil {
 				reviewerErr = rerr
-			} else {
-				reviewersRL = rl
-				haveReviewersRL = true
 			}
 		}
 
 		ref := pr.Ref
 		return func() {
-			s.setRateLimit(createRL)
-			if haveReviewersRL {
-				s.setRateLimit(reviewersRL)
-			}
 			s.emit(Event{Kind: EventPullRequestCreated, Ref: &ref})
 			if reviewerErr != nil {
 				// finishMutation's success path already reset mutationErr

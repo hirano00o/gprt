@@ -28,9 +28,9 @@ type GitHub interface {
 	SearchPullRequests(ctx context.Context, query, cursor string) (gh.SearchResult, error)
 	PullRequest(ctx context.Context, ref model.PRRef, viewerLogin string) (gh.DetailResult, error)
 	ChangedFiles(ctx context.Context, ref model.PRRef, page int, etag string) (gh.FilesResult, error)
-	AddIssueComment(ctx context.Context, subjectID, body string) (model.IssueComment, model.RateLimit, error)
-	UpdateIssueComment(ctx context.Context, id, body string) (model.IssueComment, model.RateLimit, error)
-	DeleteIssueComment(ctx context.Context, id string) (model.RateLimit, error)
+	AddIssueComment(ctx context.Context, subjectID, body string) (model.IssueComment, error)
+	UpdateIssueComment(ctx context.Context, id, body string) (model.IssueComment, error)
+	DeleteIssueComment(ctx context.Context, id string) error
 
 	// Review mutations (see review.go). CreatePendingReview/AddReviewNow/
 	// AddReviewNowWithEvent all wrap GraphQL's addPullRequestReview: the
@@ -38,23 +38,23 @@ type GitHub interface {
 	// no event; publish threads immediately with event: COMMENT), and the
 	// third covers the store's SubmitReview when no pending review exists
 	// yet (an arbitrary event, no threads).
-	CreatePendingReview(ctx context.Context, prID string) (model.Review, model.RateLimit, error)
-	AddReviewNow(ctx context.Context, prID string, threads []gh.DraftThread, body string) (model.Review, model.RateLimit, error)
-	AddReviewNowWithEvent(ctx context.Context, prID string, event model.ReviewEvent, body string) (model.Review, model.RateLimit, error)
-	AddReviewThread(ctx context.Context, in gh.ThreadInput) (model.ReviewThread, model.RateLimit, error)
-	AddThreadReply(ctx context.Context, threadID, body, pendingReviewID string) (model.ReviewComment, model.RateLimit, error)
-	SubmitReview(ctx context.Context, reviewID string, event model.ReviewEvent, body string) (model.Review, model.RateLimit, error)
-	DeletePendingReview(ctx context.Context, reviewID string) (model.RateLimit, error)
-	UpdateReviewComment(ctx context.Context, id, body string) (model.ReviewComment, model.RateLimit, error)
-	DeleteReviewComment(ctx context.Context, id string) (model.RateLimit, error)
-	ResolveThread(ctx context.Context, threadID string) (model.ReviewThread, model.RateLimit, error)
-	UnresolveThread(ctx context.Context, threadID string) (model.ReviewThread, model.RateLimit, error)
+	CreatePendingReview(ctx context.Context, prID string) (model.Review, error)
+	AddReviewNow(ctx context.Context, prID string, threads []gh.DraftThread, body string) (model.Review, error)
+	AddReviewNowWithEvent(ctx context.Context, prID string, event model.ReviewEvent, body string) (model.Review, error)
+	AddReviewThread(ctx context.Context, in gh.ThreadInput) (model.ReviewThread, error)
+	AddThreadReply(ctx context.Context, threadID, body, pendingReviewID string) (model.ReviewComment, error)
+	SubmitReview(ctx context.Context, reviewID string, event model.ReviewEvent, body string) (model.Review, error)
+	DeletePendingReview(ctx context.Context, reviewID string) error
+	UpdateReviewComment(ctx context.Context, id, body string) (model.ReviewComment, error)
+	DeleteReviewComment(ctx context.Context, id string) error
+	ResolveThread(ctx context.Context, threadID string) (model.ReviewThread, error)
+	UnresolveThread(ctx context.Context, threadID string) (model.ReviewThread, error)
 
 	// Reaction mutations (see reaction.go): AddReaction/RemoveReaction both
 	// return the reacted-on subject's full, refreshed set of reaction
 	// groups, mirroring gh.Client's own signatures.
-	AddReaction(ctx context.Context, subjectID string, content model.ReactionContent) ([]model.ReactionGroup, model.RateLimit, error)
-	RemoveReaction(ctx context.Context, subjectID string, content model.ReactionContent) ([]model.ReactionGroup, model.RateLimit, error)
+	AddReaction(ctx context.Context, subjectID string, content model.ReactionContent) ([]model.ReactionGroup, error)
+	RemoveReaction(ctx context.Context, subjectID string, content model.ReactionContent) ([]model.ReactionGroup, error)
 
 	// MentionableUsers returns a repository's mentionable users (see
 	// mentionable.go), the store's `@`-mention autocomplete candidate
@@ -79,16 +79,16 @@ type GitHub interface {
 	Teams(ctx context.Context, org, query string, first int) ([]model.Team, model.RateLimit, error)
 
 	// Pull request edit/merge/create mutations (see pr_edit.go, pr_create.go).
-	UpdatePullRequest(ctx context.Context, id string, in gh.UpdatePullRequestInput) (model.PullRequest, model.RateLimit, error)
-	RequestReviewers(ctx context.Context, id string, userIDs, teamIDs []string, union bool) ([]model.Reviewer, model.RateLimit, error)
-	MarkReadyForReview(ctx context.Context, id string) (bool, model.RateLimit, error)
-	ConvertToDraft(ctx context.Context, id string) (bool, model.RateLimit, error)
+	UpdatePullRequest(ctx context.Context, id string, in gh.UpdatePullRequestInput) (model.PullRequest, error)
+	RequestReviewers(ctx context.Context, id string, userIDs, teamIDs []string, union bool) ([]model.Reviewer, error)
+	MarkReadyForReview(ctx context.Context, id string) (bool, error)
+	ConvertToDraft(ctx context.Context, id string) (bool, error)
 	MergePullRequest(
 		ctx context.Context, id string, method model.MergeMethod, commitHeadline, commitBody *string, expectedHeadOID string,
-	) (model.PullRequest, model.RateLimit, error)
-	ClosePullRequest(ctx context.Context, id string) (model.PRState, model.RateLimit, error)
-	ReopenPullRequest(ctx context.Context, id string) (model.PRState, model.RateLimit, error)
-	CreatePullRequest(ctx context.Context, in gh.CreatePullRequestInput) (model.PullRequest, model.RateLimit, error)
+	) (model.PullRequest, error)
+	ClosePullRequest(ctx context.Context, id string) (model.PRState, error)
+	ReopenPullRequest(ctx context.Context, id string) (model.PRState, error)
+	CreatePullRequest(ctx context.Context, in gh.CreatePullRequestInput) (model.PullRequest, error)
 }
 
 // lineHighlighter is the subset of *highlight.Highlighter the store depends

@@ -19,8 +19,7 @@ func TestClient_AddReaction_Success(t *testing.T) {
 					{"content": "THUMBS_UP", "viewerHasReacted": true, "reactors": {"totalCount": 3}},
 					{"content": "HEART", "viewerHasReacted": false, "reactors": {"totalCount": 1}}
 				]
-			},
-			"rateLimit": {"remaining": 4999, "resetAt": "2026-09-13T01:00:00Z"}
+			}
 		}
 	}`)
 
@@ -31,7 +30,7 @@ func TestClient_AddReaction_Success(t *testing.T) {
 	})
 	defer srv.Close()
 
-	groups, rl, err := c.AddReaction(context.Background(), "PR_1", model.ReactionThumbsUp)
+	groups, err := c.AddReaction(context.Background(), "PR_1", model.ReactionThumbsUp)
 	if err != nil {
 		t.Fatalf("AddReaction() error = %v", err)
 	}
@@ -44,9 +43,6 @@ func TestClient_AddReaction_Success(t *testing.T) {
 	if len(groups) != 2 || groups[0].Content != model.ReactionThumbsUp || groups[0].Count != 3 || !groups[0].ViewerHasReacted {
 		t.Errorf("AddReaction() groups = %+v", groups)
 	}
-	if !rl.Known || rl.Remaining != 4999 {
-		t.Errorf("AddReaction() rate limit = %+v, want Remaining=4999, Known=true", rl)
-	}
 }
 
 func TestClient_AddReaction_ValidationError(t *testing.T) {
@@ -57,7 +53,7 @@ func TestClient_AddReaction_ValidationError(t *testing.T) {
 	})
 	defer srv.Close()
 
-	_, _, err := c.AddReaction(context.Background(), "PR_1", model.ReactionThumbsUp)
+	_, err := c.AddReaction(context.Background(), "PR_1", model.ReactionThumbsUp)
 	var ghErr *Error
 	if !errors.As(err, &ghErr) || ghErr.Kind != KindValidation {
 		t.Fatalf("AddReaction() error = %v, want a KindValidation *gh.Error", err)
@@ -80,7 +76,7 @@ func TestClient_AddReaction_UnprocessableGraphQLError(t *testing.T) {
 	})
 	defer srv.Close()
 
-	_, _, err := c.AddReaction(context.Background(), "PR_1", model.ReactionThumbsUp)
+	_, err := c.AddReaction(context.Background(), "PR_1", model.ReactionThumbsUp)
 	var ghErr *Error
 	if !errors.As(err, &ghErr) {
 		t.Fatalf("AddReaction() error = %v (%T), want *gh.Error", err, err)
@@ -102,8 +98,7 @@ func TestClient_RemoveReaction_Success(t *testing.T) {
 				"reactionGroups": [
 					{"content": "THUMBS_UP", "viewerHasReacted": false, "reactors": {"totalCount": 2}}
 				]
-			},
-			"rateLimit": {"remaining": 4998, "resetAt": "2026-09-13T01:00:00Z"}
+			}
 		}
 	}`)
 
@@ -114,7 +109,7 @@ func TestClient_RemoveReaction_Success(t *testing.T) {
 	})
 	defer srv.Close()
 
-	groups, rl, err := c.RemoveReaction(context.Background(), "IC_1", model.ReactionThumbsUp)
+	groups, err := c.RemoveReaction(context.Background(), "IC_1", model.ReactionThumbsUp)
 	if err != nil {
 		t.Fatalf("RemoveReaction() error = %v", err)
 	}
@@ -127,9 +122,6 @@ func TestClient_RemoveReaction_Success(t *testing.T) {
 	if len(groups) != 1 || groups[0].ViewerHasReacted {
 		t.Errorf("RemoveReaction() groups = %+v, want ViewerHasReacted=false", groups)
 	}
-	if !rl.Known || rl.Remaining != 4998 {
-		t.Errorf("RemoveReaction() rate limit = %+v, want Remaining=4998, Known=true", rl)
-	}
 }
 
 func TestClient_RemoveReaction_ValidationError(t *testing.T) {
@@ -140,7 +132,7 @@ func TestClient_RemoveReaction_ValidationError(t *testing.T) {
 	})
 	defer srv.Close()
 
-	_, _, err := c.RemoveReaction(context.Background(), "IC_1", model.ReactionThumbsUp)
+	_, err := c.RemoveReaction(context.Background(), "IC_1", model.ReactionThumbsUp)
 	var ghErr *Error
 	if !errors.As(err, &ghErr) || ghErr.Kind != KindValidation {
 		t.Fatalf("RemoveReaction() error = %v, want a KindValidation *gh.Error", err)

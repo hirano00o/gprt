@@ -2,8 +2,4 @@ mutation DeleteIssueComment($id: ID!) {
   deleteIssueComment(input: { id: $id }) {
     clientMutationId
   }
-  rateLimit {
-    remaining
-    resetAt
-  }
 }

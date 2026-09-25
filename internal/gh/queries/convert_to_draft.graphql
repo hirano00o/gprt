@@ -4,8 +4,4 @@ mutation ConvertPullRequestToDraft($id: ID!) {
       isDraft
     }
   }
-  rateLimit {
-    remaining
-    resetAt
-  }
 }

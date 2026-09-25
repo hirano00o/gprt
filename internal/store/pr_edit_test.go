@@ -60,11 +60,11 @@ func TestUpdatePullRequestMeta_Success_AppliesAndRefreshesList(t *testing.T) {
 		}
 		return gh.DetailResult{PR: pr}, nil
 	})
-	gitHub.setUpdatePullRequestFunc(func(_ context.Context, id string, in gh.UpdatePullRequestInput) (model.PullRequest, model.RateLimit, error) {
+	gitHub.setUpdatePullRequestFunc(func(_ context.Context, id string, in gh.UpdatePullRequestInput) (model.PullRequest, error) {
 		if id != "PR_1" || in.Title == nil || *in.Title != newTitle {
 			t.Errorf("UpdatePullRequest called with id=%q in=%+v", id, in)
 		}
-		return model.PullRequest{Title: newTitle, BaseRefName: "main"}, model.RateLimit{}, nil
+		return model.PullRequest{Title: newTitle, BaseRefName: "main"}, nil
 	})
 
 	if !s.UpdatePullRequestMeta(gh.UpdatePullRequestInput{Title: &newTitle}) {
@@ -95,11 +95,11 @@ func TestSetReviewers_Success_AppliesReviewRequests(t *testing.T) {
 		}
 		return gh.DetailResult{PR: pr}, nil
 	})
-	gitHub.setRequestReviewersFunc(func(_ context.Context, id string, userIDs, teamIDs []string, union bool) ([]model.Reviewer, model.RateLimit, error) {
+	gitHub.setRequestReviewersFunc(func(_ context.Context, id string, userIDs, teamIDs []string, union bool) ([]model.Reviewer, error) {
 		if id != "PR_1" || union {
 			t.Errorf("RequestReviewers called with id=%q union=%v, want id=PR_1 union=false", id, union)
 		}
-		return want, model.RateLimit{}, nil
+		return want, nil
 	})
 
 	if !s.SetReviewers([]string{"U_1"}, nil) {
@@ -157,8 +157,8 @@ func TestSetDraft_ToDraft_CallsConvertToDraft(t *testing.T) {
 		}
 		return gh.DetailResult{PR: pr}, nil
 	})
-	gitHub.setConvertToDraftFunc(func(context.Context, string) (bool, model.RateLimit, error) {
-		return true, model.RateLimit{}, nil
+	gitHub.setConvertToDraftFunc(func(context.Context, string) (bool, error) {
+		return true, nil
 	})
 
 	if !s.SetDraft(true) {
@@ -191,8 +191,8 @@ func TestSetDraft_ToReady_CallsMarkReadyForReview(t *testing.T) {
 		}
 		return gh.DetailResult{PR: pr}, nil
 	})
-	gitHub.setMarkReadyForReviewFunc(func(context.Context, string) (bool, model.RateLimit, error) {
-		return false, model.RateLimit{}, nil
+	gitHub.setMarkReadyForReviewFunc(func(context.Context, string) (bool, error) {
+		return false, nil
 	})
 
 	if !s.SetDraft(false) {
@@ -229,11 +229,11 @@ func TestMerge_Success_AppliesResultAndRefreshesList(t *testing.T) {
 	})
 	gitHub.setMergePullRequestFunc(func(
 		_ context.Context, id string, method model.MergeMethod, headline, body *string, expectedHeadOID string,
-	) (model.PullRequest, model.RateLimit, error) {
+	) (model.PullRequest, error) {
 		if id != "PR_1" || method != model.MergeMethodSquash || expectedHeadOID != "headsha1" {
 			t.Errorf("MergePullRequest called with id=%q method=%v expectedHeadOID=%q", id, method, expectedHeadOID)
 		}
-		return model.PullRequest{State: model.PRStateMerged, Merged: true, MergedAt: mergedAt}, model.RateLimit{}, nil
+		return model.PullRequest{State: model.PRStateMerged, Merged: true, MergedAt: mergedAt}, nil
 	})
 
 	if !s.Merge(model.MergeMethodSquash, nil, nil) {
@@ -287,8 +287,8 @@ func TestClose_Success(t *testing.T) {
 		}
 		return gh.DetailResult{PR: pr}, nil
 	})
-	gitHub.setClosePullRequestFunc(func(context.Context, string) (model.PRState, model.RateLimit, error) {
-		return model.PRStateClosed, model.RateLimit{}, nil
+	gitHub.setClosePullRequestFunc(func(context.Context, string) (model.PRState, error) {
+		return model.PRStateClosed, nil
 	})
 
 	if !s.Close() {
@@ -315,8 +315,8 @@ func TestReopen_Success(t *testing.T) {
 		}
 		return gh.DetailResult{PR: pr}, nil
 	})
-	gitHub.setReopenPullRequestFunc(func(context.Context, string) (model.PRState, model.RateLimit, error) {
-		return model.PRStateOpen, model.RateLimit{}, nil
+	gitHub.setReopenPullRequestFunc(func(context.Context, string) (model.PRState, error) {
+		return model.PRStateOpen, nil
 	})
 
 	if !s.Reopen() {

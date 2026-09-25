@@ -166,15 +166,15 @@ func (s *Store) sendModeFor(mode SendMode) (effective SendMode, pendingID string
 // is Store's immutable dependency set, safe to read from any goroutine.
 func (s *Store) ensurePendingReviewID(
 	ctx context.Context, prID, pendingID string,
-) (reviewID string, created *model.Review, rl model.RateLimit, err error) {
+) (reviewID string, created *model.Review, err error) {
 	if pendingID != "" {
-		return pendingID, nil, model.RateLimit{}, nil
+		return pendingID, nil, nil
 	}
-	rev, rl, err := s.deps.GitHub.CreatePendingReview(ctx, prID)
+	rev, err := s.deps.GitHub.CreatePendingReview(ctx, prID)
 	if err != nil {
-		return "", nil, model.RateLimit{}, err
+		return "", nil, err
 	}
-	return rev.ID, &rev, rl, nil
+	return rev.ID, &rev, nil
 }
 
 // draftThreadFromRange builds a gh.DraftThread for AddReviewNow from a
@@ -256,22 +256,21 @@ func (s *Store) CommentOnLines(path string, anchor diff.Range, body string, mode
 		if effectiveMode == SendSingle {
 			s.deps.Logger.Debug("comment_on_lines: single", "path", path)
 			thread := draftThreadFromRange(path, anchor, body)
-			_, rl, err := s.deps.GitHub.AddReviewNow(ctx, prID, []gh.DraftThread{thread}, "")
+			_, err := s.deps.GitHub.AddReviewNow(ctx, prID, []gh.DraftThread{thread}, "")
 			if err != nil {
 				return nil, err
 			}
 			return func() {
-				s.setRateLimit(rl)
 				s.emit(Event{Kind: EventPRChanged})
 			}, nil
 		}
 
 		s.deps.Logger.Debug("comment_on_lines: review", "path", path, "creates_pending", pendingID == "")
-		reviewID, created, rl1, err := s.ensurePendingReviewID(ctx, prID, pendingID)
+		reviewID, created, err := s.ensurePendingReviewID(ctx, prID, pendingID)
 		if err != nil {
 			return nil, err
 		}
-		thread, rl2, err := s.deps.GitHub.AddReviewThread(ctx, threadInputFromRange(reviewID, path, anchor, body))
+		thread, err := s.deps.GitHub.AddReviewThread(ctx, threadInputFromRange(reviewID, path, anchor, body))
 		if err != nil {
 			return nil, err
 		}
@@ -281,10 +280,8 @@ func (s *Store) CommentOnLines(path string, anchor diff.Range, body string, mode
 				s.emit(Event{Kind: EventNotice, Message: sendCoercedToReviewMessage})
 			}
 			if created != nil {
-				s.setRateLimit(rl1)
 				s.applyCreatedPendingReview(*created)
 			}
-			s.setRateLimit(rl2)
 			s.appendReviewThread(thread)
 			s.emit(Event{Kind: EventPRChanged})
 		}, nil
@@ -326,35 +323,32 @@ func (s *Store) CommentOnFile(path, body string, mode SendMode) bool {
 	run := func(ctx context.Context) (func(), error) {
 		if effectiveMode == SendSingle {
 			s.deps.Logger.Debug("comment_on_file: single", "path", path)
-			rev, rl0, err := s.deps.GitHub.CreatePendingReview(ctx, prID)
+			rev, err := s.deps.GitHub.CreatePendingReview(ctx, prID)
 			if err != nil {
 				return nil, err
 			}
-			thread, rl1, err := s.deps.GitHub.AddReviewThread(ctx, gh.ThreadInput{
+			thread, err := s.deps.GitHub.AddReviewThread(ctx, gh.ThreadInput{
 				PullRequestReviewID: rev.ID, Path: path, SubjectType: model.ThreadSubjectFile, Body: body,
 			})
 			if err != nil {
 				return nil, err
 			}
-			_, rl2, err := s.deps.GitHub.SubmitReview(ctx, rev.ID, model.ReviewEventComment, "")
+			_, err = s.deps.GitHub.SubmitReview(ctx, rev.ID, model.ReviewEventComment, "")
 			if err != nil {
 				return nil, err
 			}
 			return func() {
-				s.setRateLimit(rl0)
-				s.setRateLimit(rl1)
-				s.setRateLimit(rl2)
 				s.appendReviewThread(markThreadCommentsSubmitted(thread))
 				s.emit(Event{Kind: EventPRChanged})
 			}, nil
 		}
 
 		s.deps.Logger.Debug("comment_on_file: review", "path", path, "creates_pending", pendingID == "")
-		reviewID, created, rl1, err := s.ensurePendingReviewID(ctx, prID, pendingID)
+		reviewID, created, err := s.ensurePendingReviewID(ctx, prID, pendingID)
 		if err != nil {
 			return nil, err
 		}
-		thread, rl2, err := s.deps.GitHub.AddReviewThread(ctx, gh.ThreadInput{
+		thread, err := s.deps.GitHub.AddReviewThread(ctx, gh.ThreadInput{
 			PullRequestReviewID: reviewID, Path: path, SubjectType: model.ThreadSubjectFile, Body: body,
 		})
 		if err != nil {
@@ -366,10 +360,8 @@ func (s *Store) CommentOnFile(path, body string, mode SendMode) bool {
 				s.emit(Event{Kind: EventNotice, Message: sendCoercedToReviewMessage})
 			}
 			if created != nil {
-				s.setRateLimit(rl1)
 				s.applyCreatedPendingReview(*created)
 			}
-			s.setRateLimit(rl2)
 			s.appendReviewThread(thread)
 			s.emit(Event{Kind: EventPRChanged})
 		}, nil
@@ -403,23 +395,22 @@ func (s *Store) ReplyToThread(threadID, body string, mode SendMode) bool {
 	run := func(ctx context.Context) (func(), error) {
 		if effectiveMode == SendSingle {
 			s.deps.Logger.Debug("reply_to_thread: single", "thread", threadID)
-			comment, rl, err := s.deps.GitHub.AddThreadReply(ctx, threadID, body, "")
+			comment, err := s.deps.GitHub.AddThreadReply(ctx, threadID, body, "")
 			if err != nil {
 				return nil, err
 			}
 			return func() {
-				s.setRateLimit(rl)
 				s.appendThreadReply(threadID, comment)
 				s.emit(Event{Kind: EventPRChanged})
 			}, nil
 		}
 
 		s.deps.Logger.Debug("reply_to_thread: review", "thread", threadID, "creates_pending", pendingID == "")
-		reviewID, created, rl1, err := s.ensurePendingReviewID(ctx, prID, pendingID)
+		reviewID, created, err := s.ensurePendingReviewID(ctx, prID, pendingID)
 		if err != nil {
 			return nil, err
 		}
-		comment, rl2, err := s.deps.GitHub.AddThreadReply(ctx, threadID, body, reviewID)
+		comment, err := s.deps.GitHub.AddThreadReply(ctx, threadID, body, reviewID)
 		if err != nil {
 			return nil, err
 		}
@@ -429,10 +420,8 @@ func (s *Store) ReplyToThread(threadID, body string, mode SendMode) bool {
 				s.emit(Event{Kind: EventNotice, Message: sendCoercedToReviewMessage})
 			}
 			if created != nil {
-				s.setRateLimit(rl1)
 				s.applyCreatedPendingReview(*created)
 			}
-			s.setRateLimit(rl2)
 			s.appendThreadReply(threadID, comment)
 			s.emit(Event{Kind: EventPRChanged})
 		}, nil
@@ -448,12 +437,11 @@ func (s *Store) EditReviewComment(id, body string) bool {
 		return false
 	}
 	s.enqueueMutation("edit_review_comment", func(ctx context.Context) (func(), error) {
-		comment, rl, err := s.deps.GitHub.UpdateReviewComment(ctx, id, body)
+		comment, err := s.deps.GitHub.UpdateReviewComment(ctx, id, body)
 		if err != nil {
 			return nil, err
 		}
 		return func() {
-			s.setRateLimit(rl)
 			s.replaceReviewComment(comment)
 			s.emit(Event{Kind: EventPRChanged})
 		}, nil
@@ -472,12 +460,10 @@ func (s *Store) DeleteReviewComment(id string) bool {
 		return false
 	}
 	s.enqueueMutation("delete_review_comment", func(ctx context.Context) (func(), error) {
-		rl, err := s.deps.GitHub.DeleteReviewComment(ctx, id)
-		if err != nil {
+		if err := s.deps.GitHub.DeleteReviewComment(ctx, id); err != nil {
 			return nil, err
 		}
 		return func() {
-			s.setRateLimit(rl)
 			s.removeReviewComment(id)
 			s.emit(Event{Kind: EventPRChanged})
 		}, nil
@@ -545,18 +531,16 @@ func (s *Store) SetThreadResolved(threadID string, resolved bool) bool {
 	}
 	s.enqueueMutation(name, func(ctx context.Context) (func(), error) {
 		var thread model.ReviewThread
-		var rl model.RateLimit
 		var err error
 		if resolved {
-			thread, rl, err = s.deps.GitHub.ResolveThread(ctx, threadID)
+			thread, err = s.deps.GitHub.ResolveThread(ctx, threadID)
 		} else {
-			thread, rl, err = s.deps.GitHub.UnresolveThread(ctx, threadID)
+			thread, err = s.deps.GitHub.UnresolveThread(ctx, threadID)
 		}
 		if err != nil {
 			return nil, err
 		}
 		return func() {
-			s.setRateLimit(rl)
 			s.applyThreadResolution(thread)
 			s.emit(Event{Kind: EventPRChanged})
 		}, nil
@@ -593,12 +577,10 @@ func (s *Store) DiscardPendingReview() bool {
 	}
 
 	run := func(ctx context.Context) (func(), error) {
-		rl, err := s.deps.GitHub.DeletePendingReview(ctx, pendingID)
-		if err != nil {
+		if err := s.deps.GitHub.DeletePendingReview(ctx, pendingID); err != nil {
 			return nil, err
 		}
 		return func() {
-			s.setRateLimit(rl)
 			s.applyDiscardPendingReview()
 			s.emit(Event{Kind: EventPRChanged})
 		}, nil
@@ -633,20 +615,18 @@ func (s *Store) SubmitReview(event model.ReviewEvent, body string) bool {
 
 	run := func(ctx context.Context) (func(), error) {
 		var review model.Review
-		var rl model.RateLimit
 		var err error
 		if pendingID != "" {
 			s.deps.Logger.Debug("submit_review: pending", "review_id", pendingID)
-			review, rl, err = s.deps.GitHub.SubmitReview(ctx, pendingID, event, body)
+			review, err = s.deps.GitHub.SubmitReview(ctx, pendingID, event, body)
 		} else {
 			s.deps.Logger.Debug("submit_review: no pending review")
-			review, rl, err = s.deps.GitHub.AddReviewNowWithEvent(ctx, prID, event, body)
+			review, err = s.deps.GitHub.AddReviewNowWithEvent(ctx, prID, event, body)
 		}
 		if err != nil {
 			return nil, err
 		}
 		return func() {
-			s.setRateLimit(rl)
 			s.applySubmitReview(review)
 			s.emit(Event{Kind: EventPRChanged})
 		}, nil

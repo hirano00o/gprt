@@ -92,8 +92,8 @@ func TestAddComment_Success_OptimisticApplyThenRefetch(t *testing.T) {
 	s.OpenPR(ref)
 	runUntilIdle(t, disp)
 
-	gitHub.setAddCommentFunc(func(_ context.Context, subjectID, body string) (model.IssueComment, model.RateLimit, error) {
-		return model.IssueComment{ID: "IC_1", Body: body, Author: model.User{Login: "octocat"}}, model.RateLimit{Known: true, Remaining: 100}, nil
+	gitHub.setAddCommentFunc(func(_ context.Context, subjectID, body string) (model.IssueComment, error) {
+		return model.IssueComment{ID: "IC_1", Body: body, Author: model.User{Login: "octocat"}}, nil
 	})
 
 	s.AddComment("hello")
@@ -166,8 +166,8 @@ func TestEditComment_Success_ReplacesInPlace(t *testing.T) {
 	s.OpenPR(ref)
 	runUntilIdle(t, disp)
 
-	gitHub.setUpdateCommentFunc(func(_ context.Context, id, body string) (model.IssueComment, model.RateLimit, error) {
-		return model.IssueComment{ID: id, Body: body}, model.RateLimit{}, nil
+	gitHub.setUpdateCommentFunc(func(_ context.Context, id, body string) (model.IssueComment, error) {
+		return model.IssueComment{ID: id, Body: body}, nil
 	})
 
 	s.EditComment("IC_1", "edited")
@@ -192,11 +192,7 @@ func TestDeleteComment_Success_RemovesFromTimeline(t *testing.T) {
 
 	ref := commentTestRef(1)
 	// The post-mutation refetch (detailFunc's second call) no longer
-	// includes the comment, simulating GitHub's own post-delete state, and
-	// reports the same rate limit as the delete mutation itself so the
-	// RateLimit() assertion below is not sensitive to which of the two
-	// dispatches (the delete's own apply, or the refetch that follows it)
-	// happens to run last.
+	// includes the comment, simulating GitHub's own post-delete state.
 	gitHub.setDetailFunc(func(_ context.Context, r model.PRRef, _ string) (gh.DetailResult, error) {
 		pr := model.PullRequest{ID: "PR_node_1", Ref: r}
 		if gitHub.detailCallCount() == 1 {
@@ -205,13 +201,13 @@ func TestDeleteComment_Success_RemovesFromTimeline(t *testing.T) {
 				IssueComment: &model.IssueComment{ID: "IC_1", Body: "bye"},
 			}}
 		}
-		return gh.DetailResult{PR: pr, RateLimit: model.RateLimit{Known: true, Remaining: 4995}}, nil
+		return gh.DetailResult{PR: pr}, nil
 	})
 	s.OpenPR(ref)
 	runUntilIdle(t, disp)
 
-	gitHub.setDeleteCommentFunc(func(context.Context, string) (model.RateLimit, error) {
-		return model.RateLimit{Known: true, Remaining: 4995}, nil
+	gitHub.setDeleteCommentFunc(func(context.Context, string) error {
+		return nil
 	})
 
 	s.DeleteComment("IC_1")
@@ -220,9 +216,6 @@ func TestDeleteComment_Success_RemovesFromTimeline(t *testing.T) {
 	calls := gitHub.deleteCommentCallsSnapshot()
 	if len(calls) != 1 || calls[0].id != "IC_1" {
 		t.Fatalf("DeleteIssueComment calls = %+v, want one call with id=IC_1", calls)
-	}
-	if rl := s.RateLimit(); !rl.Known || rl.Remaining != 4995 {
-		t.Errorf("RateLimit() = %+v after DeleteComment, want Remaining=4995, Known=true", rl)
 	}
 
 	pr := s.CurrentPR()
@@ -254,13 +247,13 @@ func TestMutationQueue_FIFOSingleFlight(t *testing.T) {
 	// scheduling, since starting it is asynchronous by construction (see
 	// startNextMutation).
 	started := make(chan struct{}, 1)
-	gitHub.setAddCommentFunc(func(ctx context.Context, _, body string) (model.IssueComment, model.RateLimit, error) {
+	gitHub.setAddCommentFunc(func(ctx context.Context, _, body string) (model.IssueComment, error) {
 		if body == "first" {
 			started <- struct{}{}
 			<-block1
 		}
 		order = append(order, body)
-		return model.IssueComment{ID: "IC_" + body, Body: body}, model.RateLimit{}, nil
+		return model.IssueComment{ID: "IC_" + body, Body: body}, nil
 	})
 
 	s.AddComment("first")
@@ -302,8 +295,8 @@ func TestMutation_Error_KeepsStateEmitsEventError(t *testing.T) {
 	openPRWithID(t, s, gitHub, disp, ref, "PR_node_1")
 
 	wantErr := &gh.Error{Kind: gh.KindValidation, Message: "body too long"}
-	gitHub.setAddCommentFunc(func(context.Context, string, string) (model.IssueComment, model.RateLimit, error) {
-		return model.IssueComment{}, model.RateLimit{}, wantErr
+	gitHub.setAddCommentFunc(func(context.Context, string, string) (model.IssueComment, error) {
+		return model.IssueComment{}, wantErr
 	})
 
 	s.AddComment("x")
@@ -324,8 +317,8 @@ func TestMutation_Error_KeepsStateEmitsEventError(t *testing.T) {
 	}
 
 	// A subsequent successful mutation clears the standing mutation error.
-	gitHub.setAddCommentFunc(func(_ context.Context, _, body string) (model.IssueComment, model.RateLimit, error) {
-		return model.IssueComment{ID: "IC_ok", Body: body}, model.RateLimit{}, nil
+	gitHub.setAddCommentFunc(func(_ context.Context, _, body string) (model.IssueComment, error) {
+		return model.IssueComment{ID: "IC_ok", Body: body}, nil
 	})
 	s.AddComment("y")
 	runUntilIdle(t, disp)
@@ -354,8 +347,8 @@ func TestMutation_Error_TriggersRefetch(t *testing.T) {
 	openPRWithID(t, s, gitHub, disp, ref, "PR_node_1")
 	before := gitHub.detailCallCount()
 
-	gitHub.setAddCommentFunc(func(context.Context, string, string) (model.IssueComment, model.RateLimit, error) {
-		return model.IssueComment{}, model.RateLimit{}, errors.New("boom: network failure")
+	gitHub.setAddCommentFunc(func(context.Context, string, string) (model.IssueComment, error) {
+		return model.IssueComment{}, errors.New("boom: network failure")
 	})
 
 	s.AddComment("x")
@@ -389,13 +382,13 @@ func TestMutation_GenerationGuard_SwitchPRSkipsApplyButStillInvalidates(t *testi
 	runUntilIdle(t, disp)
 
 	block := make(chan struct{})
-	gitHub.setAddCommentFunc(func(ctx context.Context, _, _ string) (model.IssueComment, model.RateLimit, error) {
+	gitHub.setAddCommentFunc(func(ctx context.Context, _, _ string) (model.IssueComment, error) {
 		select {
 		case <-block:
 		case <-ctx.Done():
-			return model.IssueComment{}, model.RateLimit{}, ctx.Err()
+			return model.IssueComment{}, ctx.Err()
 		}
-		return model.IssueComment{ID: "IC_a"}, model.RateLimit{}, nil
+		return model.IssueComment{ID: "IC_a"}, nil
 	})
 
 	s.AddComment("for-a")
@@ -431,13 +424,13 @@ func TestMutation_Stop_CancelsSilently(t *testing.T) {
 	openPRWithID(t, s, gitHub, disp, ref, "PR_node_1")
 
 	block := make(chan struct{})
-	gitHub.setAddCommentFunc(func(ctx context.Context, _, _ string) (model.IssueComment, model.RateLimit, error) {
+	gitHub.setAddCommentFunc(func(ctx context.Context, _, _ string) (model.IssueComment, error) {
 		select {
 		case <-block:
 		case <-ctx.Done():
-			return model.IssueComment{}, model.RateLimit{}, ctx.Err()
+			return model.IssueComment{}, ctx.Err()
 		}
-		return model.IssueComment{ID: "IC_1"}, model.RateLimit{}, nil
+		return model.IssueComment{ID: "IC_1"}, nil
 	})
 
 	s.AddComment("hi")
@@ -509,39 +502,6 @@ func TestAddComment_DetailNotLoaded_EmitsNotLoadedError(t *testing.T) {
 	}
 	if !errors.Is(got, errPullRequestNotLoaded) {
 		t.Fatalf("EventError = %v, want errPullRequestNotLoaded", got)
-	}
-}
-
-func TestAddComment_UnknownRateLimitDoesNotOverwriteKnownValue(t *testing.T) {
-	cfg := config.Default()
-	gitHub := newFakeGitHub()
-	disp := newFakeDispatcher()
-	s := newTestStore(t, cfg, gitHub, disp)
-
-	// Only the first detail fetch reports a known rate limit; the
-	// post-mutation refetch does not, so whatever AddComment leaves behind
-	// is what RateLimit() returns at the end.
-	gitHub.setDetailFunc(func(_ context.Context, r model.PRRef, _ string) (gh.DetailResult, error) {
-		res := gh.DetailResult{PR: model.PullRequest{ID: "PR_node_1", Ref: r}}
-		if gitHub.detailCallCount() == 1 {
-			res.RateLimit = model.RateLimit{Known: true, Remaining: 4200}
-		}
-		return res, nil
-	})
-	s.OpenPR(commentTestRef(1))
-	runUntilIdle(t, disp)
-	if rl := s.RateLimit(); !rl.Known || rl.Remaining != 4200 {
-		t.Fatalf("precondition: RateLimit() = %+v, want known 4200", rl)
-	}
-
-	gitHub.setAddCommentFunc(func(_ context.Context, _, body string) (model.IssueComment, model.RateLimit, error) {
-		return model.IssueComment{ID: "IC_1", Body: body}, model.RateLimit{}, nil // unknown (GHES)
-	})
-	s.AddComment("hello")
-	runUntilIdle(t, disp)
-
-	if rl := s.RateLimit(); !rl.Known || rl.Remaining != 4200 {
-		t.Fatalf("RateLimit() = %+v after a mutation with an unknown rate limit, want the standing known 4200", rl)
 	}
 }
 

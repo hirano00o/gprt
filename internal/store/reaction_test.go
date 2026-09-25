@@ -46,8 +46,8 @@ func TestToggleReaction_OnPullRequest_NotYetReacted_CallsAddReaction(t *testing.
 	openPRWithDetail(t, s, gitHub, disp, ref, model.PullRequest{ID: "PR_1"})
 	setPostMutationDetail(gitHub, ref, model.PullRequest{ID: "PR_1"}, model.PullRequest{ID: "PR_1", ReactionGroups: wantGroups})
 
-	gitHub.setAddReactionFunc(func(_ context.Context, subjectID string, content model.ReactionContent) ([]model.ReactionGroup, model.RateLimit, error) {
-		return wantGroups, model.RateLimit{}, nil
+	gitHub.setAddReactionFunc(func(_ context.Context, subjectID string, content model.ReactionContent) ([]model.ReactionGroup, error) {
+		return wantGroups, nil
 	})
 
 	if got := s.ToggleReaction("PR_1", model.ReactionThumbsUp); !got {
@@ -84,8 +84,8 @@ func TestToggleReaction_OnPullRequest_AlreadyReacted_CallsRemoveReaction(t *test
 	openPRWithDetail(t, s, gitHub, disp, ref, before)
 	setPostMutationDetail(gitHub, ref, before, model.PullRequest{ID: "PR_1", ReactionGroups: wantGroups})
 
-	gitHub.setRemoveReactionFunc(func(_ context.Context, subjectID string, content model.ReactionContent) ([]model.ReactionGroup, model.RateLimit, error) {
-		return wantGroups, model.RateLimit{}, nil
+	gitHub.setRemoveReactionFunc(func(_ context.Context, subjectID string, content model.ReactionContent) ([]model.ReactionGroup, error) {
+		return wantGroups, nil
 	})
 
 	if got := s.ToggleReaction("PR_1", model.ReactionThumbsUp); !got {
@@ -135,8 +135,8 @@ func TestToggleReaction_IssueCommentInTimeline(t *testing.T) {
 		},
 	})
 
-	gitHub.setAddReactionFunc(func(_ context.Context, _ string, content model.ReactionContent) ([]model.ReactionGroup, model.RateLimit, error) {
-		return wantGroups, model.RateLimit{}, nil
+	gitHub.setAddReactionFunc(func(_ context.Context, _ string, content model.ReactionContent) ([]model.ReactionGroup, error) {
+		return wantGroups, nil
 	})
 
 	if got := s.ToggleReaction("IC_1", model.ReactionHeart); !got {
@@ -180,8 +180,8 @@ func TestToggleReaction_ReviewInTimelineAndLatestReviews(t *testing.T) {
 		LatestReviews: []model.Review{updatedReview},
 	})
 
-	gitHub.setAddReactionFunc(func(_ context.Context, _ string, content model.ReactionContent) ([]model.ReactionGroup, model.RateLimit, error) {
-		return wantGroups, model.RateLimit{}, nil
+	gitHub.setAddReactionFunc(func(_ context.Context, _ string, content model.ReactionContent) ([]model.ReactionGroup, error) {
+		return wantGroups, nil
 	})
 
 	if got := s.ToggleReaction("PRR_1", model.ReactionLaugh); !got {
@@ -223,8 +223,8 @@ func TestToggleReaction_ReviewCommentInThread(t *testing.T) {
 		},
 	})
 
-	gitHub.setAddReactionFunc(func(_ context.Context, _ string, content model.ReactionContent) ([]model.ReactionGroup, model.RateLimit, error) {
-		return wantGroups, model.RateLimit{}, nil
+	gitHub.setAddReactionFunc(func(_ context.Context, _ string, content model.ReactionContent) ([]model.ReactionGroup, error) {
+		return wantGroups, nil
 	})
 
 	if got := s.ToggleReaction("RC_2", model.ReactionRocket); !got {
@@ -284,12 +284,12 @@ func TestQueuedToggleReaction_SecondPrepareSeesFirstsAppliedState(t *testing.T) 
 	setPostMutationDetail(gitHub, ref, model.PullRequest{ID: "PR_1"}, model.PullRequest{ID: "PR_1"})
 
 	release := make(chan struct{})
-	gitHub.setAddReactionFunc(func(_ context.Context, _ string, content model.ReactionContent) ([]model.ReactionGroup, model.RateLimit, error) {
+	gitHub.setAddReactionFunc(func(_ context.Context, _ string, content model.ReactionContent) ([]model.ReactionGroup, error) {
 		<-release // hold the first mutation in flight until both are enqueued
-		return []model.ReactionGroup{{Content: content, Count: 1, ViewerHasReacted: true}}, model.RateLimit{}, nil
+		return []model.ReactionGroup{{Content: content, Count: 1, ViewerHasReacted: true}}, nil
 	})
-	gitHub.setRemoveReactionFunc(func(_ context.Context, _ string, content model.ReactionContent) ([]model.ReactionGroup, model.RateLimit, error) {
-		return []model.ReactionGroup{{Content: content, Count: 0, ViewerHasReacted: false}}, model.RateLimit{}, nil
+	gitHub.setRemoveReactionFunc(func(_ context.Context, _ string, content model.ReactionContent) ([]model.ReactionGroup, error) {
+		return []model.ReactionGroup{{Content: content, Count: 0, ViewerHasReacted: false}}, nil
 	})
 
 	// Both calls decide from the pull request's pre-toggle state (not yet
@@ -331,13 +331,13 @@ func TestToggleReaction_TargetChangedBeforeStart_NoGitHubCallEmitsError(t *testi
 	runUntilIdle(t, disp)
 
 	block := make(chan struct{})
-	gitHub.setAddCommentFunc(func(ctx context.Context, _, _ string) (model.IssueComment, model.RateLimit, error) {
+	gitHub.setAddCommentFunc(func(ctx context.Context, _, _ string) (model.IssueComment, error) {
 		select {
 		case <-block:
 		case <-ctx.Done():
-			return model.IssueComment{}, model.RateLimit{}, ctx.Err()
+			return model.IssueComment{}, ctx.Err()
 		}
-		return model.IssueComment{ID: "IC_a"}, model.RateLimit{}, nil
+		return model.IssueComment{ID: "IC_a"}, nil
 	})
 
 	// An unrelated AddComment mutation occupies the queue's single flight
@@ -373,8 +373,8 @@ func TestToggleReaction_Error_KeepsStateEmitsEventErrorAndRefetches(t *testing.T
 	before := gitHub.detailCallCount()
 
 	wantErr := errors.New("boom")
-	gitHub.setAddReactionFunc(func(context.Context, string, model.ReactionContent) ([]model.ReactionGroup, model.RateLimit, error) {
-		return nil, model.RateLimit{}, wantErr
+	gitHub.setAddReactionFunc(func(context.Context, string, model.ReactionContent) ([]model.ReactionGroup, error) {
+		return nil, wantErr
 	})
 	events := collectEvents(s)
 

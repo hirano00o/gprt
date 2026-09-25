@@ -62,12 +62,11 @@ func (s *Store) UpdatePullRequestMeta(in gh.UpdatePullRequestInput) bool {
 	id := s.currentPR.ID
 
 	s.enqueueMutationWithListRefresh("update_pull_request", func(ctx context.Context) (func(), error) {
-		pr, rl, err := s.deps.GitHub.UpdatePullRequest(ctx, id, in)
+		pr, err := s.deps.GitHub.UpdatePullRequest(ctx, id, in)
 		if err != nil {
 			return nil, err
 		}
 		return func() {
-			s.setRateLimit(rl)
 			s.applyUpdatedPullRequestMeta(pr)
 			s.emit(Event{Kind: EventPRChanged})
 		}, nil
@@ -118,12 +117,11 @@ func (s *Store) SetReviewers(userIDs, teamIDs []string) bool {
 	teamIDs = nonNilIDs(teamIDs)
 
 	s.enqueueMutationWithListRefresh("set_reviewers", func(ctx context.Context) (func(), error) {
-		reviewers, rl, err := s.deps.GitHub.RequestReviewers(ctx, id, userIDs, teamIDs, false)
+		reviewers, err := s.deps.GitHub.RequestReviewers(ctx, id, userIDs, teamIDs, false)
 		if err != nil {
 			return nil, err
 		}
 		return func() {
-			s.setRateLimit(rl)
 			s.applyReviewRequests(reviewers)
 			s.emit(Event{Kind: EventPRChanged})
 		}, nil
@@ -161,18 +159,16 @@ func (s *Store) SetDraft(draft bool) bool {
 
 	s.enqueueMutationWithListRefresh("set_draft", func(ctx context.Context) (func(), error) {
 		var isDraft bool
-		var rl model.RateLimit
 		var err error
 		if draft {
-			isDraft, rl, err = s.deps.GitHub.ConvertToDraft(ctx, id)
+			isDraft, err = s.deps.GitHub.ConvertToDraft(ctx, id)
 		} else {
-			isDraft, rl, err = s.deps.GitHub.MarkReadyForReview(ctx, id)
+			isDraft, err = s.deps.GitHub.MarkReadyForReview(ctx, id)
 		}
 		if err != nil {
 			return nil, err
 		}
 		return func() {
-			s.setRateLimit(rl)
 			s.applyIsDraft(isDraft)
 			s.emit(Event{Kind: EventPRChanged})
 		}, nil
@@ -232,12 +228,11 @@ func (s *Store) Merge(method model.MergeMethod, headline, body *string) bool {
 		return nil
 	}
 	run := func(ctx context.Context) (func(), error) {
-		pr, rl, err := s.deps.GitHub.MergePullRequest(ctx, id, method, headline, body, expectedHeadOID)
+		pr, err := s.deps.GitHub.MergePullRequest(ctx, id, method, headline, body, expectedHeadOID)
 		if err != nil {
 			return nil, err
 		}
 		return func() {
-			s.setRateLimit(rl)
 			s.applyMergeResult(pr)
 			s.emit(Event{Kind: EventPRChanged})
 		}, nil
@@ -275,12 +270,11 @@ func (s *Store) Close() bool {
 	id := s.currentPR.ID
 
 	s.enqueueMutationWithListRefresh("close", func(ctx context.Context) (func(), error) {
-		state, rl, err := s.deps.GitHub.ClosePullRequest(ctx, id)
+		state, err := s.deps.GitHub.ClosePullRequest(ctx, id)
 		if err != nil {
 			return nil, err
 		}
 		return func() {
-			s.setRateLimit(rl)
 			s.applyPRState(state)
 			s.emit(Event{Kind: EventPRChanged})
 		}, nil
@@ -297,12 +291,11 @@ func (s *Store) Reopen() bool {
 	id := s.currentPR.ID
 
 	s.enqueueMutationWithListRefresh("reopen", func(ctx context.Context) (func(), error) {
-		state, rl, err := s.deps.GitHub.ReopenPullRequest(ctx, id)
+		state, err := s.deps.GitHub.ReopenPullRequest(ctx, id)
 		if err != nil {
 			return nil, err
 		}
 		return func() {
-			s.setRateLimit(rl)
 			s.applyPRState(state)
 			s.emit(Event{Kind: EventPRChanged})
 		}, nil
