@@ -96,7 +96,7 @@ keys:                     # remap any action (vim notation); see docs/KEYBINDING
 
 | キー | 動作 |
 |------|------|
-| `j` / `k`, `gg` / `G`, `Ctrl-d` / `Ctrl-u` | 下 / 上、先頭 / 末尾、半ページ移動 |
+| `j` / `k`, `gg` / `G`, `Ctrl-d` / `Ctrl-u`, `PageDown` / `PageUp`(`Ctrl-f` / `Ctrl-b`) | 下 / 上、先頭 / 末尾、半ページ移動、1 ページ移動 |
 | `gt` / `gT`(`Ctrl-l` / `Ctrl-h` も可) | 次 / 前のタブ |
 | `Ctrl-w h` / `Ctrl-w l` | 前 / 次のペインにフォーカス |
 | `Ctrl-w o` | PR 一覧の表示 / 非表示 |

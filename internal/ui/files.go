@@ -266,11 +266,21 @@ func (p treeMovablePane) nodeCount() int {
 	return n
 }
 
-// MoveHalfPage sends the native PgUp/PgDn keypresses: TreeView's own
-// InputHandler moves by its full visible height for these (not literally
-// half), which this adapter keeps rather than reimplementing ListView's own
-// half-page arithmetic against the tree's unrelated flattened node list.
+// MoveHalfPage and MovePage both send the native PgUp/PgDn keypresses:
+// TreeView's own InputHandler moves by its full visible height for these
+// (not literally half), which this adapter keeps rather than reimplementing
+// ListView's own half-page/page arithmetic against the tree's unrelated
+// flattened node list — so both methods are identical here even though they
+// differ (half vs. full page) on every other movable pane.
 func (p treeMovablePane) MoveHalfPage(dir int) {
+	if dir < 0 {
+		p.feed(tcell.KeyPgUp, 0)
+		return
+	}
+	p.feed(tcell.KeyPgDn, 0)
+}
+
+func (p treeMovablePane) MovePage(dir int) {
 	if dir < 0 {
 		p.feed(tcell.KeyPgUp, 0)
 		return

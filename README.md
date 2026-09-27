@@ -96,7 +96,7 @@ All keys below except the editor's own can be remapped. The full reference, incl
 
 | Key | Action |
 |-----|--------|
-| `j` / `k`, `gg` / `G`, `Ctrl-d` / `Ctrl-u` | Move down / up, top / bottom, half page |
+| `j` / `k`, `gg` / `G`, `Ctrl-d` / `Ctrl-u`, `PageDown` / `PageUp` (`Ctrl-f` / `Ctrl-b`) | Move down / up, top / bottom, half page, full page |
 | `gt` / `gT` (also `Ctrl-l` / `Ctrl-h`) | Next / previous tab |
 | `Ctrl-w h` / `Ctrl-w l` | Focus the previous / next pane |
 | `Ctrl-w o` | Show or hide the PR list |

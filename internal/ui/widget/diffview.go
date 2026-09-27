@@ -327,11 +327,24 @@ func (dv *DiffView) MoveBottom() { dv.setCursor(len(dv.selectable) - 1) }
 // span roughly half of the view's visible height in display lines,
 // matching widget.ListView.MoveHalfPage's own semantics.
 func (dv *DiffView) MoveHalfPage(dir int) {
+	_, _, _, height := dv.GetInnerRect()
+	dv.moveByDisplayLines(dir, height/2)
+}
+
+// MovePage moves the cursor by a full page instead of half; otherwise
+// identical to MoveHalfPage.
+func (dv *DiffView) MovePage(dir int) {
+	_, _, _, height := dv.GetInnerRect()
+	dv.moveByDisplayLines(dir, height)
+}
+
+// moveByDisplayLines is MoveHalfPage/MovePage's shared walk: it moves the
+// cursor by however many selectable rows together span roughly target
+// display lines.
+func (dv *DiffView) moveByDisplayLines(dir, target int) {
 	if len(dv.selectable) == 0 {
 		return
 	}
-	_, _, _, height := dv.GetInnerRect()
-	target := height / 2
 	if target < 1 {
 		target = 1
 	}

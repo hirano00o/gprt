@@ -140,11 +140,25 @@ func (lv *ListView) MoveBottom() {
 // half page). dir < 0 moves up, dir > 0 moves down; always moves at least
 // one selectable row when one exists in that direction.
 func (lv *ListView) MoveHalfPage(dir int) {
+	_, _, _, height := lv.GetInnerRect()
+	lv.moveByDisplayLines(dir, height/2)
+}
+
+// MovePage moves the cursor by a full page instead of half; otherwise
+// identical to MoveHalfPage.
+func (lv *ListView) MovePage(dir int) {
+	_, _, _, height := lv.GetInnerRect()
+	lv.moveByDisplayLines(dir, height)
+}
+
+// moveByDisplayLines is MoveHalfPage/MovePage's shared walk: it moves the
+// cursor by however many selectable rows together span roughly target
+// display lines. dir < 0 moves up, dir > 0 moves down; always moves at
+// least one selectable row when one exists in that direction.
+func (lv *ListView) moveByDisplayLines(dir, target int) {
 	if len(lv.selectable) == 0 {
 		return
 	}
-	_, _, _, height := lv.GetInnerRect()
-	target := height / 2
 	if target < 1 {
 		target = 1
 	}

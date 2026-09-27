@@ -18,6 +18,8 @@ const (
 	ActionListBottom           Action = "list.bottom"
 	ActionListHalfDown         Action = "list.half_down"
 	ActionListHalfUp           Action = "list.half_up"
+	ActionListPageDown         Action = "list.page_down"
+	ActionListPageUp           Action = "list.page_up"
 	ActionListFilter           Action = "list.filter"
 	ActionListOpen             Action = "list.open"
 	ActionListNewPR            Action = "list.new_pr"
@@ -61,7 +63,8 @@ const (
 func AllActions() []Action {
 	return []Action{
 		ActionListDown, ActionListUp, ActionListTop, ActionListBottom,
-		ActionListHalfDown, ActionListHalfUp, ActionListFilter, ActionListOpen, ActionListNewPR,
+		ActionListHalfDown, ActionListHalfUp, ActionListPageDown, ActionListPageUp,
+		ActionListFilter, ActionListOpen, ActionListNewPR,
 		ActionGlobalFocusLeft, ActionGlobalFocusRight, ActionGlobalFocusDown, ActionGlobalFocusUp,
 		ActionGlobalToggleList, ActionGlobalReload, ActionGlobalOpenBrowser,
 		ActionGlobalHelp, ActionGlobalQuit, ActionGlobalCommand,
