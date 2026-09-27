@@ -131,6 +131,7 @@ keys:                     # remap any action (vim notation); see docs/KEYBINDING
 | キー | 動作 |
 |------|------|
 | `Enter`, `l` | カーソル位置のファイルを開く(ツリー内) |
+| `Enter` | 折りたたまれた領域(`⋯ N lines hidden ⋯`)上で展開する |
 | `Ctrl-w t` | ファイルツリーの表示 / 非表示 |
 | `V` | 範囲コメント用に行を選択(`Esc` で取り消し) |
 | `c` | 行または選択範囲にコメント。スレッド上では返信 |

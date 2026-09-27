@@ -339,6 +339,22 @@ func (a *App) showFile(path string) {
 	a.refreshCurrentFile()
 }
 
+// expandGapAtCursor expands the collapsed region under the diff cursor
+// (Enter on a gap row - see widget.DiffView.CursorGap/store.Store.ExpandGap).
+// A silent no-op off a gap row, like an unbound key; a synchronous error
+// from the store (no file loaded, or the file has no head blob to expand
+// from) is toasted rather than raised, matching every other Files-tab
+// action that can fail for reasons the user did nothing wrong to cause.
+func (a *App) expandGapAtCursor() {
+	gapStart, ok := a.diffView.CursorGap()
+	if !ok {
+		return
+	}
+	if err := a.deps.Store.ExpandGap(a.currentFilePath, gapStart); err != nil {
+		a.showToast(err.Error(), theme.Warning)
+	}
+}
+
 // refreshCurrentFile re-renders the diff from the store's current data for
 // currentFilePath: called after a file is opened, after a files/highlight
 // event, and after the open pull request's threads change.
@@ -376,18 +392,20 @@ func (a *App) refreshCurrentFile() {
 
 	if entry, ok := a.deps.Store.FileByPath(a.currentFilePath); ok {
 		a.diffView.SetFile(widget.DiffFile{
-			Path:         entry.File.Path,
-			PreviousPath: entry.File.PreviousPath,
-			Status:       entry.File.Status,
-			Additions:    entry.File.Additions,
-			Deletions:    entry.File.Deletions,
-			HasPatch:     entry.File.HasPatch,
-			Hunks:        entry.Hunks,
-			Tokens:       entry.Tokens,
-			Threads:      threadsForPath(a.deps.Store.CurrentPR(), entry.File.Path),
-			Err:          entry.ParseErr,
-			DraftLines:   a.draftLinesForFile(entry.Hunks, entry.File.Path),
-			DraftMarker:  a.deps.Icons.DraftMarker,
+			Path:          entry.File.Path,
+			PreviousPath:  entry.File.PreviousPath,
+			Status:        entry.File.Status,
+			Additions:     entry.File.Additions,
+			Deletions:     entry.File.Deletions,
+			HasPatch:      entry.File.HasPatch,
+			Hunks:         entry.Hunks,
+			Tokens:        entry.Tokens,
+			Threads:       threadsForPath(a.deps.Store.CurrentPR(), entry.File.Path),
+			Err:           entry.ParseErr,
+			DraftLines:    a.draftLinesForFile(entry.Hunks, entry.File.Path),
+			DraftMarker:   a.deps.Icons.DraftMarker,
+			HeadLineCount: len(entry.HeadLines),
+			HeadKnown:     entry.HeadLines != nil,
 		})
 		return
 	}

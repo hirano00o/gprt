@@ -108,7 +108,7 @@ func TestDiffCOnALineOpensLineCommentComposer(t *testing.T) {
 	app, _, ref := openFilesTabWithReviewThreads(t)
 
 	// Hunk 2's own "+newCall()" line (RIGHT, 11): no thread anchored there.
-	act(app.app, func() { app.diffView.MoveBottom() })
+	act(app.app, func() { moveToLastDiffLine(app) })
 
 	sendRune(app.app, 'c')
 	waitFor(t, app.app, func() bool { return composerOpen(app) })
@@ -171,7 +171,7 @@ func TestDiffVMixedSideRangeRefusedWithToastAndKeepsSelection(t *testing.T) {
 	app, _, _ := openFilesTabWithReviewThreads(t)
 
 	act(app.app, func() {
-		app.diffView.MoveBottom()
+		moveToLastDiffLine(app)
 		app.diffView.MoveBy(-1) // hunk 2's "-oldCall()" line
 	})
 	sendRune(app.app, 'V')
@@ -230,7 +230,7 @@ func TestDiffROnAThreadRowOpensReplyComposer(t *testing.T) {
 // with a short toast".
 func TestDiffROnANonThreadRowToasts(t *testing.T) {
 	app, _, _ := openFilesTabWithReviewThreads(t)
-	act(app.app, func() { app.diffView.MoveBottom() })
+	act(app.app, func() { moveToLastDiffLine(app) })
 
 	sendRune(app.app, 'r')
 	waitFor(t, app.app, func() bool { return containsSubstring(app.statusBar.toast, "not on a comment thread") })
@@ -263,7 +263,7 @@ func TestDiffXTogglesResolvedBothWays(t *testing.T) {
 // "x".
 func TestDiffXOnANonThreadRowToasts(t *testing.T) {
 	app, fake, _ := openFilesTabWithReviewThreads(t)
-	act(app.app, func() { app.diffView.MoveBottom() })
+	act(app.app, func() { moveToLastDiffLine(app) })
 
 	sendRune(app.app, 'x')
 	waitFor(t, app.app, func() bool { return containsSubstring(app.statusBar.toast, "not on a comment thread") })
@@ -276,7 +276,7 @@ func TestDiffXOnANonThreadRowToasts(t *testing.T) {
 // for "e".
 func TestDiffEOnANonThreadRowToasts(t *testing.T) {
 	app, _, _ := openFilesTabWithReviewThreads(t)
-	act(app.app, func() { app.diffView.MoveBottom() })
+	act(app.app, func() { moveToLastDiffLine(app) })
 
 	sendRune(app.app, 'e')
 	waitFor(t, app.app, func() bool { return containsSubstring(app.statusBar.toast, "not on a comment thread") })
@@ -289,7 +289,7 @@ func TestDiffEOnANonThreadRowToasts(t *testing.T) {
 // for "d".
 func TestDiffDOnANonThreadRowToasts(t *testing.T) {
 	app, fake, _ := openFilesTabWithReviewThreads(t)
-	act(app.app, func() { app.diffView.MoveBottom() })
+	act(app.app, func() { moveToLastDiffLine(app) })
 
 	sendRune(app.app, 'd')
 	waitFor(t, app.app, func() bool { return containsSubstring(app.statusBar.toast, "not on a comment thread") })
@@ -368,7 +368,7 @@ func typeAndSend(app *App, text string) {
 // with SendSingle).
 func TestSendModeMenuAppearsWhenNoPendingReviewAndAddSingleSendsImmediately(t *testing.T) {
 	app, fake, _ := openFilesTabWithReviewThreads(t)
-	act(app.app, func() { app.diffView.MoveBottom() }) // "+newCall()", no thread
+	act(app.app, func() { moveToLastDiffLine(app) }) // "+newCall()", no thread
 
 	sendRune(app.app, 'c')
 	waitFor(t, app.app, func() bool { return composerOpen(app) })
@@ -401,7 +401,7 @@ func TestSendModeMenuAppearsWhenNoPendingReviewAndAddSingleSendsImmediately(t *t
 // CreatePendingReview then AddReviewThread.
 func TestSendModeMenuAddToReviewCreatesPendingReviewThenAddsThread(t *testing.T) {
 	app, fake, _ := openFilesTabWithReviewThreads(t)
-	act(app.app, func() { app.diffView.MoveBottom() })
+	act(app.app, func() { moveToLastDiffLine(app) })
 
 	sendRune(app.app, 'c')
 	waitFor(t, app.app, func() bool { return composerOpen(app) })
@@ -427,7 +427,7 @@ func TestSendModeMenuAddToReviewCreatesPendingReviewThenAddsThread(t *testing.T)
 // returns to the composer with text intact".
 func TestSendModeMenuEscCancelsAndKeepsComposerText(t *testing.T) {
 	app, fake, _ := openFilesTabWithReviewThreads(t)
-	act(app.app, func() { app.diffView.MoveBottom() })
+	act(app.app, func() { moveToLastDiffLine(app) })
 
 	sendRune(app.app, 'c')
 	waitFor(t, app.app, func() bool { return composerOpen(app) })
@@ -484,7 +484,7 @@ func TestPerformReviewSendRefusesWhenTargetPRIsNoLongerCurrent(t *testing.T) {
 // showing.
 func TestEventPRChangedClosesOpenSendModeMenu(t *testing.T) {
 	app, fake, ref1 := openFilesTabWithReviewThreads(t)
-	act(app.app, func() { app.diffView.MoveBottom() })
+	act(app.app, func() { moveToLastDiffLine(app) })
 
 	sendRune(app.app, 'c')
 	waitFor(t, app.app, func() bool { return composerOpen(app) })
@@ -516,7 +516,7 @@ func TestSendModeMenuSkippedWhenPendingReviewAlreadyExists(t *testing.T) {
 	act(app.app, func() { app.deps.Store.ReloadPR() })
 	waitFor(t, app.app, func() bool { return app.deps.Store.PendingReview() != nil })
 
-	act(app.app, func() { app.diffView.MoveBottom() })
+	act(app.app, func() { moveToLastDiffLine(app) })
 	sendRune(app.app, 'c')
 	waitFor(t, app.app, func() bool { return composerOpen(app) })
 	typeAndSend(app, "goes straight to the review")
@@ -559,7 +559,7 @@ func TestReplySendGoesThroughAddThreadReply(t *testing.T) {
 // the same synchronous EventNotice-then-EventMutationChanged sequence.
 func TestSendModeMenuCoercedSendShowsNoticeToastNotSuccessToast(t *testing.T) {
 	app, fake, ref := openFilesTabWithReviewThreads(t)
-	act(app.app, func() { app.diffView.MoveBottom() })
+	act(app.app, func() { moveToLastDiffLine(app) })
 
 	sendRune(app.app, 'c')
 	waitFor(t, app.app, func() bool { return composerOpen(app) })
@@ -824,7 +824,7 @@ func TestPendingListDeletingALineCommentDraftRefreshesTheGutterMarker(t *testing
 	sendKey(app.app, tcell.NewEventKey(tcell.KeyCtrlW, 0, tcell.ModCtrl))
 	sendRune(app.app, 'l')
 	waitFor(t, app.app, func() bool { return app.app.GetFocus() == app.diffView })
-	act(app.app, func() { app.diffView.MoveBottom() }) // hunk 2's "+newCall()" (RIGHT, 11)
+	act(app.app, func() { moveToLastDiffLine(app) }) // hunk 2's "+newCall()" (RIGHT, 11)
 	sendRune(app.app, 'c')
 	waitFor(t, app.app, func() bool { return composerOpen(app) })
 	sendRune(app.app, 'i')
@@ -889,7 +889,7 @@ func TestFailedLineCommentSendRestoresDraftGutterMarker(t *testing.T) {
 	sendKey(app.app, tcell.NewEventKey(tcell.KeyCtrlW, 0, tcell.ModCtrl))
 	sendRune(app.app, 'l')
 	waitFor(t, app.app, func() bool { return app.app.GetFocus() == app.diffView })
-	act(app.app, func() { app.diffView.MoveBottom() }) // "+newCall()" (RIGHT, 11), no thread
+	act(app.app, func() { moveToLastDiffLine(app) }) // "+newCall()" (RIGHT, 11), no thread
 
 	sendRune(app.app, 'c')
 	waitFor(t, app.app, func() bool { return composerOpen(app) })
@@ -1021,7 +1021,7 @@ func TestPendingListRebuildKeepsCursorOnTheSameEntryByIdentity(t *testing.T) {
 // (empty -> non-empty), not once per further keystroke.
 func TestComposerLineCommentTypingCoalescesDraftGutterRefresh(t *testing.T) {
 	app, _, _ := openFilesTabWithReviewThreads(t)
-	act(app.app, func() { app.diffView.MoveBottom() }) // "+newCall()", no thread
+	act(app.app, func() { moveToLastDiffLine(app) }) // "+newCall()", no thread
 
 	// Let every hunk-highlight job finish first: EventFileHighlighted
 	// itself calls refreshCurrentFile for the currently open file (see
@@ -1140,7 +1140,7 @@ func TestPendingListAltKeyDoesNotPanic(t *testing.T) {
 // TestPendingListAltKeyDoesNotPanic for the choice menu (routeChoiceKey).
 func TestChoiceMenuAltKeyDoesNotPanic(t *testing.T) {
 	app, _, _ := openFilesTabWithReviewThreads(t)
-	act(app.app, func() { app.diffView.MoveBottom() })
+	act(app.app, func() { moveToLastDiffLine(app) })
 	sendRune(app.app, 'c')
 	waitFor(t, app.app, func() bool { return composerOpen(app) })
 	typeAndSend(app, "trigger the menu")
@@ -1206,7 +1206,7 @@ func TestDraftGutterMarkerRendersOnceSavedAndAgainAfterDelete(t *testing.T) {
 	sendKey(app.app, tcell.NewEventKey(tcell.KeyCtrlW, 0, tcell.ModCtrl))
 	sendRune(app.app, 'l')
 	waitFor(t, app.app, func() bool { return app.app.GetFocus() == app.diffView })
-	act(app.app, func() { app.diffView.MoveBottom() }) // hunk 2's "+newCall()" (RIGHT, 11)
+	act(app.app, func() { moveToLastDiffLine(app) }) // hunk 2's "+newCall()" (RIGHT, 11)
 
 	sendRune(app.app, 'c')
 	waitFor(t, app.app, func() bool { return composerOpen(app) })

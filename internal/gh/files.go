@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -16,6 +17,14 @@ import (
 // filesPerPage is the page size requested from the REST "list pull request
 // files" endpoint, GitHub's maximum for that endpoint.
 const filesPerPage = 100
+
+// maxBlobBytes is the largest git blob FileContent will read: refused,
+// never truncated with a bare io.LimitReader, since truncating could cut
+// the final line in half and silently corrupt a gap's Context lines once
+// merged in. A var, not a const, so a test can shrink it to keep a
+// fixture's size-cap test fast rather than needing a real 10 MiB body
+// (mirrors internal/ui's own toastDuration pattern).
+var maxBlobBytes int64 = 10 << 20
 
 // FilesResult is one page of a pull request's changed files.
 type FilesResult struct {
@@ -133,6 +142,84 @@ func (c *Client) ChangedFiles(ctx context.Context, ref model.PRRef, page int, et
 		HasNext:   linkHasNext(resp.Header.Get("Link")),
 		RateLimit: rateLimit,
 	}, nil
+}
+
+// FileContentResult is one blob's full content, line by line.
+type FileContentResult struct {
+	Lines     []string
+	RateLimit model.RateLimit
+}
+
+// FileContent fetches the full content of the git blob identified by sha in
+// repo, via the REST "get a blob" endpoint. It requests the raw media type
+// (Accept: application/vnd.github.raw+json) so the response body is the
+// file's bytes directly, rather than the endpoint's default base64-encoded
+// JSON envelope: this avoids a decode step and a second full-size
+// allocation, and the same media type works unmodified against a GHES host.
+func (c *Client) FileContent(ctx context.Context, repo model.RepoRef, sha string) (FileContentResult, error) {
+	url := fmt.Sprintf("%s/repos/%s/%s/git/blobs/%s", c.restBase, repo.Owner, repo.Name, sha)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return FileContentResult{}, classify(err)
+	}
+	req.Header.Set("Accept", "application/vnd.github.raw+json")
+
+	resp, err := c.rest.Do(req)
+	if err != nil {
+		return FileContentResult{}, classify(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	rateLimit := rateLimitFromHeaders(resp.Header)
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return FileContentResult{}, classify(api.HandleHTTPError(resp))
+	}
+
+	// Refuse up front (before reading anything) when the server declared a
+	// body larger than maxBlobBytes: see maxBlobBytes's doc comment for why
+	// this is not just truncated with an io.LimitReader instead.
+	if resp.ContentLength > maxBlobBytes {
+		return FileContentResult{}, &Error{
+			Kind:    KindUnknown,
+			Message: fmt.Sprintf("file too large to expand (%d bytes)", resp.ContentLength),
+		}
+	}
+
+	// resp.ContentLength is -1 for a chunked or otherwise length-less
+	// response, which the check above cannot catch (common for the GitHub
+	// API): read through a reader capped one byte past maxBlobBytes
+	// instead, so a body that turns out oversized only once actually read
+	// is still refused - never silently truncated - the extra byte is
+	// exactly what tells the two cases apart.
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxBlobBytes+1))
+	if err != nil {
+		return FileContentResult{}, fmt.Errorf("gh: read file content response: %w", err)
+	}
+	if int64(len(body)) > maxBlobBytes {
+		return FileContentResult{}, &Error{
+			Kind:    KindUnknown,
+			Message: fmt.Sprintf("file too large to expand (over %d bytes)", maxBlobBytes),
+		}
+	}
+
+	return FileContentResult{Lines: splitBlobLines(string(body)), RateLimit: rateLimit}, nil
+}
+
+// splitBlobLines splits a blob's raw content into lines. An empty body is
+// zero lines; a trailing "\n" (as every well-formed text file has) produces
+// one empty trailing element from strings.Split that does not correspond to
+// an actual line of content, and is dropped.
+func splitBlobLines(body string) []string {
+	if body == "" {
+		return nil
+	}
+	lines := strings.Split(body, "\n")
+	if lines[len(lines)-1] == "" {
+		lines = lines[:len(lines)-1]
+	}
+	return lines
 }
 
 // rateLimitFromHeaders derives a model.RateLimit from a REST response's

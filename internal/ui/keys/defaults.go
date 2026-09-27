@@ -96,6 +96,10 @@ var defaultTable = []defaultEntry{
 	{[]Context{ContextList, ContextFiles}, "l", ActionListOpen},
 	{[]Context{ContextList}, "n", ActionListNewPR},
 
+	// Enter is bound to list.open only in the ContextList/ContextFiles rows
+	// above - a different context from ContextDiff here, so this is no
+	// conflict: whichever pane has focus decides which binding fires.
+	{[]Context{ContextDiff}, "<Enter>", ActionDiffExpand},
 	{[]Context{ContextDiff}, "V", ActionDiffVisual},
 	{[]Context{ContextDiff, ContextPR}, "c", ActionDiffComment},
 	{[]Context{ContextThread}, "c", ActionThreadReply},

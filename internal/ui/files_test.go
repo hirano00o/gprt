@@ -39,6 +39,26 @@ const renamedGoPatch = `@@ -1,1 +1,2 @@
 +// tiny addition
 `
 
+// exampleGoHeadLines is pkg/example.go's full head content, registered
+// under its SHA ("sha-example") for the gap-expansion tests: exampleGoPatch
+// leaves new-side lines 6-10 collapsed between its two hunks (hunk 1 ends
+// at line 5, hunk 2 starts at line 11).
+func exampleGoHeadLines() []string {
+	return []string{
+		"package example",
+		"// Example is documented here with a deliberately long line so zl/zh horizontal scrolling has somewhere to go.",
+		"func Example() {",
+		"\treturn",
+		"}",
+		"",
+		"func helper() {",
+		"\treturn nil",
+		"}",
+		"",
+		"\tnewCall()",
+	}
+}
+
 // fixtureFilesPages returns two REST pages of changed files: page 1 has a
 // Go file (exampleGoPatch, above) and a renamed file; page 2 has a binary
 // file with no patch at all and HasNext false.
@@ -47,7 +67,10 @@ func fixtureFilesPages() []gh.FilesResult {
 		{
 			HasNext: true,
 			Files: []model.ChangedFile{
-				{Path: "pkg/example.go", Status: model.FileStatusModified, Additions: 2, Deletions: 1, HasPatch: true, Patch: exampleGoPatch},
+				{
+					Path: "pkg/example.go", Status: model.FileStatusModified, Additions: 2, Deletions: 1,
+					HasPatch: true, Patch: exampleGoPatch, SHA: "sha-example",
+				},
 				{Path: "pkg/renamed_new.go", PreviousPath: "pkg/renamed_old.go", Status: model.FileStatusRenamed, Additions: 1, Deletions: 0, HasPatch: true, Patch: renamedGoPatch},
 			},
 		},
@@ -631,7 +654,7 @@ func TestFilesTabNextThreadCrossesFileBoundary(t *testing.T) {
 
 	act(app.app, func() { app.openFile("pkg/example.go") })
 	waitFor(t, app.app, func() bool { return app.currentFilePath == "pkg/example.go" })
-	act(app.app, func() { app.diffView.MoveBottom() }) // past every thread in this file
+	act(app.app, func() { moveToLastDiffLine(app) }) // past every thread in this file
 
 	sendRune(app.app, ']')
 	sendRune(app.app, 'c')
@@ -688,7 +711,7 @@ func TestFilesTabNextThreadAtLastCommentToasts(t *testing.T) {
 
 	act(app.app, func() { app.openFile("pkg/renamed_new.go") })
 	waitFor(t, app.app, func() bool { return app.currentFilePath == "pkg/renamed_new.go" })
-	act(app.app, func() { app.diffView.MoveBottom() })
+	act(app.app, func() { moveToLastDiffLine(app) })
 
 	sendRune(app.app, ']')
 	sendRune(app.app, 'c')
@@ -714,7 +737,7 @@ func TestFilesTabVisualSelectAndEscClears(t *testing.T) {
 	// several of which have inline threads) — a reliable place to start a
 	// two-line selection from regardless of how the threads above bucket.
 	act(app.app, func() {
-		app.diffView.MoveBottom()
+		moveToLastDiffLine(app)
 		app.diffView.MoveBy(-1)
 	})
 	waitFor(t, app.app, func() bool {
@@ -800,7 +823,7 @@ func TestFilesTabEscInVisualModeAlsoResetsSequencerPendingPrefix(t *testing.T) {
 
 	// A line row (not a thread row) so StartVisual (V) actually activates.
 	act(app.app, func() {
-		app.diffView.MoveBottom()
+		moveToLastDiffLine(app)
 		app.diffView.MoveBy(-1)
 	})
 	waitFor(t, app.app, func() bool {
@@ -887,6 +910,10 @@ func TestFilesTabPageDownMovesFurtherThanHalfDown(t *testing.T) {
 
 	act(app.app, func() { app.diffView.MoveTop() })
 	top := cursor()
+	// The bottommost selectable row, not moveToLastDiffLine's "last real
+	// line": this test checks <PageDown> reaches exactly as far as
+	// <C-bottom> does, whatever that row actually is (here, the trailing
+	// gap row, since HeadKnown is never true for this fixture).
 	act(app.app, func() { app.diffView.MoveBottom() })
 	bottom := cursor()
 
@@ -1483,4 +1510,155 @@ func newTestScreenForFiles(t *testing.T, w, h int) tcell.SimulationScreen {
 	}
 	screen.SetSize(w, h)
 	return screen
+}
+
+// focusDiffView switches focus to the diff pane (Ctrl-w l) and waits for
+// it, the shared first step of the gap-expansion tests below.
+func focusDiffView(t *testing.T, app *App) {
+	t.Helper()
+	sendKey(app.app, tcell.NewEventKey(tcell.KeyCtrlW, 0, tcell.ModCtrl))
+	sendRune(app.app, 'l')
+	waitFor(t, app.app, func() bool { return app.app.GetFocus() == app.diffView })
+}
+
+// moveCursorToAGapRow moves the diff cursor down from the top until it
+// lands on a gap row (or gives up after enough steps that a real fixture
+// file could never need more).
+func moveCursorToAGapRow(app *App) {
+	app.diffView.MoveTop()
+	for range 50 {
+		if _, ok := app.diffView.CursorGap(); ok {
+			return
+		}
+		app.diffView.MoveBy(1)
+	}
+}
+
+// gapCursor snapshots widget.DiffView.CursorGap()'s two return values
+// together, so a single query call can read both at once.
+type gapCursor struct {
+	start int
+	ok    bool
+}
+
+func queryGapCursor(app *App) gapCursor {
+	return query(app.app, func() gapCursor {
+		start, ok := app.diffView.CursorGap()
+		return gapCursor{start, ok}
+	})
+}
+
+// moveToLastDiffLine moves the diff cursor to the bottom, then back up once
+// more if that landed on a trailing gap row (the "⋯ expand ⋯" prompt shown
+// whenever the file's head content has never been fetched - see
+// widget.DiffFile.HeadKnown, never true for these fixture-driven tests,
+// none of which ever calls ExpandGap): every one of this file's/reviewui's
+// many pre-existing "move to the bottom" tests wants the last *actual* diff
+// line, a meaning `MoveBottom` alone no longer guarantees on its own now
+// that a gap row can occupy that position.
+func moveToLastDiffLine(app *App) {
+	app.diffView.MoveBottom()
+	if _, ok := app.diffView.CursorGap(); ok {
+		app.diffView.MoveBy(-1)
+	}
+}
+
+// TestFilesTabEnterExpandsGapAndLandsOnFirstRevealedLine covers the primary
+// end-to-end path: Enter on the gap row between pkg/example.go's two hunks
+// fetches its head content once, reveals the hidden lines, and lands the
+// cursor on the first one (NewNo == the gap's own start line).
+func TestFilesTabEnterExpandsGapAndLandsOnFirstRevealedLine(t *testing.T) {
+	app, fake, screen, _ := openFilesTabForFixture(t)
+	fake.SetFileContent("sha-example", exampleGoHeadLines())
+	focusDiffView(t, app)
+
+	act(app.app, func() { moveCursorToAGapRow(app) })
+	gc := queryGapCursor(app)
+	if !gc.ok {
+		t.Fatal("cursor never reached a gap row")
+	}
+
+	sendSpecial(app.app, tcell.KeyEnter)
+	waitFor(t, app.app, func() bool {
+		return containsSubstring(diffText(app, screen), "func helper")
+	})
+
+	type lineResult struct {
+		newNo int
+		ok    bool
+	}
+	lr := query(app.app, func() lineResult {
+		l, ok := app.diffView.CursorLine()
+		return lineResult{l.NewNo, ok}
+	})
+	if !lr.ok || lr.newNo != gc.start {
+		t.Errorf("CursorLine() after expansion = %+v, want NewNo=%d (the gap's own start line)", lr, gc.start)
+	}
+
+	if calls := fake.FileContentCalls(); len(calls) != 1 || calls[0] != "sha-example" {
+		t.Errorf("FileContentCalls() = %v, want exactly [\"sha-example\"]", calls)
+	}
+}
+
+// TestFilesTabEnterOnAGapTwiceFetchesOnce covers Store.ExpandGap's
+// in-flight dedup reached through the UI: both calls run inside the same
+// queued UI-goroutine closure, so the second cannot race the first fetch's
+// own asynchronous completion — it must see the in-flight guard still set.
+func TestFilesTabEnterOnAGapTwiceFetchesOnce(t *testing.T) {
+	app, fake, screen, _ := openFilesTabForFixture(t)
+	fake.SetFileContent("sha-example", exampleGoHeadLines())
+	focusDiffView(t, app)
+
+	act(app.app, func() { moveCursorToAGapRow(app) })
+	if !queryGapCursor(app).ok {
+		t.Fatal("cursor never reached a gap row")
+	}
+
+	act(app.app, func() {
+		app.expandGapAtCursor()
+		app.expandGapAtCursor()
+	})
+
+	waitFor(t, app.app, func() bool {
+		return containsSubstring(diffText(app, screen), "func helper")
+	})
+	if calls := fake.FileContentCalls(); len(calls) != 1 {
+		t.Errorf("FileContentCalls() = %v, want exactly 1 call", calls)
+	}
+}
+
+// TestFilesTabEnterOffAGapRowIsANoop covers Enter on an ordinary (non-gap)
+// row: a silent no-op, like an unbound key.
+func TestFilesTabEnterOffAGapRowIsANoop(t *testing.T) {
+	app, fake, _, _ := openFilesTabForFixture(t)
+	fake.SetFileContent("sha-example", exampleGoHeadLines())
+	focusDiffView(t, app)
+
+	act(app.app, func() { app.diffView.MoveTop() })
+	if queryGapCursor(app).ok {
+		t.Fatal("cursor unexpectedly landed on a gap row at the top of the file")
+	}
+
+	sendSpecial(app.app, tcell.KeyEnter)
+	if calls := fake.FileContentCalls(); len(calls) != 0 {
+		t.Errorf("FileContentCalls() = %v, want none (Enter off a gap row must be a no-op)", calls)
+	}
+}
+
+// TestFilesTabExpandGapErrorToasts covers a failed head-content fetch (no
+// SetFileContent registered for the file's SHA, so the fake returns a
+// not-found error): it must toast rather than silently doing nothing.
+func TestFilesTabExpandGapErrorToasts(t *testing.T) {
+	app, _, _, _ := openFilesTabForFixture(t)
+	focusDiffView(t, app)
+
+	act(app.app, func() { moveCursorToAGapRow(app) })
+	if !queryGapCursor(app).ok {
+		t.Fatal("cursor never reached a gap row")
+	}
+
+	sendSpecial(app.app, tcell.KeyEnter)
+	waitFor(t, app.app, func() bool {
+		return containsSubstring(app.statusBar.toast, "no file content registered")
+	})
 }
