@@ -4,8 +4,4 @@ mutation ReopenPullRequest($id: ID!) {
       state
     }
   }
-  rateLimit {
-    remaining
-    resetAt
-  }
 }

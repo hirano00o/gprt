@@ -6,8 +6,4 @@ mutation CreatePendingReview($id: ID!) {
       body
     }
   }
-  rateLimit {
-    remaining
-    resetAt
-  }
 }

@@ -7,8 +7,4 @@ mutation UnresolveThread($threadId: ID!) {
       viewerCanUnresolve
     }
   }
-  rateLimit {
-    remaining
-    resetAt
-  }
 }

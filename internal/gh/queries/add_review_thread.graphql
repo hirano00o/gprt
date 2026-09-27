@@ -59,8 +59,4 @@ mutation AddReviewThread(
       }
     }
   }
-  rateLimit {
-    remaining
-    resetAt
-  }
 }

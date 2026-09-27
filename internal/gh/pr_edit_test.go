@@ -20,8 +20,7 @@ func TestClient_UpdatePullRequest_SendsExplicitNullForOmittedFields(t *testing.T
 					"labels": {"nodes": []},
 					"updatedAt": "2026-09-14T02:00:00Z"
 				}
-			},
-			"rateLimit": {"remaining": 4999, "resetAt": "2026-09-14T03:00:00Z"}
+			}
 		}
 	}`)
 
@@ -33,7 +32,7 @@ func TestClient_UpdatePullRequest_SendsExplicitNullForOmittedFields(t *testing.T
 	defer srv.Close()
 
 	title := "New title"
-	pr, rl, err := c.UpdatePullRequest(context.Background(), "PR_1", UpdatePullRequestInput{Title: &title})
+	pr, err := c.UpdatePullRequest(context.Background(), "PR_1", UpdatePullRequestInput{Title: &title})
 	if err != nil {
 		t.Fatalf("UpdatePullRequest() error = %v", err)
 	}
@@ -48,9 +47,6 @@ func TestClient_UpdatePullRequest_SendsExplicitNullForOmittedFields(t *testing.T
 	if pr.Title != "New title" || pr.BaseRefName != "main" {
 		t.Errorf("UpdatePullRequest() = %+v", pr)
 	}
-	if !rl.Known || rl.Remaining != 4999 {
-		t.Errorf("UpdatePullRequest() rate limit = %+v", rl)
-	}
 }
 
 func TestClient_UpdatePullRequest_SendsLabelIDsAndBody(t *testing.T) {
@@ -63,8 +59,7 @@ func TestClient_UpdatePullRequest_SendsLabelIDsAndBody(t *testing.T) {
 					"labels": {"nodes": [{"id": "LA_1", "name": "bug", "color": "d73a4a"}]},
 					"updatedAt": "2026-09-14T02:00:00Z"
 				}
-			},
-			"rateLimit": {"remaining": 4998, "resetAt": "2026-09-14T03:00:00Z"}
+			}
 		}
 	}`)
 
@@ -77,7 +72,7 @@ func TestClient_UpdatePullRequest_SendsLabelIDsAndBody(t *testing.T) {
 
 	body := "new body"
 	labelIDs := []string{"LA_1"}
-	pr, _, err := c.UpdatePullRequest(context.Background(), "PR_1", UpdatePullRequestInput{Body: &body, LabelIDs: &labelIDs})
+	pr, err := c.UpdatePullRequest(context.Background(), "PR_1", UpdatePullRequestInput{Body: &body, LabelIDs: &labelIDs})
 	if err != nil {
 		t.Fatalf("UpdatePullRequest() error = %v", err)
 	}
@@ -99,8 +94,7 @@ func TestClient_UpdatePullRequest_SendsEmptyLabelIDsToClear(t *testing.T) {
 		"data": {
 			"updatePullRequest": {
 				"pullRequest": {"title": "t", "body": "", "baseRefName": "main", "labels": {"nodes": []}, "updatedAt": "2026-09-14T02:00:00Z"}
-			},
-			"rateLimit": {"remaining": 4997, "resetAt": "2026-09-14T03:00:00Z"}
+			}
 		}
 	}`)
 
@@ -112,7 +106,7 @@ func TestClient_UpdatePullRequest_SendsEmptyLabelIDsToClear(t *testing.T) {
 	defer srv.Close()
 
 	emptyLabelIDs := []string{}
-	_, _, err := c.UpdatePullRequest(context.Background(), "PR_1", UpdatePullRequestInput{LabelIDs: &emptyLabelIDs})
+	_, err := c.UpdatePullRequest(context.Background(), "PR_1", UpdatePullRequestInput{LabelIDs: &emptyLabelIDs})
 	if err != nil {
 		t.Fatalf("UpdatePullRequest() error = %v", err)
 	}
@@ -135,8 +129,7 @@ func TestClient_RequestReviewers_Success(t *testing.T) {
 						]
 					}
 				}
-			},
-			"rateLimit": {"remaining": 4999, "resetAt": "2026-09-14T03:00:00Z"}
+			}
 		}
 	}`)
 
@@ -147,7 +140,7 @@ func TestClient_RequestReviewers_Success(t *testing.T) {
 	})
 	defer srv.Close()
 
-	reviewers, rl, err := c.RequestReviewers(context.Background(), "PR_1", []string{"U_1"}, []string{"T_1"}, false)
+	reviewers, err := c.RequestReviewers(context.Background(), "PR_1", []string{"U_1"}, []string{"T_1"}, false)
 	if err != nil {
 		t.Fatalf("RequestReviewers() error = %v", err)
 	}
@@ -160,9 +153,6 @@ func TestClient_RequestReviewers_Success(t *testing.T) {
 	}
 	if len(reviewers) != 2 || reviewers[0] != want[0] || reviewers[1] != want[1] {
 		t.Errorf("RequestReviewers() = %+v, want %+v", reviewers, want)
-	}
-	if !rl.Known || rl.Remaining != 4999 {
-		t.Errorf("RequestReviewers() rate limit = %+v", rl)
 	}
 }
 
@@ -177,8 +167,7 @@ func TestClient_RequestReviewers_NilSlicesSendEmptyArraysNotNull(t *testing.T) {
 	var gotVars map[string]any
 	fixture := []byte(`{
 		"data": {
-			"requestReviews": {"pullRequest": {"reviewRequests": {"nodes": []}}},
-			"rateLimit": {"remaining": 4999, "resetAt": "2026-09-14T03:00:00Z"}
+			"requestReviews": {"pullRequest": {"reviewRequests": {"nodes": []}}}
 		}
 	}`)
 
@@ -189,7 +178,7 @@ func TestClient_RequestReviewers_NilSlicesSendEmptyArraysNotNull(t *testing.T) {
 	})
 	defer srv.Close()
 
-	if _, _, err := c.RequestReviewers(context.Background(), "PR_1", nil, nil, false); err != nil {
+	if _, err := c.RequestReviewers(context.Background(), "PR_1", nil, nil, false); err != nil {
 		t.Fatalf("RequestReviewers() error = %v", err)
 	}
 
@@ -208,8 +197,7 @@ func TestClient_RequestReviewers_NilSlicesSendEmptyArraysNotNull(t *testing.T) {
 func TestClient_MarkReadyForReview_Success(t *testing.T) {
 	fixture := []byte(`{
 		"data": {
-			"markPullRequestReadyForReview": {"pullRequest": {"isDraft": false}},
-			"rateLimit": {"remaining": 4999, "resetAt": "2026-09-14T03:00:00Z"}
+			"markPullRequestReadyForReview": {"pullRequest": {"isDraft": false}}
 		}
 	}`)
 
@@ -219,23 +207,19 @@ func TestClient_MarkReadyForReview_Success(t *testing.T) {
 	})
 	defer srv.Close()
 
-	isDraft, rl, err := c.MarkReadyForReview(context.Background(), "PR_1")
+	isDraft, err := c.MarkReadyForReview(context.Background(), "PR_1")
 	if err != nil {
 		t.Fatalf("MarkReadyForReview() error = %v", err)
 	}
 	if isDraft {
 		t.Errorf("MarkReadyForReview() isDraft = true, want false")
 	}
-	if !rl.Known || rl.Remaining != 4999 {
-		t.Errorf("MarkReadyForReview() rate limit = %+v", rl)
-	}
 }
 
 func TestClient_ConvertToDraft_Success(t *testing.T) {
 	fixture := []byte(`{
 		"data": {
-			"convertPullRequestToDraft": {"pullRequest": {"isDraft": true}},
-			"rateLimit": {"remaining": 4998, "resetAt": "2026-09-14T03:00:00Z"}
+			"convertPullRequestToDraft": {"pullRequest": {"isDraft": true}}
 		}
 	}`)
 
@@ -245,14 +229,11 @@ func TestClient_ConvertToDraft_Success(t *testing.T) {
 	})
 	defer srv.Close()
 
-	isDraft, rl, err := c.ConvertToDraft(context.Background(), "PR_1")
+	isDraft, err := c.ConvertToDraft(context.Background(), "PR_1")
 	if err != nil {
 		t.Fatalf("ConvertToDraft() error = %v", err)
 	}
 	if !isDraft {
 		t.Errorf("ConvertToDraft() isDraft = false, want true")
-	}
-	if !rl.Known || rl.Remaining != 4998 {
-		t.Errorf("ConvertToDraft() rate limit = %+v", rl)
 	}
 }

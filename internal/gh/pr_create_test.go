@@ -17,8 +17,7 @@ func TestClient_CreatePullRequest_Success(t *testing.T) {
 					"repository": {"nameWithOwner": "acme/widgets"},
 					"url": "https://example.com/acme/widgets/pull/7"
 				}
-			},
-			"rateLimit": {"remaining": 4999, "resetAt": "2026-09-14T05:00:00Z"}
+			}
 		}
 	}`)
 
@@ -37,7 +36,7 @@ func TestClient_CreatePullRequest_Success(t *testing.T) {
 		Body:         "Description",
 		Draft:        true,
 	}
-	pr, rl, err := c.CreatePullRequest(context.Background(), in)
+	pr, err := c.CreatePullRequest(context.Background(), in)
 	if err != nil {
 		t.Fatalf("CreatePullRequest() error = %v", err)
 	}
@@ -47,8 +46,5 @@ func TestClient_CreatePullRequest_Success(t *testing.T) {
 	}
 	if pr.ID != "PR_new" || pr.Ref.Number != 7 || pr.Ref.Repo != repositoryTestRef() || pr.URL != "https://example.com/acme/widgets/pull/7" {
 		t.Errorf("CreatePullRequest() = %+v", pr)
-	}
-	if !rl.Known || rl.Remaining != 4999 {
-		t.Errorf("CreatePullRequest() rate limit = %+v", rl)
 	}
 }

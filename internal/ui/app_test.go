@@ -331,7 +331,7 @@ func (f *fakeGitHub) SetAddCommentBlock(ch chan struct{}) {
 
 // AddIssueComment records body and returns addCommentErr if armed (via
 // SetAddCommentError), otherwise a synthesized comment with that body.
-func (f *fakeGitHub) AddIssueComment(ctx context.Context, _, body string) (model.IssueComment, model.RateLimit, error) {
+func (f *fakeGitHub) AddIssueComment(ctx context.Context, _, body string) (model.IssueComment, error) {
 	f.mu.Lock()
 	block := f.addCommentBlock
 	f.mu.Unlock()
@@ -339,7 +339,7 @@ func (f *fakeGitHub) AddIssueComment(ctx context.Context, _, body string) (model
 		select {
 		case <-block:
 		case <-ctx.Done():
-			return model.IssueComment{}, model.RateLimit{}, ctx.Err()
+			return model.IssueComment{}, ctx.Err()
 		}
 	}
 
@@ -347,9 +347,9 @@ func (f *fakeGitHub) AddIssueComment(ctx context.Context, _, body string) (model
 	defer f.mu.Unlock()
 	f.addCommentBodies = append(f.addCommentBodies, body)
 	if f.addCommentErr != nil {
-		return model.IssueComment{}, model.RateLimit{}, f.addCommentErr
+		return model.IssueComment{}, f.addCommentErr
 	}
-	return model.IssueComment{ID: "IC_new", Author: model.User{Login: "octocat"}, Body: body, ViewerCanUpdate: true, ViewerCanDelete: true}, model.RateLimit{}, nil
+	return model.IssueComment{ID: "IC_new", Author: model.User{Login: "octocat"}, Body: body, ViewerCanUpdate: true, ViewerCanDelete: true}, nil
 }
 
 // SetAddCommentError makes AddIssueComment fail with err.
@@ -369,14 +369,14 @@ func (f *fakeGitHub) AddCommentBodies() []string {
 
 // UpdateIssueComment records (id, body) and returns updateCommentErr if
 // armed, otherwise a synthesized comment with that body.
-func (f *fakeGitHub) UpdateIssueComment(_ context.Context, id, body string) (model.IssueComment, model.RateLimit, error) {
+func (f *fakeGitHub) UpdateIssueComment(_ context.Context, id, body string) (model.IssueComment, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.updateCommentCalls = append(f.updateCommentCalls, struct{ id, body string }{id, body})
 	if f.updateCommentErr != nil {
-		return model.IssueComment{}, model.RateLimit{}, f.updateCommentErr
+		return model.IssueComment{}, f.updateCommentErr
 	}
-	return model.IssueComment{ID: id, Author: model.User{Login: "octocat"}, Body: body, ViewerCanUpdate: true, ViewerCanDelete: true}, model.RateLimit{}, nil
+	return model.IssueComment{ID: id, Author: model.User{Login: "octocat"}, Body: body, ViewerCanUpdate: true, ViewerCanDelete: true}, nil
 }
 
 // SetUpdateCommentError makes UpdateIssueComment fail with err.
@@ -399,14 +399,14 @@ func (f *fakeGitHub) UpdateCommentBodies() []string {
 }
 
 // DeleteIssueComment records id and returns deleteCommentErr if armed.
-func (f *fakeGitHub) DeleteIssueComment(_ context.Context, id string) (model.RateLimit, error) {
+func (f *fakeGitHub) DeleteIssueComment(_ context.Context, id string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.deleteCommentIDs = append(f.deleteCommentIDs, id)
 	if f.deleteCommentErr != nil {
-		return model.RateLimit{}, f.deleteCommentErr
+		return f.deleteCommentErr
 	}
-	return model.RateLimit{}, nil
+	return nil
 }
 
 // DeleteCommentIDs returns every ID DeleteIssueComment has been called
@@ -421,34 +421,34 @@ func (f *fakeGitHub) DeleteCommentIDs() []string {
 // (mirroring AddIssueComment/UpdateIssueComment/DeleteIssueComment above)
 // and returns a synthesized, minimally-plausible result unless the
 // matching Set*Error was armed.
-func (f *fakeGitHub) CreatePendingReview(context.Context, string) (model.Review, model.RateLimit, error) {
+func (f *fakeGitHub) CreatePendingReview(context.Context, string) (model.Review, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.createPendingReviewCalls++
 	if f.createPendingReviewErr != nil {
-		return model.Review{}, model.RateLimit{}, f.createPendingReviewErr
+		return model.Review{}, f.createPendingReviewErr
 	}
-	return model.Review{ID: "PVR_new", State: model.ReviewStatePending}, model.RateLimit{}, nil
+	return model.Review{ID: "PVR_new", State: model.ReviewStatePending}, nil
 }
 
-func (f *fakeGitHub) AddReviewNow(_ context.Context, prID string, threads []gh.DraftThread, body string) (model.Review, model.RateLimit, error) {
+func (f *fakeGitHub) AddReviewNow(_ context.Context, prID string, threads []gh.DraftThread, body string) (model.Review, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.addReviewNowCalls = append(f.addReviewNowCalls, addReviewNowCall{prID, threads, body})
 	if f.addReviewNowErr != nil {
-		return model.Review{}, model.RateLimit{}, f.addReviewNowErr
+		return model.Review{}, f.addReviewNowErr
 	}
-	return model.Review{ID: "PVR_submitted", State: model.ReviewStateCommented}, model.RateLimit{}, nil
+	return model.Review{ID: "PVR_submitted", State: model.ReviewStateCommented}, nil
 }
 
-func (f *fakeGitHub) AddReviewNowWithEvent(_ context.Context, prID string, event model.ReviewEvent, body string) (model.Review, model.RateLimit, error) {
+func (f *fakeGitHub) AddReviewNowWithEvent(_ context.Context, prID string, event model.ReviewEvent, body string) (model.Review, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.addReviewNowWithEventCalls = append(f.addReviewNowWithEventCalls, addReviewNowWithEventCall{prID, event, body})
 	if f.addReviewNowWithEventErr != nil {
-		return model.Review{}, model.RateLimit{}, f.addReviewNowWithEventErr
+		return model.Review{}, f.addReviewNowWithEventErr
 	}
-	return model.Review{ID: "PVR_submitted"}, model.RateLimit{}, nil
+	return model.Review{ID: "PVR_submitted"}, nil
 }
 
 // SetAddReviewNowWithEventError makes AddReviewNowWithEvent fail with err.
@@ -466,12 +466,12 @@ func (f *fakeGitHub) AddReviewNowWithEventCalls() []addReviewNowWithEventCall {
 	return append([]addReviewNowWithEventCall(nil), f.addReviewNowWithEventCalls...)
 }
 
-func (f *fakeGitHub) AddReviewThread(_ context.Context, in gh.ThreadInput) (model.ReviewThread, model.RateLimit, error) {
+func (f *fakeGitHub) AddReviewThread(_ context.Context, in gh.ThreadInput) (model.ReviewThread, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.addReviewThreadCalls = append(f.addReviewThreadCalls, in)
 	if f.addReviewThreadErr != nil {
-		return model.ReviewThread{}, model.RateLimit{}, f.addReviewThreadErr
+		return model.ReviewThread{}, f.addReviewThreadErr
 	}
 	return model.ReviewThread{
 		ID: "RT_new", Path: in.Path, Line: in.Line, Side: in.Side,
@@ -481,31 +481,31 @@ func (f *fakeGitHub) AddReviewThread(_ context.Context, in gh.ThreadInput) (mode
 			ID: "RC_new", Author: model.User{Login: "octocat"}, Body: in.Body,
 			State: model.ReviewCommentStatePending, ViewerCanUpdate: true, ViewerCanDelete: true,
 		}},
-	}, model.RateLimit{}, nil
+	}, nil
 }
 
-func (f *fakeGitHub) AddThreadReply(_ context.Context, threadID, body, pendingReviewID string) (model.ReviewComment, model.RateLimit, error) {
+func (f *fakeGitHub) AddThreadReply(_ context.Context, threadID, body, pendingReviewID string) (model.ReviewComment, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.addThreadReplyCalls = append(f.addThreadReplyCalls, addThreadReplyCall{threadID, body, pendingReviewID})
 	if f.addThreadReplyErr != nil {
-		return model.ReviewComment{}, model.RateLimit{}, f.addThreadReplyErr
+		return model.ReviewComment{}, f.addThreadReplyErr
 	}
 	state := model.ReviewCommentStateSubmitted
 	if pendingReviewID != "" {
 		state = model.ReviewCommentStatePending
 	}
-	return model.ReviewComment{ID: "RC_reply", Author: model.User{Login: "octocat"}, Body: body, State: state, ViewerCanUpdate: true, ViewerCanDelete: true}, model.RateLimit{}, nil
+	return model.ReviewComment{ID: "RC_reply", Author: model.User{Login: "octocat"}, Body: body, State: state, ViewerCanUpdate: true, ViewerCanDelete: true}, nil
 }
 
-func (f *fakeGitHub) SubmitReview(_ context.Context, reviewID string, event model.ReviewEvent, body string) (model.Review, model.RateLimit, error) {
+func (f *fakeGitHub) SubmitReview(_ context.Context, reviewID string, event model.ReviewEvent, body string) (model.Review, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.submitReviewCalls = append(f.submitReviewCalls, submitReviewCall{reviewID, event, body})
 	if f.submitReviewErr != nil {
-		return model.Review{}, model.RateLimit{}, f.submitReviewErr
+		return model.Review{}, f.submitReviewErr
 	}
-	return model.Review{ID: reviewID}, model.RateLimit{}, nil
+	return model.Review{ID: reviewID}, nil
 }
 
 // SetSubmitReviewError makes SubmitReview fail with err.
@@ -522,21 +522,21 @@ func (f *fakeGitHub) SubmitReviewCalls() []submitReviewCall {
 	return append([]submitReviewCall(nil), f.submitReviewCalls...)
 }
 
-func (f *fakeGitHub) DeletePendingReview(_ context.Context, reviewID string) (model.RateLimit, error) {
+func (f *fakeGitHub) DeletePendingReview(_ context.Context, reviewID string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.deletePendingReviewCalls = append(f.deletePendingReviewCalls, reviewID)
-	return model.RateLimit{}, f.deletePendingReviewErr
+	return f.deletePendingReviewErr
 }
 
-func (f *fakeGitHub) UpdateReviewComment(_ context.Context, id, body string) (model.ReviewComment, model.RateLimit, error) {
+func (f *fakeGitHub) UpdateReviewComment(_ context.Context, id, body string) (model.ReviewComment, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.updateReviewCommentCalls = append(f.updateReviewCommentCalls, updateReviewCommentCall{id, body})
 	if f.updateReviewCommentErr != nil {
-		return model.ReviewComment{}, model.RateLimit{}, f.updateReviewCommentErr
+		return model.ReviewComment{}, f.updateReviewCommentErr
 	}
-	return model.ReviewComment{ID: id, Author: model.User{Login: "octocat"}, Body: body, ViewerCanUpdate: true, ViewerCanDelete: true}, model.RateLimit{}, nil
+	return model.ReviewComment{ID: id, Author: model.User{Login: "octocat"}, Body: body, ViewerCanUpdate: true, ViewerCanDelete: true}, nil
 }
 
 // UpdateReviewCommentBodies returns every body UpdateReviewComment has been
@@ -551,59 +551,59 @@ func (f *fakeGitHub) UpdateReviewCommentBodies() []string {
 	return out
 }
 
-func (f *fakeGitHub) DeleteReviewComment(_ context.Context, id string) (model.RateLimit, error) {
+func (f *fakeGitHub) DeleteReviewComment(_ context.Context, id string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.deleteReviewCommentIDs = append(f.deleteReviewCommentIDs, id)
-	return model.RateLimit{}, f.deleteReviewCommentErr
+	return f.deleteReviewCommentErr
 }
 
-func (f *fakeGitHub) ResolveThread(_ context.Context, threadID string) (model.ReviewThread, model.RateLimit, error) {
+func (f *fakeGitHub) ResolveThread(_ context.Context, threadID string) (model.ReviewThread, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.resolveThreadIDs = append(f.resolveThreadIDs, threadID)
 	if f.resolveThreadErr != nil {
-		return model.ReviewThread{}, model.RateLimit{}, f.resolveThreadErr
+		return model.ReviewThread{}, f.resolveThreadErr
 	}
-	return model.ReviewThread{ID: threadID, IsResolved: true, ViewerCanUnresolve: true}, model.RateLimit{}, nil
+	return model.ReviewThread{ID: threadID, IsResolved: true, ViewerCanUnresolve: true}, nil
 }
 
-func (f *fakeGitHub) UnresolveThread(_ context.Context, threadID string) (model.ReviewThread, model.RateLimit, error) {
+func (f *fakeGitHub) UnresolveThread(_ context.Context, threadID string) (model.ReviewThread, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.unresolveThreadIDs = append(f.unresolveThreadIDs, threadID)
 	if f.unresolveThreadErr != nil {
-		return model.ReviewThread{}, model.RateLimit{}, f.unresolveThreadErr
+		return model.ReviewThread{}, f.unresolveThreadErr
 	}
-	return model.ReviewThread{ID: threadID, IsResolved: false, ViewerCanResolve: true}, model.RateLimit{}, nil
+	return model.ReviewThread{ID: threadID, IsResolved: false, ViewerCanResolve: true}, nil
 }
 
 // AddReaction records subjectID/content and returns a synthesized,
 // minimally-plausible result unless SetAddReactionError was armed: a
 // single-group result for content with ViewerHasReacted true, matching
 // what Store.applyReactionGroups needs to reflect a successful toggle.
-func (f *fakeGitHub) AddReaction(_ context.Context, subjectID string, content model.ReactionContent) ([]model.ReactionGroup, model.RateLimit, error) {
+func (f *fakeGitHub) AddReaction(_ context.Context, subjectID string, content model.ReactionContent) ([]model.ReactionGroup, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.addReactionCalls = append(f.addReactionCalls, reactionCall{subjectID, content})
 	if f.addReactionErr != nil {
-		return nil, model.RateLimit{}, f.addReactionErr
+		return nil, f.addReactionErr
 	}
-	return []model.ReactionGroup{{Content: content, Count: 1, ViewerHasReacted: true}}, model.RateLimit{}, nil
+	return []model.ReactionGroup{{Content: content, Count: 1, ViewerHasReacted: true}}, nil
 }
 
 // RemoveReaction records subjectID/content and returns a synthesized,
 // minimally-plausible result (the group removed entirely, mirroring
 // GitHub's own behaviour once a reaction's count reaches zero) unless
 // SetRemoveReactionError was armed.
-func (f *fakeGitHub) RemoveReaction(_ context.Context, subjectID string, content model.ReactionContent) ([]model.ReactionGroup, model.RateLimit, error) {
+func (f *fakeGitHub) RemoveReaction(_ context.Context, subjectID string, content model.ReactionContent) ([]model.ReactionGroup, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.removeReactionCalls = append(f.removeReactionCalls, reactionCall{subjectID, content})
 	if f.removeReactionErr != nil {
-		return nil, model.RateLimit{}, f.removeReactionErr
+		return nil, f.removeReactionErr
 	}
-	return nil, model.RateLimit{}, nil
+	return nil, nil
 }
 
 // SetMentionableUsers registers the users MentionableUsers returns for
@@ -1102,13 +1102,13 @@ func (f *fakeGitHub) UpdatePullRequestCalls() []updatePullRequestCall {
 // each pull request's full, evolving state.
 func (f *fakeGitHub) UpdatePullRequest(
 	_ context.Context, id string, in gh.UpdatePullRequestInput,
-) (model.PullRequest, model.RateLimit, error) {
+) (model.PullRequest, error) {
 	f.mu.Lock()
 	f.updatePullRequestCalls = append(f.updatePullRequestCalls, updatePullRequestCall{id: id, in: in})
 	err := f.updatePullRequestErr
 	f.mu.Unlock()
 	if err != nil {
-		return model.PullRequest{}, model.RateLimit{}, err
+		return model.PullRequest{}, err
 	}
 	result := model.PullRequest{ID: id, UpdatedAt: time.Now()}
 	if in.Title != nil {
@@ -1125,7 +1125,7 @@ func (f *fakeGitHub) UpdatePullRequest(
 			result.Labels = append(result.Labels, model.Label{ID: labelID})
 		}
 	}
-	return result, model.RateLimit{}, nil
+	return result, nil
 }
 
 // SetRequestReviewersError makes every RequestReviewers call fail with err.
@@ -1145,7 +1145,7 @@ func (f *fakeGitHub) RequestReviewersCalls() []requestReviewersCall {
 
 func (f *fakeGitHub) RequestReviewers(
 	_ context.Context, id string, userIDs, teamIDs []string, union bool,
-) ([]model.Reviewer, model.RateLimit, error) {
+) ([]model.Reviewer, error) {
 	f.mu.Lock()
 	f.requestReviewersCalls = append(
 		f.requestReviewersCalls, requestReviewersCall{id: id, userIDs: userIDs, teamIDs: teamIDs, union: union},
@@ -1153,7 +1153,7 @@ func (f *fakeGitHub) RequestReviewers(
 	err := f.requestReviewersErr
 	f.mu.Unlock()
 	if err != nil {
-		return nil, model.RateLimit{}, err
+		return nil, err
 	}
 	reviewers := make([]model.Reviewer, 0, len(userIDs)+len(teamIDs))
 	for _, uid := range userIDs {
@@ -1162,7 +1162,7 @@ func (f *fakeGitHub) RequestReviewers(
 	for _, tid := range teamIDs {
 		reviewers = append(reviewers, model.Reviewer{ID: tid, Kind: model.ReviewerKindTeam})
 	}
-	return reviewers, model.RateLimit{}, nil
+	return reviewers, nil
 }
 
 // SetMarkReadyForReviewError makes every MarkReadyForReview call fail with
@@ -1181,15 +1181,15 @@ func (f *fakeGitHub) MarkReadyForReviewCalls() []string {
 	return append([]string(nil), f.markReadyForReviewCalls...)
 }
 
-func (f *fakeGitHub) MarkReadyForReview(_ context.Context, id string) (bool, model.RateLimit, error) {
+func (f *fakeGitHub) MarkReadyForReview(_ context.Context, id string) (bool, error) {
 	f.mu.Lock()
 	f.markReadyForReviewCalls = append(f.markReadyForReviewCalls, id)
 	err := f.markReadyForReviewErr
 	f.mu.Unlock()
 	if err != nil {
-		return false, model.RateLimit{}, err
+		return false, err
 	}
-	return false, model.RateLimit{}, nil
+	return false, nil
 }
 
 // SetConvertToDraftError makes every ConvertToDraft call fail with err.
@@ -1207,15 +1207,15 @@ func (f *fakeGitHub) ConvertToDraftCalls() []string {
 	return append([]string(nil), f.convertToDraftCalls...)
 }
 
-func (f *fakeGitHub) ConvertToDraft(_ context.Context, id string) (bool, model.RateLimit, error) {
+func (f *fakeGitHub) ConvertToDraft(_ context.Context, id string) (bool, error) {
 	f.mu.Lock()
 	f.convertToDraftCalls = append(f.convertToDraftCalls, id)
 	err := f.convertToDraftErr
 	f.mu.Unlock()
 	if err != nil {
-		return false, model.RateLimit{}, err
+		return false, err
 	}
-	return true, model.RateLimit{}, nil
+	return true, nil
 }
 
 // SetMergePullRequestError makes every MergePullRequest call fail with err.
@@ -1235,7 +1235,7 @@ func (f *fakeGitHub) MergePullRequestCalls() []mergePullRequestCall {
 
 func (f *fakeGitHub) MergePullRequest(
 	_ context.Context, id string, method model.MergeMethod, commitHeadline, commitBody *string, expectedHeadOID string,
-) (model.PullRequest, model.RateLimit, error) {
+) (model.PullRequest, error) {
 	f.mu.Lock()
 	f.mergePullRequestCalls = append(f.mergePullRequestCalls, mergePullRequestCall{
 		id: id, method: method, headline: commitHeadline, body: commitBody, expectedHeadOID: expectedHeadOID,
@@ -1243,9 +1243,9 @@ func (f *fakeGitHub) MergePullRequest(
 	err := f.mergePullRequestErr
 	f.mu.Unlock()
 	if err != nil {
-		return model.PullRequest{}, model.RateLimit{}, err
+		return model.PullRequest{}, err
 	}
-	return model.PullRequest{ID: id, State: model.PRStateMerged, Merged: true, MergedAt: time.Now()}, model.RateLimit{}, nil
+	return model.PullRequest{ID: id, State: model.PRStateMerged, Merged: true, MergedAt: time.Now()}, nil
 }
 
 // SetClosePullRequestError makes every ClosePullRequest call fail with err.
@@ -1263,15 +1263,15 @@ func (f *fakeGitHub) ClosePullRequestIDs() []string {
 	return append([]string(nil), f.closePullRequestIDs...)
 }
 
-func (f *fakeGitHub) ClosePullRequest(_ context.Context, id string) (model.PRState, model.RateLimit, error) {
+func (f *fakeGitHub) ClosePullRequest(_ context.Context, id string) (model.PRState, error) {
 	f.mu.Lock()
 	f.closePullRequestIDs = append(f.closePullRequestIDs, id)
 	err := f.closePullRequestErr
 	f.mu.Unlock()
 	if err != nil {
-		return "", model.RateLimit{}, err
+		return "", err
 	}
-	return model.PRStateClosed, model.RateLimit{}, nil
+	return model.PRStateClosed, nil
 }
 
 // SetReopenPullRequestError makes every ReopenPullRequest call fail with
@@ -1290,15 +1290,15 @@ func (f *fakeGitHub) ReopenPullRequestIDs() []string {
 	return append([]string(nil), f.reopenPullRequestIDs...)
 }
 
-func (f *fakeGitHub) ReopenPullRequest(_ context.Context, id string) (model.PRState, model.RateLimit, error) {
+func (f *fakeGitHub) ReopenPullRequest(_ context.Context, id string) (model.PRState, error) {
 	f.mu.Lock()
 	f.reopenPullRequestIDs = append(f.reopenPullRequestIDs, id)
 	err := f.reopenPullRequestErr
 	f.mu.Unlock()
 	if err != nil {
-		return "", model.RateLimit{}, err
+		return "", err
 	}
-	return model.PRStateOpen, model.RateLimit{}, nil
+	return model.PRStateOpen, nil
 }
 
 // SetCreatePullRequestResult makes CreatePullRequest succeed, returning pr.
@@ -1325,16 +1325,16 @@ func (f *fakeGitHub) CreatePullRequestCalls() []createPullRequestCall {
 	return append([]createPullRequestCall(nil), f.createPullRequestCalls...)
 }
 
-func (f *fakeGitHub) CreatePullRequest(_ context.Context, in gh.CreatePullRequestInput) (model.PullRequest, model.RateLimit, error) {
+func (f *fakeGitHub) CreatePullRequest(_ context.Context, in gh.CreatePullRequestInput) (model.PullRequest, error) {
 	f.mu.Lock()
 	f.createPullRequestCalls = append(f.createPullRequestCalls, createPullRequestCall{in: in})
 	err := f.createPullRequestErr
 	result := f.createPullRequestResult
 	f.mu.Unlock()
 	if err != nil {
-		return model.PullRequest{}, model.RateLimit{}, err
+		return model.PullRequest{}, err
 	}
-	return result, model.RateLimit{}, nil
+	return result, nil
 }
 
 func fixtureRef(number int) model.PRRef {

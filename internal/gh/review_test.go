@@ -32,8 +32,7 @@ func TestClient_CreatePendingReview_Success(t *testing.T) {
 		"data": {
 			"addPullRequestReview": {
 				"pullRequestReview": {"id": "PRR_1", "state": "PENDING", "body": ""}
-			},
-			"rateLimit": {"remaining": 4999, "resetAt": "2026-09-12T01:00:00Z"}
+			}
 		}
 	}`)
 
@@ -44,7 +43,7 @@ func TestClient_CreatePendingReview_Success(t *testing.T) {
 	})
 	defer srv.Close()
 
-	review, rl, err := c.CreatePendingReview(context.Background(), "PR_1")
+	review, err := c.CreatePendingReview(context.Background(), "PR_1")
 	if err != nil {
 		t.Fatalf("CreatePendingReview() error = %v", err)
 	}
@@ -57,9 +56,6 @@ func TestClient_CreatePendingReview_Success(t *testing.T) {
 	if review.ID != "PRR_1" || review.State != model.ReviewStatePending {
 		t.Errorf("CreatePendingReview() review = %+v, want ID=PRR_1 State=PENDING", review)
 	}
-	if !rl.Known || rl.Remaining != 4999 {
-		t.Errorf("CreatePendingReview() rate limit = %+v, want Remaining=4999, Known=true", rl)
-	}
 }
 
 func TestClient_CreatePendingReview_ValidationError(t *testing.T) {
@@ -70,7 +66,7 @@ func TestClient_CreatePendingReview_ValidationError(t *testing.T) {
 	})
 	defer srv.Close()
 
-	_, _, err := c.CreatePendingReview(context.Background(), "PR_1")
+	_, err := c.CreatePendingReview(context.Background(), "PR_1")
 	var ghErr *Error
 	if !errors.As(err, &ghErr) {
 		t.Fatalf("CreatePendingReview() error = %v (%T), want *gh.Error", err, err)
@@ -90,8 +86,7 @@ func TestClient_AddReviewNow_Success(t *testing.T) {
 		"data": {
 			"addPullRequestReview": {
 				"pullRequestReview": {"id": "PRR_2", "state": "COMMENTED", "body": ""}
-			},
-			"rateLimit": {"remaining": 4998, "resetAt": "2026-09-12T01:00:00Z"}
+			}
 		}
 	}`)
 
@@ -105,7 +100,7 @@ func TestClient_AddReviewNow_Success(t *testing.T) {
 	threads := []DraftThread{
 		{Path: "a.go", Line: 12, Side: model.DiffSideRight, Body: "nit"},
 	}
-	review, rl, err := c.AddReviewNow(context.Background(), "PR_1", threads, "")
+	review, err := c.AddReviewNow(context.Background(), "PR_1", threads, "")
 	if err != nil {
 		t.Fatalf("AddReviewNow() error = %v", err)
 	}
@@ -129,17 +124,13 @@ func TestClient_AddReviewNow_Success(t *testing.T) {
 	if review.ID != "PRR_2" {
 		t.Errorf("AddReviewNow() review.ID = %q, want PRR_2", review.ID)
 	}
-	if !rl.Known || rl.Remaining != 4998 {
-		t.Errorf("AddReviewNow() rate limit = %+v, want Remaining=4998, Known=true", rl)
-	}
 }
 
 func TestClient_AddReviewNow_RangeThreadIncludesStartLine(t *testing.T) {
 	var gotVars map[string]any
 	fixture := []byte(`{
 		"data": {
-			"addPullRequestReview": {"pullRequestReview": {"id": "PRR_3", "state": "COMMENTED", "body": ""}},
-			"rateLimit": {"remaining": 4997, "resetAt": "2026-09-12T01:00:00Z"}
+			"addPullRequestReview": {"pullRequestReview": {"id": "PRR_3", "state": "COMMENTED", "body": ""}}
 		}
 	}`)
 	c, srv := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
@@ -152,7 +143,7 @@ func TestClient_AddReviewNow_RangeThreadIncludesStartLine(t *testing.T) {
 	threads := []DraftThread{
 		{Path: "a.go", Line: 15, Side: model.DiffSideRight, StartLine: 12, StartSide: model.DiffSideRight, Body: "range"},
 	}
-	if _, _, err := c.AddReviewNow(context.Background(), "PR_1", threads, ""); err != nil {
+	if _, err := c.AddReviewNow(context.Background(), "PR_1", threads, ""); err != nil {
 		t.Fatalf("AddReviewNow() error = %v", err)
 	}
 
@@ -167,8 +158,7 @@ func TestClient_AddReviewNowWithEvent_Success(t *testing.T) {
 	var gotVars map[string]any
 	fixture := []byte(`{
 		"data": {
-			"addPullRequestReview": {"pullRequestReview": {"id": "PRR_4", "state": "APPROVED", "body": "lgtm"}},
-			"rateLimit": {"remaining": 4996, "resetAt": "2026-09-12T01:00:00Z"}
+			"addPullRequestReview": {"pullRequestReview": {"id": "PRR_4", "state": "APPROVED", "body": "lgtm"}}
 		}
 	}`)
 	c, srv := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
@@ -178,7 +168,7 @@ func TestClient_AddReviewNowWithEvent_Success(t *testing.T) {
 	})
 	defer srv.Close()
 
-	review, _, err := c.AddReviewNowWithEvent(context.Background(), "PR_1", model.ReviewEventApprove, "lgtm")
+	review, err := c.AddReviewNowWithEvent(context.Background(), "PR_1", model.ReviewEventApprove, "lgtm")
 	if err != nil {
 		t.Fatalf("AddReviewNowWithEvent() error = %v", err)
 	}
@@ -225,8 +215,7 @@ func TestClient_AddReviewThread_LineSubject(t *testing.T) {
 						"pullRequestReview": {"id": "PRR_1"}
 					}]}
 				}
-			},
-			"rateLimit": {"remaining": 4995, "resetAt": "2026-09-12T01:00:00Z"}
+			}
 		}
 	}`)
 
@@ -237,7 +226,7 @@ func TestClient_AddReviewThread_LineSubject(t *testing.T) {
 	})
 	defer srv.Close()
 
-	thread, rl, err := c.AddReviewThread(context.Background(), ThreadInput{
+	thread, err := c.AddReviewThread(context.Background(), ThreadInput{
 		PullRequestReviewID: "PRR_1",
 		Path:                "a.go",
 		Line:                12,
@@ -273,9 +262,6 @@ func TestClient_AddReviewThread_LineSubject(t *testing.T) {
 		thread.Comments[0].ID != want.Comments[0].ID || thread.Comments[0].ReviewID != want.Comments[0].ReviewID {
 		t.Errorf("AddReviewThread() thread = %+v, want %+v", thread, want)
 	}
-	if !rl.Known || rl.Remaining != 4995 {
-		t.Errorf("AddReviewThread() rate limit = %+v, want Remaining=4995, Known=true", rl)
-	}
 }
 
 func TestClient_AddReviewThread_FileSubjectOmitsLine(t *testing.T) {
@@ -289,8 +275,7 @@ func TestClient_AddReviewThread_FileSubjectOmitsLine(t *testing.T) {
 					"viewerCanReply": true, "viewerCanResolve": true, "viewerCanUnresolve": false,
 					"comments": {"nodes": []}
 				}
-			},
-			"rateLimit": {"remaining": 4994, "resetAt": "2026-09-12T01:00:00Z"}
+			}
 		}
 	}`)
 	c, srv := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
@@ -300,7 +285,7 @@ func TestClient_AddReviewThread_FileSubjectOmitsLine(t *testing.T) {
 	})
 	defer srv.Close()
 
-	thread, _, err := c.AddReviewThread(context.Background(), ThreadInput{
+	thread, err := c.AddReviewThread(context.Background(), ThreadInput{
 		PullRequestReviewID: "PRR_1", Path: "a.go", SubjectType: model.ThreadSubjectFile, Body: "file comment",
 	})
 	if err != nil {
@@ -327,8 +312,7 @@ func TestClient_AddThreadReply_WithPendingReview(t *testing.T) {
 					"viewerCanUpdate": true, "viewerCanDelete": true,
 					"pullRequestReview": {"id": "PRR_1"}
 				}
-			},
-			"rateLimit": {"remaining": 4993, "resetAt": "2026-09-12T01:00:00Z"}
+			}
 		}
 	}`)
 	c, srv := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
@@ -338,7 +322,7 @@ func TestClient_AddThreadReply_WithPendingReview(t *testing.T) {
 	})
 	defer srv.Close()
 
-	comment, rl, err := c.AddThreadReply(context.Background(), "RT_1", "reply", "PRR_1")
+	comment, err := c.AddThreadReply(context.Background(), "RT_1", "reply", "PRR_1")
 	if err != nil {
 		t.Fatalf("AddThreadReply() error = %v", err)
 	}
@@ -350,9 +334,6 @@ func TestClient_AddThreadReply_WithPendingReview(t *testing.T) {
 	}
 	if comment.ID != "RC_2" || comment.ReviewID != "PRR_1" {
 		t.Errorf("AddThreadReply() comment = %+v, want ID=RC_2 ReviewID=PRR_1", comment)
-	}
-	if !rl.Known || rl.Remaining != 4993 {
-		t.Errorf("AddThreadReply() rate limit = %+v, want Remaining=4993, Known=true", rl)
 	}
 }
 
@@ -367,8 +348,7 @@ func TestClient_AddThreadReply_NoPendingReviewOmitsReviewID(t *testing.T) {
 					"url": "https://example.com/RC_3", "reactionGroups": [],
 					"viewerCanUpdate": true, "viewerCanDelete": true, "pullRequestReview": {"id": "PRR_2"}
 				}
-			},
-			"rateLimit": {"remaining": 4992, "resetAt": "2026-09-12T01:00:00Z"}
+			}
 		}
 	}`)
 	c, srv := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
@@ -378,7 +358,7 @@ func TestClient_AddThreadReply_NoPendingReviewOmitsReviewID(t *testing.T) {
 	})
 	defer srv.Close()
 
-	if _, _, err := c.AddThreadReply(context.Background(), "RT_1", "reply", ""); err != nil {
+	if _, err := c.AddThreadReply(context.Background(), "RT_1", "reply", ""); err != nil {
 		t.Fatalf("AddThreadReply() error = %v", err)
 	}
 	if gotVars["reviewId"] != nil {
@@ -391,8 +371,7 @@ func TestClient_SubmitReview_Success(t *testing.T) {
 	var gotVars map[string]any
 	fixture := []byte(`{
 		"data": {
-			"submitPullRequestReview": {"pullRequestReview": {"id": "PRR_1", "state": "APPROVED", "body": "lgtm"}},
-			"rateLimit": {"remaining": 4991, "resetAt": "2026-09-12T01:00:00Z"}
+			"submitPullRequestReview": {"pullRequestReview": {"id": "PRR_1", "state": "APPROVED", "body": "lgtm"}}
 		}
 	}`)
 	c, srv := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
@@ -402,7 +381,7 @@ func TestClient_SubmitReview_Success(t *testing.T) {
 	})
 	defer srv.Close()
 
-	review, rl, err := c.SubmitReview(context.Background(), "PRR_1", model.ReviewEventApprove, "lgtm")
+	review, err := c.SubmitReview(context.Background(), "PRR_1", model.ReviewEventApprove, "lgtm")
 	if err != nil {
 		t.Fatalf("SubmitReview() error = %v", err)
 	}
@@ -415,9 +394,6 @@ func TestClient_SubmitReview_Success(t *testing.T) {
 	if review.State != model.ReviewStateApproved {
 		t.Errorf("SubmitReview() review.State = %v, want APPROVED", review.State)
 	}
-	if !rl.Known || rl.Remaining != 4991 {
-		t.Errorf("SubmitReview() rate limit = %+v, want Remaining=4991, Known=true", rl)
-	}
 }
 
 func TestClient_SubmitReview_ValidationError(t *testing.T) {
@@ -428,7 +404,7 @@ func TestClient_SubmitReview_ValidationError(t *testing.T) {
 	})
 	defer srv.Close()
 
-	_, _, err := c.SubmitReview(context.Background(), "PRR_1", model.ReviewEventApprove, "")
+	_, err := c.SubmitReview(context.Background(), "PRR_1", model.ReviewEventApprove, "")
 	var ghErr *Error
 	if !errors.As(err, &ghErr) || ghErr.Kind != KindValidation {
 		t.Fatalf("SubmitReview() error = %v, want a KindValidation *gh.Error", err)
@@ -451,7 +427,7 @@ func TestClient_SubmitReview_UnprocessableGraphQLError(t *testing.T) {
 	})
 	defer srv.Close()
 
-	_, _, err := c.SubmitReview(context.Background(), "PRR_1", model.ReviewEventComment, "")
+	_, err := c.SubmitReview(context.Background(), "PRR_1", model.ReviewEventComment, "")
 	var ghErr *Error
 	if !errors.As(err, &ghErr) {
 		t.Fatalf("SubmitReview() error = %v (%T), want *gh.Error", err, err)
@@ -469,8 +445,7 @@ func TestClient_DeletePendingReview_Success(t *testing.T) {
 	var gotVars map[string]any
 	fixture := []byte(`{
 		"data": {
-			"deletePullRequestReview": {"pullRequestReview": {"id": "PRR_1"}},
-			"rateLimit": {"remaining": 4990, "resetAt": "2026-09-12T01:00:00Z"}
+			"deletePullRequestReview": {"pullRequestReview": {"id": "PRR_1"}}
 		}
 	}`)
 	c, srv := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
@@ -480,7 +455,7 @@ func TestClient_DeletePendingReview_Success(t *testing.T) {
 	})
 	defer srv.Close()
 
-	rl, err := c.DeletePendingReview(context.Background(), "PRR_1")
+	err := c.DeletePendingReview(context.Background(), "PRR_1")
 	if err != nil {
 		t.Fatalf("DeletePendingReview() error = %v", err)
 	}
@@ -490,9 +465,6 @@ func TestClient_DeletePendingReview_Success(t *testing.T) {
 	if gotVars["reviewId"] != "PRR_1" {
 		t.Errorf("request variables = %+v, want reviewId=PRR_1", gotVars)
 	}
-	if !rl.Known || rl.Remaining != 4990 {
-		t.Errorf("DeletePendingReview() rate limit = %+v, want Remaining=4990, Known=true", rl)
-	}
 }
 
 func TestClient_DeletePendingReview_NotFoundError(t *testing.T) {
@@ -501,7 +473,7 @@ func TestClient_DeletePendingReview_NotFoundError(t *testing.T) {
 	})
 	defer srv.Close()
 
-	_, err := c.DeletePendingReview(context.Background(), "PRR_missing")
+	err := c.DeletePendingReview(context.Background(), "PRR_missing")
 	var ghErr *Error
 	if !errors.As(err, &ghErr) || ghErr.Kind != KindNotFound {
 		t.Fatalf("DeletePendingReview() error = %v, want a KindNotFound *gh.Error", err)
@@ -520,8 +492,7 @@ func TestClient_UpdateReviewComment_Success(t *testing.T) {
 					"url": "https://example.com/RC_1", "reactionGroups": [],
 					"viewerCanUpdate": true, "viewerCanDelete": true, "pullRequestReview": {"id": "PRR_1"}
 				}
-			},
-			"rateLimit": {"remaining": 4989, "resetAt": "2026-09-12T01:00:00Z"}
+			}
 		}
 	}`)
 	c, srv := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
@@ -531,7 +502,7 @@ func TestClient_UpdateReviewComment_Success(t *testing.T) {
 	})
 	defer srv.Close()
 
-	comment, rl, err := c.UpdateReviewComment(context.Background(), "RC_1", "edited")
+	comment, err := c.UpdateReviewComment(context.Background(), "RC_1", "edited")
 	if err != nil {
 		t.Fatalf("UpdateReviewComment() error = %v", err)
 	}
@@ -544,9 +515,6 @@ func TestClient_UpdateReviewComment_Success(t *testing.T) {
 	if comment.Body != "edited" {
 		t.Errorf("UpdateReviewComment() comment.Body = %q, want %q", comment.Body, "edited")
 	}
-	if !rl.Known || rl.Remaining != 4989 {
-		t.Errorf("UpdateReviewComment() rate limit = %+v, want Remaining=4989, Known=true", rl)
-	}
 }
 
 func TestClient_UpdateReviewComment_AuthError(t *testing.T) {
@@ -555,7 +523,7 @@ func TestClient_UpdateReviewComment_AuthError(t *testing.T) {
 	})
 	defer srv.Close()
 
-	_, _, err := c.UpdateReviewComment(context.Background(), "RC_1", "edited")
+	_, err := c.UpdateReviewComment(context.Background(), "RC_1", "edited")
 	var ghErr *Error
 	if !errors.As(err, &ghErr) || ghErr.Kind != KindAuth {
 		t.Fatalf("UpdateReviewComment() error = %v, want a KindAuth *gh.Error", err)
@@ -567,8 +535,7 @@ func TestClient_DeleteReviewComment_Success(t *testing.T) {
 	var gotVars map[string]any
 	fixture := []byte(`{
 		"data": {
-			"deletePullRequestReviewComment": {"clientMutationId": null},
-			"rateLimit": {"remaining": 4988, "resetAt": "2026-09-12T01:00:00Z"}
+			"deletePullRequestReviewComment": {"clientMutationId": null}
 		}
 	}`)
 	c, srv := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
@@ -578,7 +545,7 @@ func TestClient_DeleteReviewComment_Success(t *testing.T) {
 	})
 	defer srv.Close()
 
-	rl, err := c.DeleteReviewComment(context.Background(), "RC_1")
+	err := c.DeleteReviewComment(context.Background(), "RC_1")
 	if err != nil {
 		t.Fatalf("DeleteReviewComment() error = %v", err)
 	}
@@ -588,9 +555,6 @@ func TestClient_DeleteReviewComment_Success(t *testing.T) {
 	if gotVars["id"] != "RC_1" {
 		t.Errorf("request variables = %+v, want id=RC_1", gotVars)
 	}
-	if !rl.Known || rl.Remaining != 4988 {
-		t.Errorf("DeleteReviewComment() rate limit = %+v, want Remaining=4988, Known=true", rl)
-	}
 }
 
 func TestClient_DeleteReviewComment_NotFoundError(t *testing.T) {
@@ -599,7 +563,7 @@ func TestClient_DeleteReviewComment_NotFoundError(t *testing.T) {
 	})
 	defer srv.Close()
 
-	_, err := c.DeleteReviewComment(context.Background(), "RC_missing")
+	err := c.DeleteReviewComment(context.Background(), "RC_missing")
 	var ghErr *Error
 	if !errors.As(err, &ghErr) || ghErr.Kind != KindNotFound {
 		t.Fatalf("DeleteReviewComment() error = %v, want a KindNotFound *gh.Error", err)
@@ -614,8 +578,7 @@ func TestClient_ResolveThread_Success(t *testing.T) {
 			"resolveReviewThread": {"thread": {
 				"id": "RT_1", "isResolved": true,
 				"viewerCanResolve": false, "viewerCanUnresolve": true
-			}},
-			"rateLimit": {"remaining": 4987, "resetAt": "2026-09-12T01:00:00Z"}
+			}}
 		}
 	}`)
 	c, srv := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
@@ -625,7 +588,7 @@ func TestClient_ResolveThread_Success(t *testing.T) {
 	})
 	defer srv.Close()
 
-	thread, rl, err := c.ResolveThread(context.Background(), "RT_1")
+	thread, err := c.ResolveThread(context.Background(), "RT_1")
 	if err != nil {
 		t.Fatalf("ResolveThread() error = %v", err)
 	}
@@ -641,9 +604,6 @@ func TestClient_ResolveThread_Success(t *testing.T) {
 	if thread.ViewerCanResolve || !thread.ViewerCanUnresolve {
 		t.Errorf("ResolveThread() thread = %+v, want ViewerCanResolve=false ViewerCanUnresolve=true", thread)
 	}
-	if !rl.Known || rl.Remaining != 4987 {
-		t.Errorf("ResolveThread() rate limit = %+v, want Remaining=4987, Known=true", rl)
-	}
 }
 
 func TestClient_ResolveThread_ValidationError(t *testing.T) {
@@ -654,7 +614,7 @@ func TestClient_ResolveThread_ValidationError(t *testing.T) {
 	})
 	defer srv.Close()
 
-	_, _, err := c.ResolveThread(context.Background(), "RT_1")
+	_, err := c.ResolveThread(context.Background(), "RT_1")
 	var ghErr *Error
 	if !errors.As(err, &ghErr) || ghErr.Kind != KindValidation {
 		t.Fatalf("ResolveThread() error = %v, want a KindValidation *gh.Error", err)
@@ -672,8 +632,7 @@ func TestClient_UnresolveThread_Success(t *testing.T) {
 			"unresolveReviewThread": {"thread": {
 				"id": "RT_1", "isResolved": false,
 				"viewerCanResolve": true, "viewerCanUnresolve": false
-			}},
-			"rateLimit": {"remaining": 4986, "resetAt": "2026-09-12T01:00:00Z"}
+			}}
 		}
 	}`)
 	c, srv := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
@@ -683,7 +642,7 @@ func TestClient_UnresolveThread_Success(t *testing.T) {
 	})
 	defer srv.Close()
 
-	thread, rl, err := c.UnresolveThread(context.Background(), "RT_1")
+	thread, err := c.UnresolveThread(context.Background(), "RT_1")
 	if err != nil {
 		t.Fatalf("UnresolveThread() error = %v", err)
 	}
@@ -699,9 +658,6 @@ func TestClient_UnresolveThread_Success(t *testing.T) {
 	if !thread.ViewerCanResolve || thread.ViewerCanUnresolve {
 		t.Errorf("UnresolveThread() thread = %+v, want ViewerCanResolve=true ViewerCanUnresolve=false", thread)
 	}
-	if !rl.Known || rl.Remaining != 4986 {
-		t.Errorf("UnresolveThread() rate limit = %+v, want Remaining=4986, Known=true", rl)
-	}
 }
 
 func TestClient_UnresolveThread_NotFoundError(t *testing.T) {
@@ -710,7 +666,7 @@ func TestClient_UnresolveThread_NotFoundError(t *testing.T) {
 	})
 	defer srv.Close()
 
-	_, _, err := c.UnresolveThread(context.Background(), "RT_missing")
+	_, err := c.UnresolveThread(context.Background(), "RT_missing")
 	var ghErr *Error
 	if !errors.As(err, &ghErr) || ghErr.Kind != KindNotFound {
 		t.Fatalf("UnresolveThread() error = %v, want a KindNotFound *gh.Error", err)

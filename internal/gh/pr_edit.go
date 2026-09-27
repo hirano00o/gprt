@@ -66,7 +66,6 @@ type updatePullRequestResponse struct {
 	UpdatePullRequest *struct {
 		PullRequest *updatePullRequestNode `json:"pullRequest"`
 	} `json:"updatePullRequest"`
-	RateLimit *rateLimitFragment `json:"rateLimit"`
 }
 
 // UpdatePullRequest edits an existing pull request's title, body, base
@@ -79,7 +78,7 @@ type updatePullRequestResponse struct {
 // already holds rather than replacing it outright.
 func (c *Client) UpdatePullRequest(
 	ctx context.Context, id string, in UpdatePullRequestInput,
-) (model.PullRequest, model.RateLimit, error) {
+) (model.PullRequest, error) {
 	variables := map[string]any{
 		"id":          id,
 		"title":       stringPtrVariable(in.Title),
@@ -89,11 +88,10 @@ func (c *Client) UpdatePullRequest(
 	}
 	var resp updatePullRequestResponse
 	if err := c.gql.DoWithContext(ctx, updatePullRequestQuery(), variables, &resp); err != nil {
-		return model.PullRequest{}, model.RateLimit{}, classify(err)
+		return model.PullRequest{}, classify(err)
 	}
 	if resp.UpdatePullRequest == nil || resp.UpdatePullRequest.PullRequest == nil {
-		return model.PullRequest{}, resp.RateLimit.toModel(),
-			&Error{Kind: KindUnknown, Message: "updatePullRequest: no pull request returned"}
+		return model.PullRequest{}, &Error{Kind: KindUnknown, Message: "updatePullRequest: no pull request returned"}
 	}
 
 	node := resp.UpdatePullRequest.PullRequest
@@ -108,7 +106,7 @@ func (c *Client) UpdatePullRequest(
 		Labels:      labels,
 		UpdatedAt:   node.UpdatedAt,
 	}
-	return pr, resp.RateLimit.toModel(), nil
+	return pr, nil
 }
 
 // requestReviewersResponse is the decoded shape of
@@ -123,7 +121,6 @@ type requestReviewersResponse struct {
 			} `json:"reviewRequests"`
 		} `json:"pullRequest"`
 	} `json:"requestReviews"`
-	RateLimit *rateLimitFragment `json:"rateLimit"`
 }
 
 // nonNilIDs returns a non-nil, empty slice for a nil ids, or ids
@@ -147,14 +144,14 @@ func nonNilIDs(ids []string) []string {
 // pull request's full, refreshed set of review requests.
 func (c *Client) RequestReviewers(
 	ctx context.Context, id string, userIDs, teamIDs []string, union bool,
-) ([]model.Reviewer, model.RateLimit, error) {
+) ([]model.Reviewer, error) {
 	variables := map[string]any{"id": id, "userIds": nonNilIDs(userIDs), "teamIds": nonNilIDs(teamIDs), "union": union}
 	var resp requestReviewersResponse
 	if err := c.gql.DoWithContext(ctx, requestReviewersQuery(), variables, &resp); err != nil {
-		return nil, model.RateLimit{}, classify(err)
+		return nil, classify(err)
 	}
 	if resp.RequestReviews == nil || resp.RequestReviews.PullRequest == nil {
-		return nil, resp.RateLimit.toModel(), &Error{Kind: KindUnknown, Message: "requestReviews: no pull request returned"}
+		return nil, &Error{Kind: KindUnknown, Message: "requestReviews: no pull request returned"}
 	}
 
 	nodes := resp.RequestReviews.PullRequest.ReviewRequests.Nodes
@@ -162,7 +159,7 @@ func (c *Client) RequestReviewers(
 	for _, n := range nodes {
 		reviewers = append(reviewers, mapReviewer(n))
 	}
-	return reviewers, resp.RateLimit.toModel(), nil
+	return reviewers, nil
 }
 
 // markReadyForReviewResponse is the decoded shape of
@@ -173,24 +170,22 @@ type markReadyForReviewResponse struct {
 			IsDraft bool `json:"isDraft"`
 		} `json:"pullRequest"`
 	} `json:"markPullRequestReadyForReview"`
-	RateLimit *rateLimitFragment `json:"rateLimit"`
 }
 
 // MarkReadyForReview takes id out of draft via GraphQL's
 // markPullRequestReadyForReview mutation, returning the pull request's
 // post-toggle IsDraft (always false on success, but read back from the
 // server rather than assumed).
-func (c *Client) MarkReadyForReview(ctx context.Context, id string) (bool, model.RateLimit, error) {
+func (c *Client) MarkReadyForReview(ctx context.Context, id string) (bool, error) {
 	variables := map[string]any{"id": id}
 	var resp markReadyForReviewResponse
 	if err := c.gql.DoWithContext(ctx, markReadyForReviewQuery(), variables, &resp); err != nil {
-		return false, model.RateLimit{}, classify(err)
+		return false, classify(err)
 	}
 	if resp.MarkPullRequestReadyForReview == nil || resp.MarkPullRequestReadyForReview.PullRequest == nil {
-		return false, resp.RateLimit.toModel(),
-			&Error{Kind: KindUnknown, Message: "markPullRequestReadyForReview: no pull request returned"}
+		return false, &Error{Kind: KindUnknown, Message: "markPullRequestReadyForReview: no pull request returned"}
 	}
-	return resp.MarkPullRequestReadyForReview.PullRequest.IsDraft, resp.RateLimit.toModel(), nil
+	return resp.MarkPullRequestReadyForReview.PullRequest.IsDraft, nil
 }
 
 // convertToDraftResponse is the decoded shape of
@@ -201,22 +196,20 @@ type convertToDraftResponse struct {
 			IsDraft bool `json:"isDraft"`
 		} `json:"pullRequest"`
 	} `json:"convertPullRequestToDraft"`
-	RateLimit *rateLimitFragment `json:"rateLimit"`
 }
 
 // ConvertToDraft marks id as a draft via GraphQL's
 // convertPullRequestToDraft mutation, returning the pull request's
 // post-toggle IsDraft (always true on success, but read back from the
 // server rather than assumed).
-func (c *Client) ConvertToDraft(ctx context.Context, id string) (bool, model.RateLimit, error) {
+func (c *Client) ConvertToDraft(ctx context.Context, id string) (bool, error) {
 	variables := map[string]any{"id": id}
 	var resp convertToDraftResponse
 	if err := c.gql.DoWithContext(ctx, convertToDraftQuery(), variables, &resp); err != nil {
-		return false, model.RateLimit{}, classify(err)
+		return false, classify(err)
 	}
 	if resp.ConvertPullRequestToDraft == nil || resp.ConvertPullRequestToDraft.PullRequest == nil {
-		return false, resp.RateLimit.toModel(),
-			&Error{Kind: KindUnknown, Message: "convertPullRequestToDraft: no pull request returned"}
+		return false, &Error{Kind: KindUnknown, Message: "convertPullRequestToDraft: no pull request returned"}
 	}
-	return resp.ConvertPullRequestToDraft.PullRequest.IsDraft, resp.RateLimit.toModel(), nil
+	return resp.ConvertPullRequestToDraft.PullRequest.IsDraft, nil
 }

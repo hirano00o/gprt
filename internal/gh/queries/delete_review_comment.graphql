@@ -2,8 +2,4 @@ mutation DeleteReviewComment($id: ID!) {
   deletePullRequestReviewComment(input: { id: $id }) {
     clientMutationId
   }
-  rateLimit {
-    remaining
-    resetAt
-  }
 }

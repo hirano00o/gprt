@@ -36,7 +36,6 @@ type createPullRequestResponse struct {
 			URL string `json:"url"`
 		} `json:"pullRequest"`
 	} `json:"createPullRequest"`
-	RateLimit *rateLimitFragment `json:"rateLimit"`
 }
 
 // CreatePullRequest opens a new pull request via GraphQL's
@@ -46,7 +45,7 @@ type createPullRequestResponse struct {
 // zero value — the store's apply (see internal/store's CreatePullRequest)
 // opens the new pull request by ref rather than trying to seed its full
 // detail from this minimal payload.
-func (c *Client) CreatePullRequest(ctx context.Context, in CreatePullRequestInput) (model.PullRequest, model.RateLimit, error) {
+func (c *Client) CreatePullRequest(ctx context.Context, in CreatePullRequestInput) (model.PullRequest, error) {
 	variables := map[string]any{
 		"repositoryId": in.RepositoryID,
 		"baseRefName":  in.BaseRefName,
@@ -57,11 +56,10 @@ func (c *Client) CreatePullRequest(ctx context.Context, in CreatePullRequestInpu
 	}
 	var resp createPullRequestResponse
 	if err := c.gql.DoWithContext(ctx, createPullRequestQuery(), variables, &resp); err != nil {
-		return model.PullRequest{}, model.RateLimit{}, classify(err)
+		return model.PullRequest{}, classify(err)
 	}
 	if resp.CreatePullRequest == nil || resp.CreatePullRequest.PullRequest == nil {
-		return model.PullRequest{}, resp.RateLimit.toModel(),
-			&Error{Kind: KindUnknown, Message: "createPullRequest: no pull request returned"}
+		return model.PullRequest{}, &Error{Kind: KindUnknown, Message: "createPullRequest: no pull request returned"}
 	}
 
 	node := resp.CreatePullRequest.PullRequest
@@ -74,5 +72,5 @@ func (c *Client) CreatePullRequest(ctx context.Context, in CreatePullRequestInpu
 		},
 		URL: node.URL,
 	}
-	return pr, resp.RateLimit.toModel(), nil
+	return pr, nil
 }

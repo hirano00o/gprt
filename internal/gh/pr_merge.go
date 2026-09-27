@@ -24,7 +24,6 @@ type mergePullRequestResponse struct {
 			MergedAt time.Time `json:"mergedAt"`
 		} `json:"pullRequest"`
 	} `json:"mergePullRequest"`
-	RateLimit *rateLimitFragment `json:"rateLimit"`
 }
 
 // MergePullRequest merges id via GraphQL's mergePullRequest mutation.
@@ -40,7 +39,7 @@ type mergePullRequestResponse struct {
 // Merged, and MergedAt; every other field is left at its zero value.
 func (c *Client) MergePullRequest(
 	ctx context.Context, id string, method model.MergeMethod, commitHeadline, commitBody *string, expectedHeadOID string,
-) (model.PullRequest, model.RateLimit, error) {
+) (model.PullRequest, error) {
 	variables := map[string]any{
 		"id":              id,
 		"mergeMethod":     string(method),
@@ -50,11 +49,10 @@ func (c *Client) MergePullRequest(
 	}
 	var resp mergePullRequestResponse
 	if err := c.gql.DoWithContext(ctx, mergePullRequestQuery(), variables, &resp); err != nil {
-		return model.PullRequest{}, model.RateLimit{}, classify(err)
+		return model.PullRequest{}, classify(err)
 	}
 	if resp.MergePullRequest == nil || resp.MergePullRequest.PullRequest == nil {
-		return model.PullRequest{}, resp.RateLimit.toModel(),
-			&Error{Kind: KindUnknown, Message: "mergePullRequest: no pull request returned"}
+		return model.PullRequest{}, &Error{Kind: KindUnknown, Message: "mergePullRequest: no pull request returned"}
 	}
 
 	node := resp.MergePullRequest.PullRequest
@@ -63,7 +61,7 @@ func (c *Client) MergePullRequest(
 		Merged:   node.Merged,
 		MergedAt: node.MergedAt,
 	}
-	return pr, resp.RateLimit.toModel(), nil
+	return pr, nil
 }
 
 // closePullRequestResponse is the decoded shape of
@@ -74,22 +72,21 @@ type closePullRequestResponse struct {
 			State string `json:"state"`
 		} `json:"pullRequest"`
 	} `json:"closePullRequest"`
-	RateLimit *rateLimitFragment `json:"rateLimit"`
 }
 
 // ClosePullRequest closes id via GraphQL's closePullRequest mutation,
 // returning its post-close state (read back from the server rather than
 // assumed CLOSED, matching every other mutation in this package).
-func (c *Client) ClosePullRequest(ctx context.Context, id string) (model.PRState, model.RateLimit, error) {
+func (c *Client) ClosePullRequest(ctx context.Context, id string) (model.PRState, error) {
 	variables := map[string]any{"id": id}
 	var resp closePullRequestResponse
 	if err := c.gql.DoWithContext(ctx, closePullRequestQuery(), variables, &resp); err != nil {
-		return "", model.RateLimit{}, classify(err)
+		return "", classify(err)
 	}
 	if resp.ClosePullRequest == nil || resp.ClosePullRequest.PullRequest == nil {
-		return "", resp.RateLimit.toModel(), &Error{Kind: KindUnknown, Message: "closePullRequest: no pull request returned"}
+		return "", &Error{Kind: KindUnknown, Message: "closePullRequest: no pull request returned"}
 	}
-	return model.PRState(resp.ClosePullRequest.PullRequest.State), resp.RateLimit.toModel(), nil
+	return model.PRState(resp.ClosePullRequest.PullRequest.State), nil
 }
 
 // reopenPullRequestResponse is the decoded shape of
@@ -100,19 +97,18 @@ type reopenPullRequestResponse struct {
 			State string `json:"state"`
 		} `json:"pullRequest"`
 	} `json:"reopenPullRequest"`
-	RateLimit *rateLimitFragment `json:"rateLimit"`
 }
 
 // ReopenPullRequest reopens id via GraphQL's reopenPullRequest mutation,
 // returning its post-reopen state.
-func (c *Client) ReopenPullRequest(ctx context.Context, id string) (model.PRState, model.RateLimit, error) {
+func (c *Client) ReopenPullRequest(ctx context.Context, id string) (model.PRState, error) {
 	variables := map[string]any{"id": id}
 	var resp reopenPullRequestResponse
 	if err := c.gql.DoWithContext(ctx, reopenPullRequestQuery(), variables, &resp); err != nil {
-		return "", model.RateLimit{}, classify(err)
+		return "", classify(err)
 	}
 	if resp.ReopenPullRequest == nil || resp.ReopenPullRequest.PullRequest == nil {
-		return "", resp.RateLimit.toModel(), &Error{Kind: KindUnknown, Message: "reopenPullRequest: no pull request returned"}
+		return "", &Error{Kind: KindUnknown, Message: "reopenPullRequest: no pull request returned"}
 	}
-	return model.PRState(resp.ReopenPullRequest.PullRequest.State), resp.RateLimit.toModel(), nil
+	return model.PRState(resp.ReopenPullRequest.PullRequest.State), nil
 }

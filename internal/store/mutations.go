@@ -192,12 +192,11 @@ func (s *Store) AddComment(body string) bool {
 	subjectID := s.currentPR.ID
 
 	s.enqueueMutation("add_comment", func(ctx context.Context) (func(), error) {
-		comment, rl, err := s.deps.GitHub.AddIssueComment(ctx, subjectID, body)
+		comment, err := s.deps.GitHub.AddIssueComment(ctx, subjectID, body)
 		if err != nil {
 			return nil, err
 		}
 		return func() {
-			s.setRateLimit(rl)
 			s.appendTimelineComment(comment)
 			s.emit(Event{Kind: EventPRChanged})
 		}, nil
@@ -221,12 +220,11 @@ func (s *Store) EditComment(id, body string) bool {
 	}
 
 	s.enqueueMutation("edit_comment", func(ctx context.Context) (func(), error) {
-		comment, rl, err := s.deps.GitHub.UpdateIssueComment(ctx, id, body)
+		comment, err := s.deps.GitHub.UpdateIssueComment(ctx, id, body)
 		if err != nil {
 			return nil, err
 		}
 		return func() {
-			s.setRateLimit(rl)
 			s.replaceTimelineComment(comment)
 			s.emit(Event{Kind: EventPRChanged})
 		}, nil
@@ -247,12 +245,10 @@ func (s *Store) DeleteComment(id string) {
 	}
 
 	s.enqueueMutation("delete_comment", func(ctx context.Context) (func(), error) {
-		rl, err := s.deps.GitHub.DeleteIssueComment(ctx, id)
-		if err != nil {
+		if err := s.deps.GitHub.DeleteIssueComment(ctx, id); err != nil {
 			return nil, err
 		}
 		return func() {
-			s.setRateLimit(rl)
 			s.removeTimelineComment(id)
 			s.emit(Event{Kind: EventPRChanged})
 		}, nil

@@ -4,8 +4,4 @@ mutation ClosePullRequest($id: ID!) {
       state
     }
   }
-  rateLimit {
-    remaining
-    resetAt
-  }
 }

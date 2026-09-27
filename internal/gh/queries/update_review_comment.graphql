@@ -23,8 +23,4 @@ mutation UpdateReviewComment($id: ID!, $body: String!) {
       }
     }
   }
-  rateLimit {
-    remaining
-    resetAt
-  }
 }

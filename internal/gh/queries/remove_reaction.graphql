@@ -8,8 +8,4 @@ mutation RemoveReaction($subjectId: ID!, $content: ReactionContent!) {
       }
     }
   }
-  rateLimit {
-    remaining
-    resetAt
-  }
 }
