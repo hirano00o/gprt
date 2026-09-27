@@ -418,28 +418,43 @@ func TestDiffViewNextThreadAndPrevThread(t *testing.T) {
 	drawn(t, dv, 60, 40)
 
 	dv.MoveTop()
-	dv.NextThread()
+	if moved := dv.NextThread(); !moved {
+		t.Fatal("NextThread() from the top returned false, want true (t1 exists)")
+	}
 	first, ok := dv.CursorThread()
 	if !ok || first.ID != "t1" {
 		t.Fatalf("NextThread() from the top landed on %+v, ok=%v, want t1", first, ok)
 	}
 
-	dv.NextThread()
+	if moved := dv.NextThread(); !moved {
+		t.Fatal("second NextThread() returned false, want true (t2 exists)")
+	}
 	second, ok := dv.CursorThread()
 	if !ok || second.ID != "t2" {
 		t.Fatalf("second NextThread() landed on %+v, ok=%v, want t2", second, ok)
 	}
 
-	// No third thread: NextThread must not move (clamp, no wrap).
-	dv.NextThread()
+	// No third thread: NextThread must not move (clamp, no wrap) and must
+	// report false, so the router's own dispatch knows to fall forward into
+	// App.stepThread instead.
+	if moved := dv.NextThread(); moved {
+		t.Error("NextThread() past the last thread returned true, want false")
+	}
 	if id, _ := dv.CursorThread(); id.ID != "t2" {
 		t.Errorf("NextThread() past the last thread moved to %+v, want it to stay on t2", id)
 	}
 
-	dv.PrevThread()
+	if moved := dv.PrevThread(); !moved {
+		t.Fatal("PrevThread() returned false, want true (t1 exists)")
+	}
 	back, ok := dv.CursorThread()
 	if !ok || back.ID != "t1" {
 		t.Fatalf("PrevThread() = %+v, ok=%v, want t1", back, ok)
+	}
+
+	// No thread before t1: PrevThread must not move and must report false.
+	if moved := dv.PrevThread(); moved {
+		t.Error("PrevThread() before the first thread returned true, want false")
 	}
 }
 
@@ -927,5 +942,80 @@ func TestDiffViewJumpToLineGivesUpOnceLoadingFinishesWithoutAMatch(t *testing.T)
 
 	if dv.pendingCursorSet {
 		t.Error("pendingCursorSet still true after a rebuild with Loading false; an unresolved anchor must be dropped, not retried forever")
+	}
+}
+
+// TestDiffViewJumpToThreadMovesCursorOnceTheThreadExists mirrors
+// TestDiffViewJumpToLineMovesCursorOnceTheLineExists for JumpToThread: the
+// "t" review-threads dialog's own Enter uses it to resolve a chosen thread
+// once its file's data has arrived.
+func TestDiffViewJumpToThreadMovesCursorOnceTheThreadExists(t *testing.T) {
+	dv := NewDiffView()
+	dv.SetFile(DiffFile{Path: "pkg/example.go", Loading: true})
+	dv.JumpToThread("t2")
+	drawn(t, dv, 60, 40) // rebuilds while still loading: nothing to land on yet
+
+	f := twoHunkFile(t)
+	f.Threads = []model.ReviewThread{
+		{ID: "t1", Path: f.Path, Line: 1, Side: model.DiffSideRight, Comments: []model.ReviewComment{{Body: "a"}}},
+		{ID: "t2", Path: f.Path, Line: 10, Side: model.DiffSideRight, Comments: []model.ReviewComment{{Body: "b"}}},
+	}
+	dv.SetFile(f)
+	drawn(t, dv, 60, 40)
+
+	th, ok := dv.CursorThread()
+	if !ok {
+		t.Fatal("cursor is not on a thread row after JumpToThread's target arrived")
+	}
+	if th.ID != "t2" {
+		t.Errorf("cursor thread ID = %q, want %q (the target JumpToThread was given)", th.ID, "t2")
+	}
+}
+
+// TestDiffViewJumpToThreadGivesUpOnceLoadingFinishesWithoutAMatch mirrors
+// TestDiffViewJumpToLineGivesUpOnceLoadingFinishesWithoutAMatch for
+// JumpToThread: an ID that never resolves (the thread was deleted/resolved
+// away between listing it and opening this file) must not keep retrying on
+// every future, unrelated rebuild.
+func TestDiffViewJumpToThreadGivesUpOnceLoadingFinishesWithoutAMatch(t *testing.T) {
+	dv := NewDiffView()
+	f := twoHunkFile(t)
+	dv.JumpToThread("no-such-thread")
+	dv.SetFile(f) // f.Loading is false: data has "arrived"
+	drawn(t, dv, 60, 20)
+
+	if dv.pendingThreadSet {
+		t.Error("pendingThreadSet still true after a rebuild with Loading false; an unresolved thread ID must be dropped, not retried forever")
+	}
+}
+
+// TestDiffViewJumpToThreadEdgeUsesDisplayOrder covers JumpToThreadEdge
+// landing on the first/last thread-header row in *display* order
+// (bucketThreads/build: outdated threads first, then file-level, then
+// inline in hunk order) rather than by a raw model.ReviewThread.Line
+// comparison, which would get an outdated thread's own placement wrong —
+// see JumpToThreadEdge's own doc comment.
+func TestDiffViewJumpToThreadEdgeUsesDisplayOrder(t *testing.T) {
+	f := twoHunkFile(t)
+	f.Threads = []model.ReviewThread{
+		{ID: "inline", Path: f.Path, Line: 1, Side: model.DiffSideRight, Comments: []model.ReviewComment{{Body: "inline"}}},
+		{ID: "outdated", Path: f.Path, Line: 999, Side: model.DiffSideRight, IsOutdated: true, Comments: []model.ReviewComment{{Body: "outdated"}}},
+	}
+	dv := NewDiffView()
+	dv.SetFile(f)
+	drawn(t, dv, 60, 40)
+
+	dv.JumpToThreadEdge(1)
+	drawn(t, dv, 60, 40)
+	first, ok := dv.CursorThread()
+	if !ok || first.ID != "outdated" {
+		t.Fatalf("JumpToThreadEdge(1) landed on %+v, ok=%v, want the outdated thread (rendered first)", first, ok)
+	}
+
+	dv.JumpToThreadEdge(-1)
+	drawn(t, dv, 60, 40)
+	last, ok := dv.CursorThread()
+	if !ok || last.ID != "inline" {
+		t.Fatalf("JumpToThreadEdge(-1) landed on %+v, ok=%v, want the inline thread (rendered last)", last, ok)
 	}
 }

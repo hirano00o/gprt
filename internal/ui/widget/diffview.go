@@ -200,6 +200,16 @@ type DiffView struct {
 	pendingCursorSet  bool
 	pendingCursorSide model.DiffSide
 	pendingCursorLine int
+
+	// pendingThreadSet/ID/Edge are JumpToLine's own counterpart for a
+	// thread-header target — see JumpToThread/JumpToThreadEdge. Only one of
+	// a line target and a thread target is ever pending at a time: setting
+	// either clears the other, since both compete for the same cursor.
+	// pendingThreadEdge is 0 for a by-ID target (pendingThreadID), positive
+	// for "first in display order", negative for "last".
+	pendingThreadSet  bool
+	pendingThreadID   string
+	pendingThreadEdge int
 }
 
 // JumpToLine arranges for the cursor to move to the line anchored at
@@ -217,6 +227,41 @@ func (dv *DiffView) JumpToLine(side model.DiffSide, line int) {
 	dv.pendingCursorSet = true
 	dv.pendingCursorSide = side
 	dv.pendingCursorLine = line
+	dv.pendingThreadSet = false // only one pending target at a time
+	dv.lastWidth = -1
+}
+
+// JumpToThread arranges for the cursor to land on the thread-header row for
+// id, as soon as the current file's rendered rows contain one — the same
+// survive-a-still-loading-rebuild, drop-once-it-is-not lifecycle JumpToLine
+// uses (see its own doc comment). Used by the "t" review-threads dialog to
+// resolve a chosen thread once its file has loaded.
+func (dv *DiffView) JumpToThread(id string) {
+	dv.pendingThreadSet = true
+	dv.pendingThreadID = id
+	dv.pendingThreadEdge = 0
+	dv.pendingCursorSet = false // only one pending target at a time
+	dv.lastWidth = -1
+}
+
+// JumpToThreadEdge arranges for the cursor to land on the first (dir > 0)
+// or last (dir < 0) thread-header row in *display* order, once the current
+// file's rendered rows contain any — the same lifecycle as JumpToThread.
+// Display order matters here: bucketThreads/build render outdated threads
+// first, then file-level threads, then inline threads in hunk order, so
+// the caller cannot derive "first thread" from a raw
+// model.ReviewThread.Line comparison without independently reimplementing
+// that same skip-the-outdated-ones bucketing. App.stepThread uses this to
+// land ]c/[c on the right end once it crosses into a neighbouring file.
+func (dv *DiffView) JumpToThreadEdge(dir int) {
+	dv.pendingThreadSet = true
+	dv.pendingThreadID = ""
+	if dir < 0 {
+		dv.pendingThreadEdge = -1
+	} else {
+		dv.pendingThreadEdge = 1
+	}
+	dv.pendingCursorSet = false // only one pending target at a time
 	dv.lastWidth = -1
 }
 
@@ -376,25 +421,32 @@ func (dv *DiffView) moveByDisplayLines(dir, target int) {
 }
 
 // NextThread moves the cursor to the next thread-header row after the
-// current position, if any (]c); a no-op at the last one.
-func (dv *DiffView) NextThread() {
+// current position, if any (]c). Returns true when the cursor moved; false
+// (a no-op) at the last one, or when the file has none at all — the
+// router's own dispatch falls forward into App.stepThread when false, to
+// cross ]c into the next file that has a thread.
+func (dv *DiffView) NextThread() bool {
 	for i := dv.cursor + 1; i < len(dv.selectable); i++ {
 		if dv.rows[dv.selectable[i]].kind == rowKindThreadHeader {
 			dv.setCursor(i)
-			return
+			return true
 		}
 	}
+	return false
 }
 
 // PrevThread moves the cursor to the previous thread-header row before the
-// current position, if any ([c); a no-op at the first one.
-func (dv *DiffView) PrevThread() {
+// current position, if any ([c). Returns true when the cursor moved; false
+// at the first one, or when the file has none at all — see NextThread's
+// own doc comment for how the router uses this.
+func (dv *DiffView) PrevThread() bool {
 	for i := dv.cursor - 1; i >= 0; i-- {
 		if dv.rows[dv.selectable[i]].kind == rowKindThreadHeader {
 			dv.setCursor(i)
-			return
+			return true
 		}
 	}
+	return false
 }
 
 // StartVisual begins a visual line selection anchored at the cursor's
@@ -656,17 +708,24 @@ func (dv *DiffView) rebuild(width int) {
 	dv.refreshLineTracking()
 }
 
-// applyPendingCursor resolves a JumpToLine target against the just-rebuilt
-// rows, if one is pending, taking priority over rebuild's own by-identity
-// restore above (a caller requesting a jump wants it honoured even when a
-// selectable row of the same identity as the old cursor also still exists).
-// See JumpToLine's own doc comment for why the target survives across
-// rebuilds while the file is still loading, and is dropped once it is not,
-// regardless of whether it was ever found.
+// applyPendingCursor resolves a JumpToLine or JumpToThread/JumpToThreadEdge
+// target against the just-rebuilt rows, if one is pending, taking priority
+// over rebuild's own by-identity restore above (a caller requesting a jump
+// wants it honoured even when a selectable row of the same identity as the
+// old cursor also still exists). See JumpToLine's own doc comment for why
+// the target survives across rebuilds while the file is still loading, and
+// is dropped once it is not, regardless of whether it was ever found — the
+// same rule applies to a pending thread target below.
 func (dv *DiffView) applyPendingCursor() {
-	if !dv.pendingCursorSet {
-		return
+	if dv.pendingCursorSet {
+		dv.applyPendingLineCursor()
 	}
+	if dv.pendingThreadSet {
+		dv.applyPendingThreadCursor()
+	}
+}
+
+func (dv *DiffView) applyPendingLineCursor() {
 	if hi, li, ok := diff.LocateLine(dv.file.Hunks, dv.pendingCursorSide, dv.pendingCursorLine); ok {
 		for i, idx := range dv.selectable {
 			r := dv.rows[idx]
@@ -679,6 +738,41 @@ func (dv *DiffView) applyPendingCursor() {
 	}
 	if !dv.file.Loading {
 		dv.pendingCursorSet = false
+	}
+}
+
+// applyPendingThreadCursor resolves a JumpToThread (by ID) or
+// JumpToThreadEdge (pendingThreadEdge != 0: first/last in display order,
+// i.e. selectable order — see JumpToThreadEdge's own doc comment) target.
+func (dv *DiffView) applyPendingThreadCursor() {
+	if dv.pendingThreadEdge != 0 {
+		found := -1
+		for i, idx := range dv.selectable {
+			if dv.rows[idx].kind != rowKindThreadHeader {
+				continue
+			}
+			found = i
+			if dv.pendingThreadEdge > 0 {
+				break // first match, scanning forward
+			}
+			// dir < 0: keep overwriting so found ends on the last match.
+		}
+		if found >= 0 {
+			dv.cursor = found
+			dv.pendingThreadSet = false
+		}
+	} else {
+		for i, idx := range dv.selectable {
+			r := dv.rows[idx]
+			if r.kind == rowKindThreadHeader && r.threadID == dv.pendingThreadID {
+				dv.cursor = i
+				dv.pendingThreadSet = false
+				break
+			}
+		}
+	}
+	if !dv.file.Loading {
+		dv.pendingThreadSet = false
 	}
 }
 

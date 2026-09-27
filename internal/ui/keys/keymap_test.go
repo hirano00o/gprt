@@ -53,6 +53,28 @@ func TestAllActionsContainsPageMovement(t *testing.T) {
 	}
 }
 
+// TestDefaultsResolvesPRThreadsInEveryPROpenContext covers "t" (pr.threads),
+// bound in the same three "PR open" contexts as pr.pending's own "p"
+// binding (ContextPR/ContextFiles/ContextDiff).
+func TestDefaultsResolvesPRThreadsInEveryPROpenContext(t *testing.T) {
+	km := Defaults()
+	for _, ctx := range []Context{ContextPR, ContextFiles, ContextDiff} {
+		if action, kind := km.Lookup(ctx, mustParse("t")); kind != Exact || action != ActionPRThreads {
+			t.Errorf("Lookup(%v, t) = (%q, %v), want (%q, Exact)", ctx, action, kind, ActionPRThreads)
+		}
+	}
+}
+
+func TestAllActionsContainsPRThreads(t *testing.T) {
+	all := AllActions()
+	for _, a := range all {
+		if a == ActionPRThreads {
+			return
+		}
+	}
+	t.Errorf("AllActions() does not contain %q", ActionPRThreads)
+}
+
 func TestKeymapLookup(t *testing.T) {
 	km := Defaults()
 

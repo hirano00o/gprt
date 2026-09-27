@@ -40,6 +40,9 @@ func (a *App) subscribeStore() {
 			if a.overlay == "pending" {
 				a.rebuildPendingList()
 			}
+			if a.overlay == "threads" {
+				a.rebuildThreadList()
+			}
 			if a.overlay == "reaction" {
 				a.rebuildReactionPicker()
 			}
@@ -82,6 +85,9 @@ func (a *App) subscribeStore() {
 			a.onCreateFormMutationChanged()
 			if a.overlay == "pending" {
 				a.rebuildPendingList()
+			}
+			if a.overlay == "threads" {
+				a.rebuildThreadList()
 			}
 		case store.EventNotice:
 			// A notice for a send still tracked in pendingSend (a

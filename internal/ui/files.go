@@ -820,6 +820,57 @@ func (a *App) stepFile(dir int) {
 	}
 }
 
+// stepThread crosses ]c/[c (diff.next_thread/prev_thread) into a
+// neighbouring file once widget.DiffView.NextThread/PrevThread report no
+// further thread-header row in the current one: modeled on stepFile, but
+// skipping past any file with no review threads at all (threadsForPath) —
+// the file list itself is small enough per pull request that filtering it
+// here, rather than precomputing an index, costs nothing worth avoiding. A
+// no-op with no files loaded; when idx is not found (nothing open yet) the
+// scan starts from the very first (dir > 0) or very last (dir < 0) file, so
+// every file is covered either way. The tree's own selection follows the
+// opened file, exactly like stepFile. No file (current or beyond) has a
+// thread left in the given direction: toasts "last comment"/"first
+// comment", mirroring stepFile's own "last file"/"first file" wording,
+// rather than silently doing nothing.
+func (a *App) stepThread(dir int) {
+	entries := a.sortedFiles()
+	if len(entries) == 0 {
+		return
+	}
+
+	idx := -1
+	for i, e := range entries {
+		if e.File.Path == a.currentFilePath {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 && dir < 0 {
+		idx = len(entries)
+	}
+
+	pr := a.deps.Store.CurrentPR()
+	for i := idx + dir; i >= 0 && i < len(entries); i += dir {
+		path := entries[i].File.Path
+		if len(threadsForPath(pr, path)) == 0 {
+			continue
+		}
+		a.openFile(path)
+		if node := a.findTreeNodeByPath(path); node != nil {
+			a.treeView.SetCurrentNode(node)
+		}
+		a.diffView.JumpToThreadEdge(dir)
+		return
+	}
+
+	if dir > 0 {
+		a.showToast("last comment", theme.Warning)
+	} else {
+		a.showToast("first comment", theme.Warning)
+	}
+}
+
 func clampInt(v, lo, hi int) int {
 	if hi < lo {
 		return lo

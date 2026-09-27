@@ -189,7 +189,7 @@ type App struct {
 
 	seq *keys.Sequencer
 
-	overlay    string // "" | "help" | "messages" | "confirm" | "choice" | "pending" | "pendingConfirm" | "reaction" | "merge" | "editform" | "editlabels" | "editreviewers"
+	overlay    string // "" | "help" | "messages" | "confirm" | "choice" | "pending" | "pendingConfirm" | "threads" | "reaction" | "merge" | "editform" | "editlabels" | "editreviewers"
 	savedFocus tview.Primitive
 
 	// Edit PR form (editform.go, "E"/pr.edit): editForm is nil while
@@ -365,6 +365,16 @@ type App struct {
 	// filesWarned/warnedSections' own "warn once, reset once resolved"
 	// shape.
 	pendingListDraftsWarned bool
+
+	// threadListView/threadListEntries back the "t" review-threads list
+	// overlay (threadlist.go): every review thread on the current pull
+	// request, sorted by path then line then ID, re-rendered on
+	// EventPRChanged/EventMutationChanged while open — the same shape as
+	// pendingListView/pendingListEntries above, but read-only (no d/D
+	// mutation path: editing/deleting/reacting to a thread is the diff's
+	// own job, reached by jumping to it via Enter).
+	threadListView    *tview.List
+	threadListEntries []model.ReviewThread
 
 	// reactionPickerView/reactionSubjectID back the "reaction" overlay
 	// (reactionpicker.go's openReactionPicker/closeReactionPicker): the

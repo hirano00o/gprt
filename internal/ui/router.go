@@ -70,6 +70,8 @@ func (a *App) handleKey(ev *tcell.EventKey) *tcell.EventKey {
 			return a.routeChoiceKey(ev, normalized)
 		case "pending":
 			return a.routePendingKey(ev, normalized)
+		case "threads":
+			return a.routeThreadListKey(ev, normalized)
 		case "reaction":
 			return a.routeReactionKey(ev, normalized)
 		case "merge":
@@ -405,9 +407,13 @@ func (a *App) dispatch(action keys.Action, count int) {
 	case keys.ActionDiffScrollRight:
 		a.diffView.ScrollHorizontal(diffScrollStep)
 	case keys.ActionDiffNextThread:
-		a.diffView.NextThread()
+		if !a.diffView.NextThread() {
+			a.stepThread(1)
+		}
 	case keys.ActionDiffPrevThread:
-		a.diffView.PrevThread()
+		if !a.diffView.PrevThread() {
+			a.stepThread(-1)
+		}
 	case keys.ActionDiffNextFile:
 		a.stepFile(1)
 	case keys.ActionDiffPrevFile:
@@ -449,6 +455,8 @@ func (a *App) dispatch(action keys.Action, count int) {
 		}
 	case keys.ActionPRPending:
 		a.openPendingList()
+	case keys.ActionPRThreads:
+		a.openThreadList()
 	case keys.ActionPRSubmit:
 		a.openSubmitReviewDialog()
 	case keys.ActionPREdit:

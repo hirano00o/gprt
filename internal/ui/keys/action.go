@@ -54,6 +54,7 @@ const (
 	ActionCommentDelete        Action = "comment.delete"
 	ActionCommentReact         Action = "comment.react"
 	ActionPRPending            Action = "pr.pending"
+	ActionPRThreads            Action = "pr.threads"
 	ActionPRSubmit             Action = "pr.submit"
 	ActionPREdit               Action = "pr.edit"
 )
@@ -76,7 +77,7 @@ func AllActions() []Action {
 		ActionDiffNextThread, ActionDiffPrevThread, ActionDiffNextFile, ActionDiffPrevFile,
 		ActionThreadReply, ActionThreadToggleResolved,
 		ActionCommentEdit, ActionCommentDelete, ActionCommentReact,
-		ActionPRPending, ActionPRSubmit, ActionPREdit,
+		ActionPRPending, ActionPRThreads, ActionPRSubmit, ActionPREdit,
 	}
 }
 

@@ -124,6 +124,7 @@ All keys below except the editor's own can be remapped. The full reference, incl
 | `E` | Edit title, base branch, labels, reviewers, draft |
 | `S` | Submit a review: Approve, Request changes, or Comment |
 | `p` | Pending review comments and saved drafts |
+| `t` | Review threads, sorted by path and line (`Enter` jumps to it in the Files tab) |
 
 ### Files tab
 
@@ -139,11 +140,11 @@ All keys below except the editor's own can be remapped. The full reference, incl
 | `e` / `d` | Edit / delete your own review comment |
 | `a` | Add or remove a reaction |
 | `za` / `zR` / `zM` | Fold the thread / unfold all / fold all |
-| `]c` / `[c` | Next / previous thread |
+| `]c` / `[c` | Next / previous thread, crossing into the next / previous file that has one |
 | `]f` / `[f` | Next / previous file |
 | `zh` / `zl` | Scroll horizontally |
 
-`E`, `S`, and `p` work here too.
+`E`, `S`, `p`, and `t` work here too.
 
 ### Editor
 
