@@ -656,6 +656,8 @@ func TestApplyViewerResult_RestartsInFlightDetailFetchWhenViewerBecomesKnown(t *
 
 	ref := testDetailRef(1)
 	block := make(chan struct{})
+	started := make(chan struct{})
+	var startedOnce sync.Once
 	var mu sync.Mutex
 	var gotViewerLogins []string
 	gitHub.setDetailFunc(func(ctx context.Context, _ model.PRRef, viewerLogin string) (gh.DetailResult, error) {
@@ -666,6 +668,7 @@ func TestApplyViewerResult_RestartsInFlightDetailFetchWhenViewerBecomesKnown(t *
 			// The first fetch (started before the viewer resolved) blocks
 			// until released, simulating it still being in flight when
 			// the viewer login becomes known below.
+			startedOnce.Do(func() { close(started) })
 			<-block
 			<-ctx.Done()
 			return gh.DetailResult{}, ctx.Err()
@@ -677,6 +680,12 @@ func TestApplyViewerResult_RestartsInFlightDetailFetchWhenViewerBecomesKnown(t *
 	if !s.DetailState().Loading {
 		t.Fatal("expected Loading = true right after OpenPR")
 	}
+	// Wait until the first fetch's goroutine has actually run far enough
+	// to record itself: OpenPR only starts it, and nothing else orders it
+	// before the restarted ("tester") fetch's goroutine spawned below.
+	// Without this, a busy runner can schedule the restarted goroutine
+	// first, and the assertion on gotViewerLogins' order below flakes.
+	<-started
 
 	// The viewer resolves while that first ($viewer == "") fetch is still
 	// in flight: it must be restarted, not left to complete and applied.
