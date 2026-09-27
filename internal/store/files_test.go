@@ -42,6 +42,27 @@ func changedFile(path, patch string) model.ChangedFile {
 	}
 }
 
+// changedFileWithSHA is changedFile plus a head blob SHA, for ExpandGap's
+// tests (a file with no SHA has nothing for ExpandGap to fetch from - see
+// TestExpandGap_EmptySHAReturnsSyncError).
+func changedFileWithSHA(path, patch, sha string) model.ChangedFile {
+	cf := changedFile(path, patch)
+	cf.SHA = sha
+	return cf
+}
+
+// expandGapFixturePatch is a three-hunk patch, one Context line each, with
+// two gaps between hunks (new-side lines [2,4] and [6,8]) and one trailing
+// gap ([10,10]) against expandGapFixtureHeadLines' 10-line head content.
+const expandGapFixturePatch = "@@ -1 +1 @@\n context1\n@@ -5 +5 @@\n context5\n@@ -9 +9 @@\n context9"
+
+func expandGapFixtureHeadLines() []string {
+	return []string{
+		"context1", "line2", "line3", "line4", "context5",
+		"line6", "line7", "line8", "context9", "line10",
+	}
+}
+
 func TestLoadFiles_CacheFirstThenConfirmedBy304(t *testing.T) {
 	gitHub := newFakeGitHub()
 	disp := newFakeDispatcher()
@@ -1353,5 +1374,466 @@ func TestStartFilesFetch_RecomputesLastErrAfterReset(t *testing.T) {
 	}
 
 	close(block)
+	runUntilIdle(t, disp)
+}
+
+// TestExpandGap_FetchesMergesHunksReHighlightsAndEmits is the primary
+// end-to-end path: a fresh ExpandGap call for a file whose head content is
+// not yet known fetches it over the network exactly once, then reuses that
+// same fetch for every other gap in the same file (a second, independent
+// gap, then the trailing gap) with no further network call, ending with
+// every hunk merged into one and fully re-highlighted.
+func TestExpandGap_FetchesMergesHunksReHighlightsAndEmits(t *testing.T) {
+	gitHub := newFakeGitHub()
+	disp := newFakeDispatcher()
+	ref := filesTestRef()
+	s := newFilesTestStore(t, gitHub, disp, ref, "head1")
+
+	gitHub.setFilesFunc(func(context.Context, model.PRRef, int, string) (gh.FilesResult, error) {
+		return gh.FilesResult{Files: []model.ChangedFile{
+			changedFileWithSHA("sample.go", expandGapFixturePatch, "sha-abc"),
+		}}, nil
+	})
+	s.LoadFiles(false)
+	runUntilIdle(t, disp)
+
+	files := s.Files()
+	if len(files) != 1 || len(files[0].Hunks) != 3 {
+		t.Fatalf("Files() = %+v, want 1 file with 3 hunks before expansion", files)
+	}
+	if !files[0].Highlighted || len(files[0].Tokens) != 3 {
+		t.Fatalf("files[0] = %+v, want Highlighted=true Tokens len=3 before expansion", files[0])
+	}
+
+	gitHub.setFileContentFunc(func(context.Context, model.RepoRef, string) (gh.FileContentResult, error) {
+		return gh.FileContentResult{Lines: expandGapFixtureHeadLines()}, nil
+	})
+
+	var events []EventKind
+	s.Subscribe(func(e Event) { events = append(events, e.Kind) })
+
+	if err := s.ExpandGap("sample.go", 2); err != nil {
+		t.Fatalf("ExpandGap(gapStart=2) error = %v", err)
+	}
+	runUntilIdle(t, disp)
+
+	if calls := gitHub.fileContentCallsSnapshot(); len(calls) != 1 || calls[0].sha != "sha-abc" {
+		t.Fatalf("FileContent calls = %+v, want exactly 1 call for sha-abc", calls)
+	}
+	var sawFilesChanged bool
+	for _, k := range events {
+		if k == EventFilesChanged {
+			sawFilesChanged = true
+		}
+	}
+	if !sawFilesChanged {
+		t.Error("no EventFilesChanged observed after ExpandGap")
+	}
+
+	files = s.Files()
+	if len(files[0].Hunks) != 2 {
+		t.Fatalf("Hunks after first expand = %d, want 2 (hunk 0 and 1 merged, hunk 2 untouched)", len(files[0].Hunks))
+	}
+	if got := len(files[0].Hunks[0].Lines); got != 5 {
+		t.Errorf("merged hunk has %d lines, want 5 (1 + 3 revealed + 1)", got)
+	}
+	if len(files[0].Tokens) != 2 || !files[0].Highlighted {
+		t.Errorf("files[0] = %+v, want Tokens len=2 Highlighted=true after re-highlighting", files[0])
+	}
+
+	// Second gap, same file: no further network call, since the whole
+	// head content was already fetched once.
+	if err := s.ExpandGap("sample.go", 6); err != nil {
+		t.Fatalf("ExpandGap(gapStart=6) error = %v", err)
+	}
+	runUntilIdle(t, disp)
+	if len(gitHub.fileContentCallsSnapshot()) != 1 {
+		t.Errorf("FileContent called %d times after a second gap, want still 1", len(gitHub.fileContentCallsSnapshot()))
+	}
+	files = s.Files()
+	if len(files[0].Hunks) != 1 {
+		t.Fatalf("Hunks after second expand = %d, want 1 (fully merged with hunk 2)", len(files[0].Hunks))
+	}
+
+	// Trailing gap: still no further network call.
+	if err := s.ExpandGap("sample.go", 10); err != nil {
+		t.Fatalf("ExpandGap(gapStart=10) error = %v", err)
+	}
+	runUntilIdle(t, disp)
+	if len(gitHub.fileContentCallsSnapshot()) != 1 {
+		t.Errorf("FileContent called %d times after the trailing gap, want still 1", len(gitHub.fileContentCallsSnapshot()))
+	}
+	files = s.Files()
+	if len(files[0].Hunks) != 1 || len(files[0].Hunks[0].Lines) != 10 {
+		t.Fatalf("Hunks after trailing expand = %+v, want 1 hunk covering all 10 lines", files[0].Hunks)
+	}
+}
+
+// TestApplyExpandGap_TrailingGapAlreadyEmptyEmitsEventButNoReHighlight
+// covers head content that turns out exactly as long as the diff's last
+// visible line: diff.ExpandGap reports the trailing gap already empty
+// (hunks unchanged). EventFilesChanged must still fire (the UI now knows
+// HeadLineCount and can hide the trailing gap row), but there is nothing to
+// re-highlight: the entry's id must stay the same (no replace-and-reassign,
+// unlike a real expansion), and Tokens must be untouched.
+func TestApplyExpandGap_TrailingGapAlreadyEmptyEmitsEventButNoReHighlight(t *testing.T) {
+	gitHub := newFakeGitHub()
+	disp := newFakeDispatcher()
+	ref := filesTestRef()
+	s := newFilesTestStore(t, gitHub, disp, ref, "head1")
+
+	gitHub.setFilesFunc(func(context.Context, model.PRRef, int, string) (gh.FilesResult, error) {
+		return gh.FilesResult{Files: []model.ChangedFile{
+			changedFileWithSHA("sample.go", expandGapFixturePatch, "sha-abc"),
+		}}, nil
+	})
+	s.LoadFiles(false)
+	runUntilIdle(t, disp)
+
+	before := s.Files()
+	if len(before) != 1 || len(before[0].Hunks) != 3 {
+		t.Fatalf("Files() = %+v, want 1 file with 3 hunks", before)
+	}
+	beforeID := before[0].id
+	beforeTokensLen := len(before[0].Tokens)
+
+	// Exactly 9 lines: the diff's last hunk already ends at new-side line
+	// 9, so the trailing gap (starting at 10) is empty.
+	gitHub.setFileContentFunc(func(context.Context, model.RepoRef, string) (gh.FileContentResult, error) {
+		return gh.FileContentResult{Lines: expandGapFixtureHeadLines()[:9]}, nil
+	})
+
+	var events []EventKind
+	s.Subscribe(func(e Event) { events = append(events, e.Kind) })
+
+	if err := s.ExpandGap("sample.go", 10); err != nil {
+		t.Fatalf("ExpandGap() error = %v", err)
+	}
+	runUntilIdle(t, disp)
+
+	var sawFilesChanged bool
+	for _, k := range events {
+		if k == EventFilesChanged {
+			sawFilesChanged = true
+		}
+	}
+	if !sawFilesChanged {
+		t.Error("no EventFilesChanged observed for the already-empty trailing gap")
+	}
+
+	after := s.Files()
+	if len(after) != 1 || len(after[0].Hunks) != 3 {
+		t.Fatalf("Hunks after expand = %+v, want unchanged (still 3 hunks)", after[0].Hunks)
+	}
+	if after[0].id != beforeID {
+		t.Errorf("FileEntry id changed (%d -> %d), want unchanged: a no-op expansion must not replace-and-reassign", beforeID, after[0].id)
+	}
+	if len(after[0].Tokens) != beforeTokensLen {
+		t.Errorf("Tokens len changed %d -> %d, want unchanged", beforeTokensLen, len(after[0].Tokens))
+	}
+}
+
+// TestExpandGap_CacheHitSkipsNetworkOnFreshStore covers a fresh Store (no
+// in-memory HeadLines yet) whose blob is already on disk under the
+// "blob/<sha>" cache key: ExpandGap must apply it synchronously, with no
+// network call at all.
+func TestExpandGap_CacheHitSkipsNetworkOnFreshStore(t *testing.T) {
+	gitHub := newFakeGitHub()
+	disp := newFakeDispatcher()
+	ref := filesTestRef()
+	s := newFilesTestStore(t, gitHub, disp, ref, "head1")
+
+	gitHub.setFilesFunc(func(context.Context, model.PRRef, int, string) (gh.FilesResult, error) {
+		return gh.FilesResult{Files: []model.ChangedFile{
+			changedFileWithSHA("sample.go", expandGapFixturePatch, "sha-cached"),
+		}}, nil
+	})
+	s.LoadFiles(false)
+	runUntilIdle(t, disp)
+
+	key, err := cache.RepoKey(s.deps.Host, "tester", ref.Repo, "blob/sha-cached")
+	if err != nil {
+		t.Fatalf("RepoKey: %v", err)
+	}
+	body, err := json.Marshal(cachedBlob{Lines: expandGapFixtureHeadLines()})
+	if err != nil {
+		t.Fatalf("marshal cachedBlob: %v", err)
+	}
+	if err := s.deps.Cache.Put(key, cache.Entry{Body: body, FetchedAt: s.deps.Now()}); err != nil {
+		t.Fatalf("seed blob cache: %v", err)
+	}
+
+	if err := s.ExpandGap("sample.go", 2); err != nil {
+		t.Fatalf("ExpandGap() error = %v", err)
+	}
+	runUntilIdle(t, disp)
+
+	if len(gitHub.fileContentCallsSnapshot()) != 0 {
+		t.Errorf("FileContent called %d times, want 0 (blob already cached on disk)", len(gitHub.fileContentCallsSnapshot()))
+	}
+	if got := len(s.Files()[0].Hunks); got != 2 {
+		t.Errorf("Hunks after cache-hit expand = %d, want 2", got)
+	}
+}
+
+// TestExpandGap_InFlightFetchIsDeduplicated covers a second ExpandGap call
+// for the same file while its head-content fetch is still in flight: it
+// must not start a second, redundant network call.
+func TestExpandGap_InFlightFetchIsDeduplicated(t *testing.T) {
+	gitHub := newFakeGitHub()
+	disp := newFakeDispatcher()
+	ref := filesTestRef()
+	s := newFilesTestStore(t, gitHub, disp, ref, "head1")
+
+	gitHub.setFilesFunc(func(context.Context, model.PRRef, int, string) (gh.FilesResult, error) {
+		return gh.FilesResult{Files: []model.ChangedFile{
+			changedFileWithSHA("sample.go", expandGapFixturePatch, "sha-abc"),
+		}}, nil
+	})
+	s.LoadFiles(false)
+	runUntilIdle(t, disp)
+
+	block := make(chan struct{})
+	gitHub.setFileContentFunc(func(context.Context, model.RepoRef, string) (gh.FileContentResult, error) {
+		<-block
+		return gh.FileContentResult{Lines: expandGapFixtureHeadLines()}, nil
+	})
+
+	if err := s.ExpandGap("sample.go", 2); err != nil {
+		t.Fatalf("first ExpandGap() error = %v", err)
+	}
+	if err := s.ExpandGap("sample.go", 2); err != nil {
+		t.Fatalf("second (in-flight) ExpandGap() error = %v, want nil (silently ignored)", err)
+	}
+
+	close(block)
+	runUntilIdle(t, disp)
+
+	if len(gitHub.fileContentCallsSnapshot()) != 1 {
+		t.Errorf("FileContent called %d times, want exactly 1 (the second call was a dedup no-op)", len(gitHub.fileContentCallsSnapshot()))
+	}
+}
+
+// TestExpandGap_GenerationMismatchDiscardsLateResult covers a files
+// generation switch (ClosePR) while an ExpandGap fetch is still in flight:
+// its late result must be discarded without panicking or corrupting the
+// (now empty) files state.
+func TestExpandGap_GenerationMismatchDiscardsLateResult(t *testing.T) {
+	gitHub := newFakeGitHub()
+	disp := newFakeDispatcher()
+	ref := filesTestRef()
+	s := newFilesTestStore(t, gitHub, disp, ref, "head1")
+
+	gitHub.setFilesFunc(func(context.Context, model.PRRef, int, string) (gh.FilesResult, error) {
+		return gh.FilesResult{Files: []model.ChangedFile{
+			changedFileWithSHA("sample.go", expandGapFixturePatch, "sha-abc"),
+		}}, nil
+	})
+	s.LoadFiles(false)
+	runUntilIdle(t, disp)
+
+	block := make(chan struct{})
+	gitHub.setFileContentFunc(func(context.Context, model.RepoRef, string) (gh.FileContentResult, error) {
+		<-block
+		return gh.FileContentResult{Lines: expandGapFixtureHeadLines()}, nil
+	})
+
+	if err := s.ExpandGap("sample.go", 2); err != nil {
+		t.Fatalf("ExpandGap() error = %v", err)
+	}
+	s.ClosePR()
+
+	close(block)
+	runUntilIdle(t, disp)
+
+	if len(s.Files()) != 0 {
+		t.Errorf("Files() = %+v, want empty after ClosePR", s.Files())
+	}
+}
+
+// TestExpandGap_FetchErrorEmitsEventError covers a failed head-content
+// fetch: it must be reported via EventError, and must leave the file's
+// hunks untouched (nothing to expand from).
+func TestExpandGap_FetchErrorEmitsEventError(t *testing.T) {
+	gitHub := newFakeGitHub()
+	disp := newFakeDispatcher()
+	ref := filesTestRef()
+	s := newFilesTestStore(t, gitHub, disp, ref, "head1")
+
+	gitHub.setFilesFunc(func(context.Context, model.PRRef, int, string) (gh.FilesResult, error) {
+		return gh.FilesResult{Files: []model.ChangedFile{
+			changedFileWithSHA("sample.go", expandGapFixturePatch, "sha-abc"),
+		}}, nil
+	})
+	s.LoadFiles(false)
+	runUntilIdle(t, disp)
+
+	wantErr := errors.New("boom")
+	gitHub.setFileContentFunc(func(context.Context, model.RepoRef, string) (gh.FileContentResult, error) {
+		return gh.FileContentResult{}, wantErr
+	})
+
+	var sawErr bool
+	s.Subscribe(func(e Event) {
+		if e.Kind == EventError {
+			sawErr = true
+		}
+	})
+
+	if err := s.ExpandGap("sample.go", 2); err != nil {
+		t.Fatalf("ExpandGap() error = %v, want nil (the fetch error is reported asynchronously)", err)
+	}
+	runUntilIdle(t, disp)
+
+	if !sawErr {
+		t.Error("no EventError observed after a failed FileContent fetch")
+	}
+	if got := len(s.Files()[0].Hunks); got != 3 {
+		t.Errorf("Hunks after a failed expand = %d, want 3 (unchanged)", got)
+	}
+}
+
+// TestExpandGap_UnknownPathReturnsSyncError covers ExpandGap called for a
+// path with no loaded FileEntry.
+func TestExpandGap_UnknownPathReturnsSyncError(t *testing.T) {
+	gitHub := newFakeGitHub()
+	disp := newFakeDispatcher()
+	ref := filesTestRef()
+	s := newFilesTestStore(t, gitHub, disp, ref, "head1")
+
+	gitHub.setFilesFunc(func(context.Context, model.PRRef, int, string) (gh.FilesResult, error) {
+		return gh.FilesResult{Files: []model.ChangedFile{
+			changedFileWithSHA("known.go", expandGapFixturePatch, "sha-abc"),
+		}}, nil
+	})
+	s.LoadFiles(false)
+	runUntilIdle(t, disp)
+
+	if err := s.ExpandGap("missing.go", 1); err == nil {
+		t.Fatal("ExpandGap() for an unloaded path error = nil, want an error")
+	}
+}
+
+// TestExpandGap_EmptySHAReturnsSyncError covers ExpandGap called for a file
+// with no head blob (File.SHA == "", for example a rename with no content
+// change): it must fail synchronously, without starting any network call.
+func TestExpandGap_EmptySHAReturnsSyncError(t *testing.T) {
+	gitHub := newFakeGitHub()
+	disp := newFakeDispatcher()
+	ref := filesTestRef()
+	s := newFilesTestStore(t, gitHub, disp, ref, "head1")
+
+	gitHub.setFilesFunc(func(context.Context, model.PRRef, int, string) (gh.FilesResult, error) {
+		return gh.FilesResult{Files: []model.ChangedFile{
+			changedFile("no-sha.go", expandGapFixturePatch),
+		}}, nil
+	})
+	s.LoadFiles(false)
+	runUntilIdle(t, disp)
+
+	if err := s.ExpandGap("no-sha.go", 2); err == nil {
+		t.Fatal("ExpandGap() for a file with no SHA error = nil, want an error")
+	}
+	if len(gitHub.fileContentCallsSnapshot()) != 0 {
+		t.Errorf("FileContent called %d times, want 0 (no SHA to fetch from)", len(gitHub.fileContentCallsSnapshot()))
+	}
+}
+
+// TestExpandGap_StaleGenerationResultDoesNotClearNewGenerationsInFlightMark
+// is the regression test for a bug where applyFileContentResult deleted
+// expandInFlight[path] unconditionally, before checking gen: a stale
+// generation's (G1) own late result then deleted the *new* generation's
+// (G2) in-flight mark for the same path (maps are reference types, so
+// there is only ever one "the map" by the time either result lands),
+// letting a further Enter on G2's still-loading gap start a redundant
+// third fetch. The fix checks gen first (resetFiles already replaced the
+// whole map, so G1's late result has nothing of its own left to clean up).
+func TestExpandGap_StaleGenerationResultDoesNotClearNewGenerationsInFlightMark(t *testing.T) {
+	gitHub := newFakeGitHub()
+	disp := newFakeDispatcher()
+	ref := filesTestRef()
+	s := newFilesTestStore(t, gitHub, disp, ref, "head1")
+
+	gitHub.setFilesFunc(func(context.Context, model.PRRef, int, string) (gh.FilesResult, error) {
+		return gh.FilesResult{Files: []model.ChangedFile{
+			changedFileWithSHA("sample.go", expandGapFixturePatch, "sha-abc"),
+		}}, nil
+	})
+	s.LoadFiles(false)
+	runUntilIdle(t, disp)
+
+	var mu sync.Mutex
+	calls := 0
+	// started fires (once per call, buffered so the fake never blocks
+	// sending to it) the instant each call begins - after the fake has
+	// already recorded it in fileContentCalls but before this closure does
+	// anything else - so the test can wait deterministically for a call to
+	// have actually started, instead of racing the goroutine that runs it.
+	started := make(chan int, 3)
+	block1 := make(chan struct{})
+	block2 := make(chan struct{})
+	gitHub.setFileContentFunc(func(context.Context, model.RepoRef, string) (gh.FileContentResult, error) {
+		mu.Lock()
+		calls++
+		n := calls
+		mu.Unlock()
+		started <- n
+		switch n {
+		case 1:
+			<-block1
+		case 2:
+			<-block2
+			// n >= 3 (only reachable under the bug this test guards
+			// against) returns immediately, unblocked, so a buggy third
+			// fetch's result reaches applyFileContentResult and gets
+			// counted instead of hanging the test forever.
+		}
+		return gh.FileContentResult{Lines: expandGapFixtureHeadLines()}, nil
+	})
+
+	// Fetch #1 starts under generation G1, then blocks.
+	if err := s.ExpandGap("sample.go", 2); err != nil {
+		t.Fatalf("first ExpandGap() error = %v", err)
+	}
+	if got := <-started; got != 1 {
+		t.Fatalf("first call started = %d, want 1", got)
+	}
+
+	// A force-push moves HeadOID: LoadFiles(false) starts a new generation
+	// G2, superseding G1 (whose fetch #1 stays blocked, uncancelled by the
+	// context switch, matching how a real in-flight network call would
+	// keep running past ctx cancellation until it itself observes it).
+	s.currentPR.HeadOID = "head2"
+	s.LoadFiles(false)
+	runUntilIdle(t, disp)
+
+	// Fetch #2 starts under G2 for the same path, then also blocks.
+	if err := s.ExpandGap("sample.go", 2); err != nil {
+		t.Fatalf("second ExpandGap() error = %v", err)
+	}
+	if got := <-started; got != 2 {
+		t.Fatalf("second call started = %d, want 2", got)
+	}
+
+	// Resolve the stale G1 fetch late: its result must be discarded without
+	// disturbing G2's own still-in-flight mark for the same path.
+	close(block1)
+	runUntilIdle(t, disp)
+
+	// A further Enter while G2's fetch #2 is still in flight must still be
+	// deduped - not a third fetch. Under the bug this guards against, a
+	// third fetch would start and complete immediately (see the fake
+	// above); runUntilIdle gives it every chance to do so before the final
+	// count assertion.
+	if err := s.ExpandGap("sample.go", 2); err != nil {
+		t.Fatalf("third ExpandGap() error = %v", err)
+	}
+	runUntilIdle(t, disp)
+	if len(gitHub.fileContentCallsSnapshot()) != 2 {
+		t.Errorf("FileContent calls = %d, want still 2 (the stale G1 result must not have cleared G2's in-flight mark)",
+			len(gitHub.fileContentCallsSnapshot()))
+	}
+
+	close(block2)
 	runUntilIdle(t, disp)
 }

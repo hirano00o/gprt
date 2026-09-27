@@ -9,6 +9,7 @@ package ui
 import (
 	"context"
 	"log/slog"
+	"regexp"
 	"time"
 
 	"github.com/rivo/tview"
@@ -134,6 +135,30 @@ type App struct {
 	cmdHistory  []string
 	cmdHistIdx  int
 
+	// searchInput is the "/" diff-search input field, a bottomPages page
+	// like cmdLine (see openDiffSearch/closeDiffSearch, search.go).
+	// searchRE is the currently active search's compiled pattern — nil
+	// when none is active, including right after Esc clears the diff
+	// highlight (router.go): diffSearchStep re-enables it via
+	// diffView.SetSearch before jumping, rather than this field ever going
+	// stale. searchPattern is the raw text last submitted (reused to
+	// prefill the input, and in "no match"/toast messages). searchMatches
+	// is computeSearchMatches' result for searchRE, ordered by
+	// (sortedFiles index, hunk, line, byte column) — the order
+	// diffSearchStep's cursor-relative scan relies on. searchIdx is the
+	// index into searchMatches the cursor was last moved to, -1 before the
+	// first jump. searchRef is the pull request the active search belongs
+	// to (set in submitDiffSearch), so clearDiffSearchIfWrongPR
+	// (storeevents.go, EventPRChanged) can drop a stale search on a genuine
+	// PR switch without also dropping it on an EventPRChanged for the same
+	// pull request.
+	searchInput   *tview.InputField
+	searchRE      *regexp.Regexp
+	searchPattern string
+	searchMatches []searchMatch
+	searchIdx     int
+	searchRef     model.PRRef
+
 	// composerFlex is added to detailColumn (a title line over
 	// composerEditor) while a composer is open, and nil otherwise — see
 	// openComposer/closeComposer in composer.go. composerReturnFocus is
@@ -191,6 +216,21 @@ type App struct {
 
 	overlay    string // "" | "help" | "messages" | "confirm" | "choice" | "pending" | "pendingConfirm" | "threads" | "reaction" | "merge" | "editform" | "editlabels" | "editreviewers"
 	savedFocus tview.Primitive
+
+	// Help overlay (overlay.go, "?"/":help"): helpFlex wraps helpView (the
+	// scrollable binding list) and helpSearchInput (app.go's build, a
+	// hidden row shown by openHelpSearch — the same ResizeItem trick as
+	// the list filter/pending list). helpSearchInput itself is built once,
+	// in buildStatusBar, alongside cmdLine/searchInput, so a focus-switch
+	// comparison against it in the router is never made before help has
+	// ever opened. helpMatchCount/helpMatchIdx are the current help
+	// search's total match count and the index Highlight() currently
+	// points at (both 0 with no search active).
+	helpView        *tview.TextView
+	helpFlex        *tview.Flex
+	helpSearchInput *tview.InputField
+	helpMatchCount  int
+	helpMatchIdx    int
 
 	// Edit PR form (editform.go, "E"/pr.edit): editForm is nil while
 	// closed. editFormOriginal snapshots the pull request's field values

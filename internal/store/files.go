@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sync"
 
@@ -57,6 +58,15 @@ type FileEntry struct {
 	// had a result applied (or immediately, for a file with nothing to
 	// highlight: no patch, a parse error, or zero hunks).
 	Highlighted bool
+	// HeadLines is this file's full head-side (new/right) content, fetched
+	// lazily and once per file by ExpandGap the first time any of its gaps
+	// is expanded; nil until then. Tab-expanded to the same width
+	// parseFilesPage expands hunk lines to, so a revealed Context line
+	// renders identically to its neighbours. A files reload or PR switch
+	// drops it naturally, with no dedicated reset code needed: every
+	// FileEntry is rebuilt from scratch by parseFilesPage, which never sets
+	// this field.
+	HeadLines []string
 }
 
 // FilesState is a snapshot of the current pull request's changed-files
@@ -133,6 +143,274 @@ func (s *Store) FileByPath(path string) (FileEntry, bool) {
 		}
 	}
 	return FileEntry{}, false
+}
+
+// cachedBlob is the on-disk JSON shape of one cached "blob/<sha>" entry
+// (see ExpandGap): a git blob's raw content, split into lines exactly as
+// gh.FileContentResult.Lines reports it, not yet tab-expanded (tab
+// expansion is applied at every read, from cache or network alike, so a
+// later change to Config.TabWidth is reflected immediately rather than
+// baked into the cached bytes - mirroring how cachedFilesPage caches a raw
+// Patch string and parseFilesPage re-expands it on every read).
+type cachedBlob struct {
+	Lines []string `json:"lines"`
+}
+
+// fileIndex returns the index of path's FileEntry in s.files, or -1.
+func (s *Store) fileIndex(path string) int {
+	for i, e := range s.files {
+		if e.File.Path == path {
+			return i
+		}
+	}
+	return -1
+}
+
+// ExpandGap starts expanding the collapsed region ("gap") starting at
+// new-side line gapStart in path's diff (see diff.ExpandGap and
+// widget.DiffView's gap rows), returning a synchronous error for the
+// caller (internal/ui's App.expandGapAtCursor) to toast immediately: no
+// file loaded at path, or the file has no head blob to expand from
+// (File.SHA == "", for example a rename with no content change). A fetch
+// already in flight for path is silently ignored, not an error - the
+// caller pressed Enter again on a still-loading gap row.
+//
+// The file's head content (its full new-side text, not just this one gap)
+// is fetched at most once per file: once FileEntry.HeadLines is set, every
+// later gap in the same file - even a different one - expands immediately
+// with no further network call. A cached blob (keyed by the immutable SHA,
+// so no freshness check is ever needed) is tried before falling back to
+// the network.
+func (s *Store) ExpandGap(path string, gapStart int) error {
+	idx := s.fileIndex(path)
+	if idx == -1 {
+		return errors.New("file not loaded")
+	}
+	entry := s.files[idx]
+	if entry.File.SHA == "" {
+		return errors.New("no head blob for this file")
+	}
+	if s.expandInFlight[path] {
+		return nil
+	}
+
+	if entry.HeadLines != nil {
+		s.applyExpandGap(s.filesGen, path, gapStart)
+		return nil
+	}
+
+	if s.current != nil && s.viewer.Login != "" {
+		if lines, ok := s.cachedFileContent(s.current.Repo, entry.File.SHA); ok {
+			s.files[idx].HeadLines = expandHeadLines(lines, s.deps.Config.TabWidth)
+			s.applyExpandGap(s.filesGen, path, gapStart)
+			return nil
+		}
+	}
+
+	s.fetchFileContent(path, entry.File.SHA, gapStart)
+	return nil
+}
+
+// expandHeadLines tab-expands each of lines to width columns, matching
+// parseFilesPage's own tab expansion of hunk lines so a Context line
+// revealed by ExpandGap renders identically to its neighbours.
+func expandHeadLines(lines []string, width int) []string {
+	out := make([]string, len(lines))
+	for i, l := range lines {
+		out[i] = diff.ExpandTabs(l, width)
+	}
+	return out
+}
+
+// cachedFileContent returns sha's cached blob content, if any - a local
+// disk/memory read, never the network.
+func (s *Store) cachedFileContent(repo model.RepoRef, sha string) ([]string, bool) {
+	key, err := cache.RepoKey(s.deps.Host, s.viewer.Login, repo, "blob/"+sha)
+	if err != nil {
+		return nil, false
+	}
+	entry, ok, err := s.deps.Cache.Get(key)
+	if err != nil {
+		s.warnCacheError(err)
+		return nil, false
+	}
+	if !ok {
+		return nil, false
+	}
+	var cached cachedBlob
+	if json.Unmarshal(entry.Body, &cached) != nil {
+		return nil, false
+	}
+	return cached.Lines, true
+}
+
+// cacheFileContent persists sha's raw blob lines under repo's "blob/<sha>"
+// cache key. Writing is skipped until the viewer has been
+// network-confirmed, for the same reason cacheMentionableUsers/
+// cacheFilesPage skip writing: before that, the login-scoped cache key
+// might be wrong.
+func (s *Store) cacheFileContent(repo model.RepoRef, sha string, lines []string) {
+	if !s.viewerConfirmed || s.viewer.Login == "" {
+		return
+	}
+	key, err := cache.RepoKey(s.deps.Host, s.viewer.Login, repo, "blob/"+sha)
+	if err != nil {
+		return
+	}
+	body, err := json.Marshal(cachedBlob{Lines: lines})
+	if err != nil {
+		return
+	}
+	if err := s.deps.Cache.Put(key, cache.Entry{Body: body, FetchedAt: s.deps.Now()}); err != nil {
+		s.warnCacheError(err)
+	}
+}
+
+// fetchFileContent starts a background fetch of path's head blob content
+// (identified by sha), continuing on to applyExpandGap for gapStart once it
+// resolves. Values the goroutine needs are snapshotted from Store fields
+// before it starts, per docs/DESIGN.md's concurrency rules; ctx falls back
+// to s.baseCtx when no files generation context is active, mirroring
+// fetchMentionableUsers.
+func (s *Store) fetchFileContent(path, sha string, gapStart int) {
+	if s.expandInFlight == nil {
+		s.expandInFlight = make(map[string]bool)
+	}
+	s.expandInFlight[path] = true
+
+	gen := s.filesGen
+	ctx := s.filesCtx
+	if ctx == nil {
+		ctx = s.baseCtx
+	}
+	repo := s.current.Repo
+
+	go func() {
+		var res gh.FileContentResult
+		var err error
+		// A single deferred closure recovers a panic into err and always
+		// dispatches the same apply path, matching every other fetch in
+		// this package.
+		defer func() {
+			if r := recover(); r != nil {
+				err = fmt.Errorf("store: file_content: panic: %v", r)
+				s.deps.Logger.Error("goroutine panic", "op", "file_content", "err", err)
+			}
+			cancelled := ctx.Err() != nil
+			s.deps.Dispatch(func() {
+				s.applyFileContentResult(gen, path, sha, gapStart, res.Lines, res.RateLimit, err, cancelled)
+			})
+		}()
+		res, err = s.deps.GitHub.FileContent(ctx, repo, sha)
+	}()
+}
+
+// applyFileContentResult applies (or reports the failure of) one file's
+// head-content fetch started by fetchFileContent. It runs only on the UI
+// goroutine, from a Dispatch callback.
+func (s *Store) applyFileContentResult(
+	gen int, path, sha string, gapStart int, lines []string, rl model.RateLimit, err error, cancelled bool,
+) {
+	// The gen check comes first, before touching expandInFlight: resetFiles
+	// (PR switch/close, or a force-pushed reload) replaces the whole map
+	// with a fresh one, so a stale generation's own path entry - if any -
+	// belongs to a map that no longer exists and there is nothing of this
+	// generation's to clean up. Deleting unconditionally here would instead
+	// delete the *new* generation's own in-flight mark for the same path
+	// (maps are reference types, so "the map" this closure captured is
+	// whichever one is current by the time this runs), letting a second
+	// Enter on the same still-loading gap start a duplicate fetch -
+	// mirroring the identical placement rule fetchFilesPage's own
+	// filesFetchInFlight follows.
+	if gen != s.filesGen {
+		return
+	}
+	delete(s.expandInFlight, path)
+
+	if err != nil {
+		if cancelled {
+			// Our own cancellation (a PR switch/close superseding this
+			// generation) is not a failure worth reporting, matching every
+			// other fetch's identical rule.
+			return
+		}
+		s.deps.Logger.Error("fetch file content failed", "path", path, "err", err)
+		s.emit(Event{Kind: EventError, Err: err})
+		return
+	}
+
+	if s.setRateLimit(rl) && gen != s.filesGen {
+		return
+	}
+	if s.current != nil {
+		s.cacheFileContent(s.current.Repo, sha, lines)
+	}
+
+	idx := s.fileIndex(path)
+	if idx == -1 {
+		return
+	}
+	s.files[idx].HeadLines = expandHeadLines(lines, s.deps.Config.TabWidth)
+	s.applyExpandGap(gen, path, gapStart)
+}
+
+// applyExpandGap expands path's gap starting at gapStart using its
+// FileEntry.HeadLines (already set by ExpandGap's caller), replacing its
+// Hunks and re-highlighting the whole file from scratch: the old entry's
+// pending highlight jobs are dropped and a fresh id assigned - mirroring
+// what replaceFilesPage does for a network-replaced entry - so a highlight
+// result still in flight for the pre-expansion hunk layout can never land
+// in the new Tokens at the wrong index.
+//
+// When gapStart names the trailing gap and it is already empty,
+// diff.ExpandGap returns hunks unchanged: totalHunkLines is unchanged too
+// in that case (every other successful expansion strictly adds at least
+// one line), so that case is detected without a full deep comparison, and
+// only EventFilesChanged is emitted - the UI now knows the file's head
+// length (HeadLineCount/HeadKnown, derived from HeadLines) and can hide the
+// trailing gap row, even though nothing about Hunks itself changed.
+func (s *Store) applyExpandGap(gen int, path string, gapStart int) {
+	idx := s.fileIndex(path)
+	if idx == -1 {
+		return
+	}
+	entry := s.files[idx]
+
+	hunks, err := diff.ExpandGap(entry.Hunks, gapStart, entry.HeadLines)
+	if err != nil {
+		s.deps.Logger.Error("expand gap failed", "path", path, "gap_start", gapStart, "err", err)
+		s.emit(Event{Kind: EventError, Err: err})
+		return
+	}
+
+	if totalHunkLines(hunks) == totalHunkLines(entry.Hunks) {
+		s.emit(Event{Kind: EventFilesChanged})
+		return
+	}
+
+	single := []FileEntry{entry}
+	s.dropPendingHighlights(single)
+	s.assignFileEntryIDs(single)
+	single[0].Hunks = hunks
+	single[0].Tokens = make([][][]highlight.Token, len(hunks))
+	single[0].Highlighted = false
+	s.files[idx] = single[0]
+
+	s.emit(Event{Kind: EventFilesChanged})
+	if gen != s.filesGen {
+		return
+	}
+	s.enqueueHighlightJobs(gen, single)
+}
+
+// totalHunkLines sums the number of lines across every hunk, used by
+// applyExpandGap to detect a no-op expansion (see its doc comment).
+func totalHunkLines(hunks []diff.Hunk) int {
+	n := 0
+	for _, h := range hunks {
+		n += len(h.Lines)
+	}
+	return n
 }
 
 // LoadFiles starts loading the current pull request's changed files, one
@@ -239,6 +517,7 @@ func (s *Store) resetFiles() {
 	s.filesFetchInFlight = false
 	s.filesHighlightPending = 0
 	s.filesPendingByID = nil
+	s.expandInFlight = nil
 }
 
 // startFilesFetch begins a new files generation for headOID: it resets

@@ -51,6 +51,12 @@ type fakeGitHub struct {
 	filesErrs   map[string]map[int]error
 	filesBlock  chan struct{}
 
+	// fileContent backs FileContent (see SetFileContent): keyed by blob SHA
+	// rather than by ref/path, matching the real endpoint, which addresses
+	// a blob purely by its content hash.
+	fileContent      map[string][]string
+	fileContentCalls []string
+
 	addCommentErr      error
 	addCommentBodies   []string
 	addCommentBlock    chan struct{}
@@ -280,6 +286,37 @@ func (f *fakeGitHub) ChangedFiles(ctx context.Context, ref model.PRRef, page int
 		return gh.FilesResult{}, nil
 	}
 	return pages[page-1], nil
+}
+
+// SetFileContent registers the lines FileContent returns for sha.
+func (f *fakeGitHub) SetFileContent(sha string, lines []string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.fileContent == nil {
+		f.fileContent = make(map[string][]string)
+	}
+	f.fileContent[sha] = lines
+}
+
+// FileContentCalls returns every sha FileContent was called with, in call
+// order.
+func (f *fakeGitHub) FileContentCalls() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.fileContentCalls...)
+}
+
+// FileContent returns the lines registered for sha via SetFileContent, or a
+// not-found error for a sha nothing was registered for.
+func (f *fakeGitHub) FileContent(_ context.Context, _ model.RepoRef, sha string) (gh.FileContentResult, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.fileContentCalls = append(f.fileContentCalls, sha)
+	lines, ok := f.fileContent[sha]
+	if !ok {
+		return gh.FileContentResult{}, fmt.Errorf("fake: no file content registered for sha %q", sha)
+	}
+	return gh.FileContentResult{Lines: lines}, nil
 }
 
 // SetAddCommentBlock arms (or, passed nil, disarms) a gate every
@@ -1927,6 +1964,114 @@ func TestAppHelpAlsoClosesOnQuestionMark(t *testing.T) {
 
 	sendRune(app.app, '?')
 	waitFor(t, app.app, func() bool { return app.overlay == "" })
+}
+
+// TestAppHelpSearchHighlightsAndCycles covers the help overlay's own "/"
+// search: "list." matches every list.* binding row across the Global/List/
+// Detail/Files/Diff sections buildHelpText renders, giving more than one
+// hit to cycle through with n/N (including wrapping past either end).
+func TestAppHelpSearchHighlightsAndCycles(t *testing.T) {
+	app, _, _, _ := newTestApp(t, nil)
+
+	sendRune(app.app, '?')
+	waitFor(t, app.app, func() bool { return app.overlay == "help" })
+
+	sendRune(app.app, '/')
+	waitFor(t, app.app, func() bool { return app.app.GetFocus() == app.helpSearchInput })
+	for _, r := range "list." {
+		sendRune(app.app, r)
+	}
+	sendSpecial(app.app, tcell.KeyEnter)
+
+	// waitFor's own cond runs inside a QueueUpdate callback already on the
+	// UI goroutine (see its doc comment): every read below is a direct
+	// field/method access, never query() nested inside one, which would
+	// deadlock trying to queue a second update from within the first.
+	waitFor(t, app.app, func() bool {
+		hl := app.helpView.GetHighlights()
+		return len(hl) == 1 && hl[0] == "m0"
+	})
+	title := query(app.app, func() string { return app.helpView.GetTitle() })
+	if !containsSubstring(title, "matches") {
+		t.Errorf("help view title = %q, want it to mention the match count", title)
+	}
+
+	sendRune(app.app, 'n')
+	waitFor(t, app.app, func() bool {
+		hl := app.helpView.GetHighlights()
+		return len(hl) == 1 && hl[0] == "m1"
+	})
+
+	sendRune(app.app, 'N')
+	waitFor(t, app.app, func() bool {
+		hl := app.helpView.GetHighlights()
+		return len(hl) == 1 && hl[0] == "m0"
+	})
+
+	// A further N from the first match must wrap around to the last one.
+	count := query(app.app, func() int { return app.helpMatchCount })
+	want := fmt.Sprintf("m%d", count-1)
+	sendRune(app.app, 'N')
+	waitFor(t, app.app, func() bool {
+		hl := app.helpView.GetHighlights()
+		return len(hl) == 1 && hl[0] == want
+	})
+}
+
+func TestAppHelpSearchInvalidPatternShowsInTitle(t *testing.T) {
+	app, _, _, _ := newTestApp(t, nil)
+
+	sendRune(app.app, '?')
+	waitFor(t, app.app, func() bool { return app.overlay == "help" })
+
+	sendRune(app.app, '/')
+	waitFor(t, app.app, func() bool { return app.app.GetFocus() == app.helpSearchInput })
+	sendRune(app.app, '(')
+	sendSpecial(app.app, tcell.KeyEnter)
+
+	waitFor(t, app.app, func() bool {
+		return containsSubstring(app.helpView.GetTitle(), "invalid pattern")
+	})
+}
+
+// TestAppHelpCommandsLineListsEveryCommand guards buildHelpText's command
+// list against drifting out of sync with submitCommand's own switch (see
+// its doc comment).
+func TestAppHelpCommandsLineListsEveryCommand(t *testing.T) {
+	app, _, _, _ := newTestApp(t, nil)
+
+	sendRune(app.app, '?')
+	waitFor(t, app.app, func() bool { return app.overlay == "help" })
+
+	text := query(app.app, func() string { return app.helpView.GetText(true) })
+	if !containsSubstring(text, "close, reopen, merge") {
+		t.Errorf("help text does not list every submitCommand command: %q", text)
+	}
+}
+
+// TestAppHelpEscInSearchReturnsFocusToHelpView covers closeHelpSearch's own
+// doc comment: Esc while the help search has focus must return focus to
+// the help TextView (not close the overlay), and the overlay's later q/Esc
+// must still restore focus to the pane help was opened from — proof that
+// closeHelpSearch never consumed App.savedFocus early.
+func TestAppHelpEscInSearchReturnsFocusToHelpView(t *testing.T) {
+	app, _, _, _ := newTestApp(t, nil)
+
+	sendRune(app.app, '?')
+	waitFor(t, app.app, func() bool { return app.overlay == "help" })
+
+	sendRune(app.app, '/')
+	waitFor(t, app.app, func() bool { return app.app.GetFocus() == app.helpSearchInput })
+
+	sendSpecial(app.app, tcell.KeyEsc)
+	waitFor(t, app.app, func() bool { return app.app.GetFocus() == app.helpView })
+	if got := query(app.app, func() string { return app.overlay }); got != "help" {
+		t.Fatalf("overlay = %q after Esc inside the help search, want it to remain open", got)
+	}
+
+	sendRune(app.app, 'q')
+	waitFor(t, app.app, func() bool { return app.overlay == "" })
+	waitFor(t, app.app, func() bool { return app.app.GetFocus() == app.listView })
 }
 
 func TestAppOverlayForwardsUnboundKeysToItsTextView(t *testing.T) {

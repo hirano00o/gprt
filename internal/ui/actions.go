@@ -372,6 +372,22 @@ func (a *App) closeCommandLine() {
 	a.restoreFocus()
 }
 
+// openDiffSearch shows the "/" diff-search input in the status bar row,
+// prefilled with the last pattern searched for (so opening it again to
+// refine a search does not start from empty).
+func (a *App) openDiffSearch() {
+	a.savedFocus = a.app.GetFocus()
+	a.searchInput.SetText(a.searchPattern)
+	a.bottomPages.SwitchToPage("search")
+	a.app.SetFocus(a.searchInput)
+}
+
+// closeDiffSearch hides the "/" diff-search input and restores focus.
+func (a *App) closeDiffSearch() {
+	a.bottomPages.SwitchToPage("status")
+	a.restoreFocus()
+}
+
 // restoreFocus returns focus to whatever primitive last had it before a
 // transient overlay (filter, command line, help, messages) took it, or to
 // the list if none was recorded.

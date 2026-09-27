@@ -310,6 +310,221 @@ func LocateThread(hunks []Hunk, t model.ReviewThread) (hunk, line int, ok bool) 
 	return LocateLine(hunks, t.Side, t.Line)
 }
 
+// NewRange returns the inclusive [first, last] range of new-side (head-file)
+// line numbers h's lines occupy. A side with NewLines == 0 (h adds no
+// lines, for example a pure deletion) has no lines of its own; by
+// unified-diff convention it is then positioned immediately after
+// NewStart, so its (empty) range is (NewStart+1, NewStart) - first > last
+// signals emptiness to callers doing gap-boundary arithmetic (ExpandGap,
+// and widget.diffBuilder's gap-row placement, which reuses this exact
+// convention rather than duplicating it).
+func NewRange(h Hunk) (first, last int) {
+	if h.NewLines == 0 {
+		return h.NewStart + 1, h.NewStart
+	}
+	return h.NewStart, h.NewStart + h.NewLines - 1
+}
+
+// oldRange is NewRange's old-side counterpart. It is unexported: only
+// ExpandGap's delta arithmetic needs it here - callers outside this package
+// identify a gap by its new-side start line only (see ExpandGap's doc
+// comment for why).
+func oldRange(h Hunk) (first, last int) {
+	if h.OldLines == 0 {
+		return h.OldStart + 1, h.OldStart
+	}
+	return h.OldStart, h.OldStart + h.OldLines - 1
+}
+
+// ExpandGap returns hunks with the collapsed region ("gap") starting at
+// new-side line gapStart filled in with Context lines drawn from headLines
+// (the full head-side file content; headLines[i] is new-side line i+1).
+//
+// A gap is identified by gapStart, the new-side line number of its first
+// hidden line, rather than by which hunks border it: expanding one gap can
+// merge two hunks into one, shifting the index of every later hunk, while
+// line numbers never change. The three possible gaps are: before the first
+// hunk ([1, NewRange(hunks[0]).first-1]), between hunks i and i+1
+// ([NewRange(hunks[i]).last+1, NewRange(hunks[i+1]).first-1]), and after the
+// last hunk ([NewRange(hunks[last]).last+1, len(headLines)]).
+//
+// The trailing gap may legitimately be empty (the diff already reaches the
+// end of the file): ExpandGap then returns hunks unchanged (a copy) rather
+// than an error, since the caller (store.Store) cannot distinguish "empty"
+// from "unknown" without first knowing len(headLines), which it only learns
+// from this call. Any other gapStart that matches none of hunks' gaps is an
+// error.
+//
+// hunks and its Lines slices are never mutated: the result is built from
+// copies, so a caller that also holds a reference to the original hunks
+// keeps seeing the pre-expansion diff.
+func ExpandGap(hunks []Hunk, gapStart int, headLines []string) ([]Hunk, error) {
+	if len(hunks) == 0 {
+		return nil, fmt.Errorf("diff: ExpandGap: no hunks to expand")
+	}
+
+	if first0, _ := NewRange(hunks[0]); first0 > 1 && gapStart == 1 {
+		if err := checkHeadLinesReach(first0-1, headLines); err != nil {
+			return nil, err
+		}
+		return expandBeforeFirst(hunks, headLines), nil
+	}
+
+	for i := 0; i < len(hunks)-1; i++ {
+		_, lastI := NewRange(hunks[i])
+		firstNext, _ := NewRange(hunks[i+1])
+		if firstNext > lastI+1 && gapStart == lastI+1 {
+			if err := checkHeadLinesReach(firstNext-1, headLines); err != nil {
+				return nil, err
+			}
+			return expandBetween(hunks, i, headLines), nil
+		}
+	}
+
+	if _, lastLast := NewRange(hunks[len(hunks)-1]); gapStart == lastLast+1 {
+		if lastLast >= len(headLines) {
+			return copyHunks(hunks), nil
+		}
+		return expandTrailing(hunks, headLines), nil
+	}
+
+	return nil, fmt.Errorf("diff: ExpandGap: no gap starts at new-side line %d", gapStart)
+}
+
+// checkHeadLinesReach reports an error, rather than letting contextLines
+// panic on an out-of-range index later, when headLines is too short to
+// cover a gap that needs new-side line need (the before-first and between
+// paths only - the trailing path's own end is always len(headLines) by
+// construction, never past it).
+func checkHeadLinesReach(need int, headLines []string) error {
+	if need > len(headLines) {
+		return fmt.Errorf("diff: ExpandGap: head content has %d lines, gap needs line %d", len(headLines), need)
+	}
+	return nil
+}
+
+// copyHunks returns a shallow copy of hunks: a new backing slice, holding
+// the same (unmutated) Hunk values.
+func copyHunks(hunks []Hunk) []Hunk {
+	out := make([]Hunk, len(hunks))
+	copy(out, hunks)
+	return out
+}
+
+// contextLines builds the Context lines that fill a gap spanning new-side
+// lines [start, end] (inclusive; end < start yields none), using headLines
+// for text and delta (NewNo - OldNo, constant across a single gap) to
+// derive each line's old-side number.
+func contextLines(start, end, delta int, headLines []string) []Line {
+	if end < start {
+		return nil
+	}
+	lines := make([]Line, 0, end-start+1)
+	for newNo := start; newNo <= end; newNo++ {
+		lines = append(lines, Line{
+			Kind:  Context,
+			OldNo: newNo - delta,
+			NewNo: newNo,
+			Text:  headLines[newNo-1],
+		})
+	}
+	return lines
+}
+
+// recount derives OldLines/NewLines from lines' actual side membership, so
+// a hunk's header stays consistent after Context lines are inserted.
+func recount(lines []Line) (oldLines, newLines int) {
+	for _, l := range lines {
+		if l.Kind != Add {
+			oldLines++
+		}
+		if l.Kind != Del {
+			newLines++
+		}
+	}
+	return oldLines, newLines
+}
+
+// expandBeforeFirst fills the gap before hunks[0] by prepending Context
+// lines to it. The merged hunk starts at line 1 on both sides (delta is 0
+// throughout the preamble: nothing has changed yet).
+func expandBeforeFirst(hunks []Hunk, headLines []string) []Hunk {
+	out := copyHunks(hunks)
+	h0 := out[0]
+	first0, _ := NewRange(h0)
+
+	lines := make([]Line, 0, first0-1+len(h0.Lines))
+	lines = append(lines, contextLines(1, first0-1, 0, headLines)...)
+	lines = append(lines, h0.Lines...)
+	oldLines, newLines := recount(lines)
+
+	out[0] = Hunk{OldStart: 1, OldLines: oldLines, NewStart: 1, NewLines: newLines, Section: h0.Section, Lines: lines}
+	return out
+}
+
+// expandBetween fills the gap between hunks[i] and hunks[i+1], merging them
+// into a single hunk in the returned slice.
+func expandBetween(hunks []Hunk, i int, headLines []string) []Hunk {
+	hi, hNext := hunks[i], hunks[i+1]
+	_, lastNewI := NewRange(hi)
+	_, lastOldI := oldRange(hi)
+	delta := lastNewI - lastOldI
+	firstNext, _ := NewRange(hNext)
+
+	gap := contextLines(lastNewI+1, firstNext-1, delta, headLines)
+	lines := make([]Line, 0, len(hi.Lines)+len(gap)+len(hNext.Lines))
+	lines = append(lines, hi.Lines...)
+	lines = append(lines, gap...)
+	lines = append(lines, hNext.Lines...)
+	oldLines, newLines := recount(lines)
+
+	firstOld, _ := oldRange(hi)
+	firstNew, _ := NewRange(hi)
+	merged := Hunk{
+		OldStart: firstOld, OldLines: oldLines,
+		NewStart: firstNew, NewLines: newLines,
+		Section: hi.Section, Lines: lines,
+	}
+
+	out := make([]Hunk, 0, len(hunks)-1)
+	out = append(out, hunks[:i]...)
+	out = append(out, merged)
+	out = append(out, hunks[i+2:]...)
+	return out
+}
+
+// expandTrailing fills the gap after the last hunk by appending Context
+// lines to it. OldStart/NewStart are taken from oldRange/NewRange's own
+// first, not last.OldStart/NewStart directly, for the same reason
+// expandBetween does: when the last hunk's old or new side is itself empty
+// (a pure addition or deletion, NewLines/OldLines == 0), its own
+// OldStart/NewStart is only the position the empty side sits *after* (see
+// NewRange's doc comment) - the header's Start must be the first line
+// actually present in Lines, which the appended gap's Context lines become
+// once that side had none of its own.
+func expandTrailing(hunks []Hunk, headLines []string) []Hunk {
+	out := copyHunks(hunks)
+	last := out[len(out)-1]
+	_, lastNew := NewRange(last)
+	_, lastOld := oldRange(last)
+	delta := lastNew - lastOld
+
+	gap := contextLines(lastNew+1, len(headLines), delta, headLines)
+	lines := make([]Line, 0, len(last.Lines)+len(gap))
+	lines = append(lines, last.Lines...)
+	lines = append(lines, gap...)
+	oldLines, newLines := recount(lines)
+
+	firstOld, _ := oldRange(last)
+	firstNew, _ := NewRange(last)
+	out[len(out)-1] = Hunk{
+		OldStart: firstOld, OldLines: oldLines,
+		NewStart: firstNew, NewLines: newLines,
+		Section: last.Section, Lines: lines,
+	}
+	return out
+}
+
 // LocateLine finds the (hunk index, line index) of the diff line anchored at
 // side/lineNo — the same location model.ReviewThread's own Side/Line fields
 // name (LocateThread delegates here), and what a saved line/range-comment

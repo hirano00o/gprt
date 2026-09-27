@@ -2,9 +2,13 @@ package widget
 
 import (
 	"errors"
+	"fmt"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/gdamore/tcell/v2"
 
 	"github.com/hirano00o/gprt/internal/diff"
 	"github.com/hirano00o/gprt/internal/highlight"
@@ -32,7 +36,16 @@ func twoHunkFile(t *testing.T) DiffFile {
 	if err != nil {
 		t.Fatalf("diff.Parse: %v", err)
 	}
-	return DiffFile{Path: "pkg/example.go", Status: model.FileStatusModified, Additions: 2, Deletions: 1, HasPatch: true, Hunks: hunks}
+	return DiffFile{
+		Path: "pkg/example.go", Status: model.FileStatusModified, Additions: 2, Deletions: 1, HasPatch: true, Hunks: hunks,
+		// The second hunk ends at new-side line 12: HeadKnown/HeadLineCount
+		// are set to exactly that so no trailing gap row (an unrelated
+		// concern for most of this file's tests) is appended after it. The
+		// hunks themselves are still deliberately non-contiguous (lines 1-3,
+		// then 10-12): a genuine, unconditional gap row between them is
+		// still expected (see TestDiffViewCursorMovementSkipsNonSelectableRows).
+		HeadKnown: true, HeadLineCount: 12,
+	}
 }
 
 func rowText(r diffRow, li int) string {
@@ -129,8 +142,10 @@ func TestDiffViewCursorMovementSkipsNonSelectableRows(t *testing.T) {
 	}
 
 	// The first hunk has 4 lines (line1, old2, new2, line3); moving past all
-	// of them must land directly on the second hunk's first line
-	// ("line10"), skipping the second hunk's header row entirely.
+	// of them must land on the gap row between the two hunks (new-side
+	// lines 4-9, hidden since the hunks are non-contiguous) - itself
+	// selectable, unlike the second hunk's own header row, which is skipped
+	// entirely.
 	for range 3 {
 		dv.MoveBy(1)
 	}
@@ -140,9 +155,15 @@ func TestDiffViewCursorMovementSkipsNonSelectableRows(t *testing.T) {
 	}
 
 	dv.MoveBy(1)
+	gapStart, ok := dv.CursorGap()
+	if !ok || gapStart != 4 {
+		t.Fatalf("cursor after moving past the first hunk = gapStart=%d, ok=%v, want the gap row starting at line 4", gapStart, ok)
+	}
+
+	dv.MoveBy(1)
 	next, ok := dv.CursorLine()
 	if !ok || next.Text != "line10" {
-		t.Fatalf("cursor after moving past the first hunk = %+v, ok=%v, want the second hunk's first line (line10), not its header", next, ok)
+		t.Fatalf("cursor after moving past the gap row = %+v, ok=%v, want the second hunk's first line (line10), not its header", next, ok)
 	}
 }
 
@@ -206,7 +227,10 @@ func TestDiffViewMovePageByDisplayLines(t *testing.T) {
 	}
 
 	dv := NewDiffView()
-	dv.SetFile(DiffFile{Path: "f.go", HasPatch: true, Hunks: hunks})
+	// HeadKnown/HeadLineCount matching the hunk's own last line (10)
+	// suppresses the trailing gap row that would otherwise follow it,
+	// which is not what this test is about.
+	dv.SetFile(DiffFile{Path: "f.go", HasPatch: true, Hunks: hunks, HeadKnown: true, HeadLineCount: 10})
 	drawn(t, dv, 60, 12) // header(1) + hunk header(1) + 10 lines = 12 rows tall exactly
 
 	dv.MoveTop()
@@ -240,10 +264,10 @@ func TestDiffViewVisualSelectionWithinAHunkAndClampAtBoundary(t *testing.T) {
 		t.Errorf("Selection() = %+v, want line1..new2", sel)
 	}
 
-	// One more step crosses into the second hunk (line3 -> line10): the
-	// selection must clamp to the anchor hunk's own last line rather than
-	// spanning hunks.
-	dv.MoveBy(2) // line3, then across the hunk boundary into line10
+	// One more move crosses into the second hunk (line3, across the gap
+	// row, into line10): the selection must clamp to the anchor hunk's own
+	// last line rather than spanning hunks.
+	dv.MoveBy(3) // line3, the gap row, then across the hunk boundary into line10
 	clamped, ok := dv.Selection()
 	if !ok {
 		t.Fatal("Selection() lost after crossing a hunk boundary, want it clamped instead")
@@ -278,15 +302,17 @@ func TestDiffViewVisualSelectionAppliesSelectedBackgroundOnScreen(t *testing.T) 
 	screen := newTestScreen(t, 40, 20)
 	dv.Draw(screen)
 
-	dv.MoveTop()     // hunk index 0 (old line 10)
+	dv.MoveTop()     // the gap row before the hunk (it starts at line 10, not 1)
+	dv.MoveBy(1)     // hunk index 0 (old line 10)
 	dv.StartVisual() // anchor = index 0
 	dv.MoveBy(5)     // cursor -> index 5 (old line 15); selects indices 0..5
 	dv.Draw(screen)
 
 	x, y, _, _ := dv.GetRect()
-	// Row layout: y+0 file header, y+1 hunk header, y+2 is hunk index 0
-	// (the anchor: selected, but not the cursor).
-	_, gotBG, _ := cellStyle(screen, x, y+2).Decompose()
+	// Row layout: y+0 file header, y+1 the gap row before the hunk (it
+	// starts at old/new line 10, not 1), y+2 hunk header, y+3 is hunk
+	// index 0 (the anchor: selected, but not the cursor).
+	_, gotBG, _ := cellStyle(screen, x, y+3).Decompose()
 	_, wantBG, _ := theme.DiffLineStyle(diff.Context, false, true).Decompose()
 	if gotBG != wantBG {
 		t.Errorf("anchor row (hunk index 0, old line 10) background = %v, want the selected tint %v", gotBG, wantBG)
@@ -1017,5 +1043,270 @@ func TestDiffViewJumpToThreadEdgeUsesDisplayOrder(t *testing.T) {
 	last, ok := dv.CursorThread()
 	if !ok || last.ID != "inline" {
 		t.Fatalf("JumpToThreadEdge(-1) landed on %+v, ok=%v, want the inline thread (rendered last)", last, ok)
+	}
+}
+
+// TestDiffViewSearchHighlightsMatchedCellsOnly guards SetSearch/ClearSearch
+// end to end: only the cells covered by an actual regexp match are drawn
+// Reverse (theme.SearchMatch), never a neighbouring cell on the same line or
+// content on a different line, and ClearSearch removes it again.
+func TestDiffViewSearchHighlightsMatchedCellsOnly(t *testing.T) {
+	dv := NewDiffView()
+	dv.SetFile(twoHunkFile(t))
+	dv.SetSearch(regexp.MustCompile("new2"))
+	dv.SetRect(0, 0, 60, 20)
+	screen := newTestScreen(t, 60, 20)
+	dv.Draw(screen)
+
+	// Row layout for twoHunkFile: file header(0), hunk header(1),
+	// " line1"(2), "-old2"(3), "+new2"(4) — the only line "new2" matches.
+	row := dv.rows[4]
+	if row.kind != rowKindLine || row.line != 2 {
+		t.Fatalf("rows[4] = %+v, want the +new2 line (hunk 0, line index 2)", row)
+	}
+	gw := SpanWidth(row.gutter)
+
+	x, y, _, _ := dv.GetRect()
+	for i := range 4 { // "new2" is 4 runes wide
+		_, _, attr := cellStyle(screen, x+gw+i, y+4).Decompose()
+		if attr&tcell.AttrReverse == 0 {
+			t.Errorf("match cell %d not drawn Reverse", i)
+		}
+	}
+	if _, _, attr := cellStyle(screen, x+gw+4, y+4).Decompose(); attr&tcell.AttrReverse != 0 {
+		t.Error("cell right after the match must not be drawn Reverse")
+	}
+	if _, _, attr := cellStyle(screen, x+gw, y+2).Decompose(); attr&tcell.AttrReverse != 0 {
+		t.Error("a neighbouring, non-matching line must not be drawn Reverse")
+	}
+
+	dv.ClearSearch()
+	dv.Draw(screen)
+	for i := range 4 {
+		if _, _, attr := cellStyle(screen, x+gw+i, y+4).Decompose(); attr&tcell.AttrReverse != 0 {
+			t.Errorf("match cell %d still Reverse after ClearSearch", i)
+		}
+	}
+}
+
+// gapFixturePatch has two hunks: the first starts at new-side line 5 (a
+// 4-line gap before it, lines 1-4), the second at new-side line 10 (a
+// 3-line gap between them, lines 7-9).
+const gapFixturePatch = `@@ -5,2 +5,2 @@
+ context5
+ context6
+@@ -10,1 +10,1 @@
+ context10
+`
+
+// gapFixtureFile builds a DiffFile from gapFixturePatch with the given
+// status and head-content knowledge, for the gap-row tests below.
+func gapFixtureFile(t *testing.T, status model.FileStatus, headKnown bool, headLineCount int) DiffFile {
+	t.Helper()
+	hunks, err := diff.Parse(gapFixturePatch)
+	if err != nil {
+		t.Fatalf("diff.Parse: %v", err)
+	}
+	return DiffFile{
+		Path: "gap.go", Status: status, HasPatch: true, Hunks: hunks,
+		HeadKnown: headKnown, HeadLineCount: headLineCount,
+	}
+}
+
+func TestDiffViewGapRowsRenderedBeforeBetweenAndAfterWithCounts(t *testing.T) {
+	dv := NewDiffView()
+	dv.SetFile(gapFixtureFile(t, model.FileStatusModified, true, 15))
+	drawn(t, dv, 60, 30)
+
+	var gaps []diffRow
+	for _, r := range dv.rows {
+		if r.kind == rowKindGap {
+			gaps = append(gaps, r)
+		}
+	}
+	if len(gaps) != 3 {
+		t.Fatalf("gap rows = %d, want 3 (before, between, trailing)", len(gaps))
+	}
+	if gaps[0].gapStart != 1 || gaps[0].gapCount != 4 {
+		t.Errorf("before gap = %+v, want gapStart=1 gapCount=4", gaps[0])
+	}
+	if gaps[1].gapStart != 7 || gaps[1].gapCount != 3 {
+		t.Errorf("between gap = %+v, want gapStart=7 gapCount=3", gaps[1])
+	}
+	if gaps[2].gapStart != 11 || gaps[2].gapCount != 5 {
+		t.Errorf("trailing gap = %+v, want gapStart=11 gapCount=5 (HeadLineCount 15 - last visible line 10)", gaps[2])
+	}
+	if !containsAll(rowText(gaps[1], 0), "3", "lines hidden") {
+		t.Errorf("between gap text = %q, want it to mention the hidden line count", rowText(gaps[1], 0))
+	}
+}
+
+func TestDiffViewGapRowsNoneForAddedRemovedNoPatchOrLoading(t *testing.T) {
+	tests := []struct {
+		name string
+		f    func(t *testing.T) DiffFile
+	}{
+		{"added status", func(t *testing.T) DiffFile { return gapFixtureFile(t, model.FileStatusAdded, true, 15) }},
+		{"removed status", func(t *testing.T) DiffFile { return gapFixtureFile(t, model.FileStatusRemoved, true, 15) }},
+		{"no patch", func(t *testing.T) DiffFile {
+			return DiffFile{Path: "x.go", Status: model.FileStatusModified, HasPatch: false}
+		}},
+		{"loading", func(t *testing.T) DiffFile {
+			f := gapFixtureFile(t, model.FileStatusModified, true, 15)
+			f.Loading = true
+			return f
+		}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			dv := NewDiffView()
+			dv.SetFile(tc.f(t))
+			drawn(t, dv, 60, 30)
+			for _, r := range dv.rows {
+				if r.kind == rowKindGap {
+					t.Fatalf("gap row present = %+v, want none", r)
+				}
+			}
+		})
+	}
+}
+
+func TestDiffViewTrailingGapHiddenWhenHeadLineCountMatchesLastLineShownWhenLarger(t *testing.T) {
+	dv := NewDiffView()
+	dv.SetFile(gapFixtureFile(t, model.FileStatusModified, true, 10)) // matches the last visible line exactly
+	drawn(t, dv, 60, 30)
+	for _, r := range dv.rows {
+		if r.kind == rowKindGap && r.gapStart == 11 {
+			t.Fatalf("trailing gap row present = %+v, want none when HeadLineCount == last visible line", r)
+		}
+	}
+
+	dv2 := NewDiffView()
+	dv2.SetFile(gapFixtureFile(t, model.FileStatusModified, true, 12))
+	drawn(t, dv2, 60, 30)
+	var found bool
+	for _, r := range dv2.rows {
+		if r.kind == rowKindGap && r.gapStart == 11 {
+			found = true
+			if r.gapCount != 2 {
+				t.Errorf("trailing gap count = %d, want 2", r.gapCount)
+			}
+		}
+	}
+	if !found {
+		t.Error("trailing gap row missing when HeadLineCount > last visible line")
+	}
+}
+
+func TestDiffViewCursorGap(t *testing.T) {
+	dv := NewDiffView()
+	dv.SetFile(gapFixtureFile(t, model.FileStatusModified, true, 15))
+	drawn(t, dv, 60, 30)
+
+	dv.MoveTop() // the before gap row (gapStart=1)
+	gapStart, ok := dv.CursorGap()
+	if !ok || gapStart != 1 {
+		t.Fatalf("CursorGap() = (%d, %v), want (1, true) on the before gap row", gapStart, ok)
+	}
+
+	dv.MoveBy(1) // context5, a real line - not a gap
+	if _, ok := dv.CursorGap(); ok {
+		t.Error("CursorGap() = ok on a non-gap row, want false")
+	}
+}
+
+func TestDiffViewVisualOnGapRowIsANoOp(t *testing.T) {
+	dv := NewDiffView()
+	dv.SetFile(gapFixtureFile(t, model.FileStatusModified, true, 15))
+	drawn(t, dv, 60, 30)
+
+	dv.MoveTop() // the before gap row
+	dv.StartVisual()
+	if dv.InVisual() {
+		t.Error("StartVisual() on a gap row must be a no-op")
+	}
+}
+
+// gapFixtureHeadLines builds a 15-line synthetic head file for the
+// expansion tests below.
+func gapFixtureHeadLines() []string {
+	lines := make([]string, 15)
+	for i := range lines {
+		lines[i] = fmt.Sprintf("headline%d", i+1)
+	}
+	return lines
+}
+
+// TestDiffViewCursorSurvivesGapExpansionLandingOnFirstRevealedLine covers
+// the decided cursor-placement design: a gap row's identity (diffRowKey's
+// isGap/gapStart) can never match any row in a rebuild once its gap has
+// been expanded (there is no longer a gap at that start line at all), so
+// rebuild's by-identity restore falls through to its index-based
+// clamp(oldCursor) fallback - which lands correctly on the first revealed
+// line, since the new lines are inserted exactly where the gap row used to
+// sit in selectable order.
+func TestDiffViewCursorSurvivesGapExpansionLandingOnFirstRevealedLine(t *testing.T) {
+	dv := NewDiffView()
+	f := gapFixtureFile(t, model.FileStatusModified, true, 15)
+	dv.SetFile(f)
+	drawn(t, dv, 60, 30)
+
+	dv.MoveTop()
+	dv.MoveBy(3) // context5, context6, then the between gap row
+	gapStart, ok := dv.CursorGap()
+	if !ok || gapStart != 7 {
+		t.Fatalf("cursor gapStart = %d, ok=%v, want (7, true) on the between gap row", gapStart, ok)
+	}
+
+	expanded, err := diff.ExpandGap(f.Hunks, gapStart, gapFixtureHeadLines())
+	if err != nil {
+		t.Fatalf("diff.ExpandGap() error = %v", err)
+	}
+
+	f2 := f
+	f2.Hunks = expanded
+	dv.SetFile(f2)
+	drawn(t, dv, 60, 30)
+
+	line, ok := dv.CursorLine()
+	if !ok || line.NewNo != 7 {
+		t.Fatalf("CursorLine() after expansion = %+v, ok=%v, want the first revealed line (NewNo 7)", line, ok)
+	}
+}
+
+// TestDiffViewCursorGapIdentitySurvivesExpandingADifferentGap covers a
+// cursor left on one gap row while a *different* gap in the same file gets
+// expanded: expanding the between-gap merges the file's two hunks into
+// one, which would shift a hunk-index-based identity for "the last hunk"
+// - but gap identity is by start line, so the cursor must still be found
+// on the (unmoved) trailing gap.
+func TestDiffViewCursorGapIdentitySurvivesExpandingADifferentGap(t *testing.T) {
+	dv := NewDiffView()
+	f := gapFixtureFile(t, model.FileStatusModified, true, 15)
+	dv.SetFile(f)
+	drawn(t, dv, 60, 30)
+
+	dv.MoveBottom() // the trailing gap row (gapStart=11)
+	gapStart, ok := dv.CursorGap()
+	if !ok || gapStart != 11 {
+		t.Fatalf("cursor gapStart = %d, ok=%v, want (11, true) on the trailing gap row", gapStart, ok)
+	}
+
+	expanded, err := diff.ExpandGap(f.Hunks, 7, gapFixtureHeadLines())
+	if err != nil {
+		t.Fatalf("diff.ExpandGap() error = %v", err)
+	}
+	if len(expanded) != 1 {
+		t.Fatalf("expanding the between gap produced %d hunks, want 1 (merged)", len(expanded))
+	}
+
+	f2 := f
+	f2.Hunks = expanded
+	dv.SetFile(f2)
+	drawn(t, dv, 60, 30)
+
+	gapStart, ok = dv.CursorGap()
+	if !ok || gapStart != 11 {
+		t.Fatalf("cursor after expanding a different gap = gapStart=%d ok=%v, want still (11, true)", gapStart, ok)
 	}
 }

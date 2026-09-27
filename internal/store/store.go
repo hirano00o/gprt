@@ -28,6 +28,10 @@ type GitHub interface {
 	SearchPullRequests(ctx context.Context, query, cursor string) (gh.SearchResult, error)
 	PullRequest(ctx context.Context, ref model.PRRef, viewerLogin string) (gh.DetailResult, error)
 	ChangedFiles(ctx context.Context, ref model.PRRef, page int, etag string) (gh.FilesResult, error)
+	// FileContent fetches a git blob's full content (see files.go's
+	// ExpandGap, the collapsed-diff-region expansion feature's only
+	// caller).
+	FileContent(ctx context.Context, repo model.RepoRef, sha string) (gh.FileContentResult, error)
 	AddIssueComment(ctx context.Context, subjectID, body string) (model.IssueComment, error)
 	UpdateIssueComment(ctx context.Context, id, body string) (model.IssueComment, error)
 	DeleteIssueComment(ctx context.Context, id string) error
@@ -377,6 +381,13 @@ type Store struct {
 	// can drop a superseded entry's own leftover count precisely, without
 	// disturbing its replacement's identically-pathed, freshly started one.
 	filesPendingByID map[int]int
+
+	// expandInFlight tracks (by path) which files have an ExpandGap fetch of
+	// their head content currently in flight, so a second Enter on the same
+	// still-loading gap row is silently ignored rather than starting a
+	// duplicate network call (see ExpandGap). Reset by resetFiles along with
+	// every other files-generation field.
+	expandInFlight map[string]bool
 
 	// Mutations (see mutations.go): a single-flight FIFO queue of
 	// comment mutations. mutationQueue holds every not-yet-started

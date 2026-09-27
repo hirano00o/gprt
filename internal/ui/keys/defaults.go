@@ -96,6 +96,10 @@ var defaultTable = []defaultEntry{
 	{[]Context{ContextList, ContextFiles}, "l", ActionListOpen},
 	{[]Context{ContextList}, "n", ActionListNewPR},
 
+	// Enter is bound to list.open only in the ContextList/ContextFiles rows
+	// above - a different context from ContextDiff here, so this is no
+	// conflict: whichever pane has focus decides which binding fires.
+	{[]Context{ContextDiff}, "<Enter>", ActionDiffExpand},
 	{[]Context{ContextDiff}, "V", ActionDiffVisual},
 	{[]Context{ContextDiff, ContextPR}, "c", ActionDiffComment},
 	{[]Context{ContextThread}, "c", ActionThreadReply},
@@ -129,6 +133,16 @@ var defaultTable = []defaultEntry{
 	{[]Context{ContextDiff}, "[c", ActionDiffPrevThread},
 	{[]Context{ContextDiff}, "]f", ActionDiffNextFile},
 	{[]Context{ContextDiff}, "[f", ActionDiffPrevFile},
+
+	// Bound in ContextFiles too (not just ContextDiff): the search acts on
+	// the diff regardless of which Files-tab pane has focus (tree hidden via
+	// Ctrl-w t, or cursor still on the tree), like p/S/E above. ContextList
+	// already binds "/" to list.filter and "n" to list.new_pr, but those are
+	// a different context, so there is no conflict; no global binding starts
+	// with "/", "n", or "N".
+	{[]Context{ContextDiff, ContextFiles}, "/", ActionDiffSearch},
+	{[]Context{ContextDiff, ContextFiles}, "n", ActionDiffSearchNext},
+	{[]Context{ContextDiff, ContextFiles}, "N", ActionDiffSearchPrev},
 
 	{[]Context{ContextGlobal}, "?", ActionGlobalHelp},
 	{[]Context{ContextGlobal}, "q", ActionGlobalQuit},

@@ -45,6 +45,13 @@ var (
 	// a review-comment send silently coerced to "add to review"): distinct
 	// from Warning/Error, which both signal a problem.
 	Info = tcell.StyleDefault.Foreground(colorInfo).Background(colorBg)
+	// SearchMatch highlights a "/" search hit in the diff. Reverse, not a
+	// Background colour: widget.DiffView.drawLineRow overwrites every span's
+	// background with the row's own background via withBackground (cursor/
+	// selection tinting), which would erase a background colour set here;
+	// Reverse survives Style.Background() and still reads clearly even on
+	// the cursor row.
+	SearchMatch = tcell.StyleDefault.Foreground(colorWarning).Background(colorBg).Reverse(true)
 )
 
 // Apply sets tview's package-global Styles to gprt's dark theme. It must be

@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/rivo/tview"
@@ -11,18 +12,107 @@ import (
 	"github.com/hirano00o/gprt/internal/ui/theme"
 )
 
+// helpTitleDefault is the help overlay's title with no search active;
+// submitHelpSearch overwrites it with match feedback (the overlay covers
+// the status bar, so it has nowhere else to show a toast) and an empty
+// search submission restores it.
+const helpTitleDefault = " gprt help (q or Esc to close) "
+
 // openHelp opens the "?" / ":help" overlay: a scrollable list of every
 // effective binding (defaults merged with the user's config) for the
-// contexts this milestone's UI actually uses.
+// contexts this milestone's UI actually uses, plus a hidden "/" search row
+// (see openHelpSearch) toggled the same way the list's own filter is.
 func (a *App) openHelp() {
 	if a.overlay != "" {
 		return
 	}
 	a.savedFocus = a.app.GetFocus()
 	a.overlay = "help"
-	view := a.buildHelpView()
-	a.root.AddPage("help", view, true, true)
-	a.app.SetFocus(view)
+
+	a.helpView = tview.NewTextView().SetScrollable(true).SetRegions(true)
+	a.helpView.SetBorder(true).SetTitle(helpTitleDefault)
+	text, _ := a.buildHelpText(nil)
+	a.helpView.SetText(text)
+	a.helpMatchCount, a.helpMatchIdx = 0, 0
+
+	a.helpFlex = tview.NewFlex().SetDirection(tview.FlexRow)
+	a.helpFlex.AddItem(a.helpView, 0, 1, true)
+	a.helpFlex.AddItem(a.helpSearchInput, 0, 0, false) // hidden until "/" (openHelpSearch)
+
+	a.root.AddPage("help", a.helpFlex, true, true)
+	a.app.SetFocus(a.helpView)
+}
+
+// openHelpSearch shows the help overlay's own "/" search row and focuses
+// it. Unlike App.savedFocus (the outer overlay's own entry/exit point),
+// this only moves focus within the still-open overlay — see
+// closeHelpSearch's own doc comment for why restoreFocus() must not be
+// reused here.
+func (a *App) openHelpSearch() {
+	a.helpFlex.ResizeItem(a.helpSearchInput, 1, 0)
+	a.helpSearchInput.SetText("")
+	a.app.SetFocus(a.helpSearchInput)
+}
+
+// closeHelpSearch hides the help overlay's search row and returns focus to
+// the help TextView — not restoreFocus(): App.savedFocus is single-shot
+// and already holds whatever pane had focus before the help overlay itself
+// opened (see restoreFocus's own doc comment); calling it here would
+// consume that early, so the "q"/Esc that later actually closes the help
+// overlay would fall back to the generic list-focused default instead of
+// the real pane the overlay was opened from.
+func (a *App) closeHelpSearch() {
+	a.helpFlex.ResizeItem(a.helpSearchInput, 0, 0)
+	a.app.SetFocus(a.helpView)
+}
+
+// submitHelpSearch runs the pattern currently typed into helpSearchInput
+// (Enter): recompiles the help text with every match wrapped in a
+// Highlight()-able region and jumps to the first one. Feedback (match
+// count, "no match", or an invalid pattern) is shown in the help
+// TextView's own title, since the overlay covers the status bar.
+func (a *App) submitHelpSearch() {
+	pattern := a.helpSearchInput.GetText()
+	a.closeHelpSearch()
+
+	if pattern == "" {
+		text, _ := a.buildHelpText(nil)
+		a.helpView.SetText(text)
+		a.helpView.Highlight()
+		a.helpMatchCount, a.helpMatchIdx = 0, 0
+		a.helpView.SetTitle(helpTitleDefault)
+		return
+	}
+
+	re, err := regexp.Compile(smartcase(pattern))
+	if err != nil {
+		a.helpView.SetTitle(fmt.Sprintf(" gprt help — invalid pattern: %s ", err.Error()))
+		return
+	}
+
+	text, n := a.buildHelpText(re)
+	a.helpView.SetText(text)
+	a.helpMatchCount = n
+	if n == 0 {
+		a.helpView.SetTitle(fmt.Sprintf(" gprt help — no match: %s ", pattern))
+		return
+	}
+	a.helpMatchIdx = 0
+	a.helpView.Highlight("m0")
+	a.helpView.ScrollToHighlight()
+	a.helpView.SetTitle(fmt.Sprintf(" gprt help — %d matches (n/N) ", n))
+}
+
+// helpSearchStep cycles the help overlay's search highlight to the next
+// (dir > 0) or previous (dir < 0) match, wrapping around. A no-op with no
+// active search.
+func (a *App) helpSearchStep(dir int) {
+	if a.helpMatchCount == 0 {
+		return
+	}
+	a.helpMatchIdx = (a.helpMatchIdx + dir + a.helpMatchCount) % a.helpMatchCount
+	a.helpView.Highlight(fmt.Sprintf("m%d", a.helpMatchIdx))
+	a.helpView.ScrollToHighlight()
 }
 
 // openMessages opens the ":messages" overlay: the ring buffer of recent
@@ -64,26 +154,64 @@ var helpContexts = []struct {
 	{"Diff", keys.ContextDiff},
 }
 
-func (a *App) buildHelpView() *tview.TextView {
-	view := tview.NewTextView().SetScrollable(true)
-	view.SetBorder(true).SetTitle(" gprt help (q or Esc to close) ")
+// helpCommandsLine lists every ":" command submitCommand recognizes; kept
+// in sync with its switch by hand (a mismatch only ever makes the help
+// text wrong, never the command itself unusable, so a generated list is
+// not worth the extra indirection for one line).
+const helpCommandsLine = ": commands: q, quit, help, messages, reload, close, reopen, merge"
 
-	var b strings.Builder
-	fmt.Fprintf(&b, "gprt %s\n\n", a.deps.Version)
+// buildHelpText renders the help overlay's full text: gprt's version, then
+// every effective binding (defaults merged with the user's config) for
+// each of helpContexts, then helpCommandsLine. Every line is passed
+// through tview.Escape: helpView enables region tags (SetRegions(true),
+// for the search highlighting below), which would otherwise misparse a
+// literal "[" in a binding sequence like "[c"/"]f" as the start of a
+// region/colour tag.
+//
+// re == nil renders plain text with no highlighting (n is 0). re != nil
+// wraps every regexp match within each *raw* (pre-escape) line as a
+// ["m<N>"]...[""] region — N counting up from 0 across the whole text, so
+// TextView.Highlight("mN")/ScrollToHighlight can jump to it — and n is the
+// total number of matches found. Each line is built piecewise (escaped
+// prefix, then an escaped match inside the region tags, ...) rather than
+// searching the already-escaped line, since tview.Escape can change a
+// line's length and would otherwise invalidate the match's own byte
+// offsets.
+func (a *App) buildHelpText(re *regexp.Regexp) (string, int) {
+	var raw []string
+	raw = append(raw, fmt.Sprintf("gprt %s", a.deps.Version), "")
 	for _, hc := range helpContexts {
 		bindings := a.deps.Keymap.Bindings(hc.ctx)
 		if len(bindings) == 0 {
 			continue
 		}
-		fmt.Fprintf(&b, "%s:\n", hc.label)
+		raw = append(raw, hc.label+":")
 		for _, bd := range bindings {
-			fmt.Fprintf(&b, "  %-10s %s\n", bd.Sequence, bd.Action)
+			raw = append(raw, fmt.Sprintf("  %-10s %s", bd.Sequence, bd.Action))
 		}
-		b.WriteString("\n")
+		raw = append(raw, "")
 	}
-	fmt.Fprint(&b, ": commands: q, quit, help, messages, reload\n")
-	view.SetText(b.String())
-	return view
+	raw = append(raw, helpCommandsLine)
+
+	var b strings.Builder
+	n := 0
+	for _, line := range raw {
+		if re == nil {
+			b.WriteString(tview.Escape(line))
+			b.WriteByte('\n')
+			continue
+		}
+		last := 0
+		for _, r := range re.FindAllStringIndex(line, -1) {
+			b.WriteString(tview.Escape(line[last:r[0]]))
+			fmt.Fprintf(&b, "[\"m%d\"]%s[\"\"]", n, tview.Escape(line[r[0]:r[1]]))
+			n++
+			last = r[1]
+		}
+		b.WriteString(tview.Escape(line[last:]))
+		b.WriteByte('\n')
+	}
+	return b.String(), n
 }
 
 // buildMessagesView lists the ring buffer of recent error-and-above log
