@@ -78,13 +78,13 @@ func (a *App) buildCreateForm() {
 	a.overlay = "createform"
 
 	repoField := tview.NewInputField().SetLabel("Repository")
-	repoField.SetAutocompleteFunc(a.createFormRepoAutocomplete)
+	wireFormAutocomplete(repoField, &a.createFormRepoSuggesting, a.createFormRepoAutocomplete)
 	repoField.SetChangedFunc(a.onCreateFormRepoChanged)
 
 	head := tview.NewInputField().SetLabel("Head branch")
-	head.SetAutocompleteFunc(a.createFormHeadAutocomplete)
+	wireFormAutocomplete(head, &a.createFormHeadSuggesting, a.createFormHeadAutocomplete)
 	base := tview.NewInputField().SetLabel("Base branch")
-	base.SetAutocompleteFunc(a.createFormBaseAutocomplete)
+	wireFormAutocomplete(base, &a.createFormBaseSuggesting, a.createFormBaseAutocomplete)
 	title := tview.NewInputField().SetLabel("Title")
 	draft := tview.NewCheckbox().SetLabel("Draft")
 
@@ -496,6 +496,9 @@ func (a *App) closeCreateForm() {
 	a.createFormHeadLastQuery = ""
 	a.createFormBaseSuggestions = nil
 	a.createFormBaseLastQuery = ""
+	a.createFormRepoSuggesting = false
+	a.createFormHeadSuggesting = false
+	a.createFormBaseSuggesting = false
 	a.deleteCreateFormBodyDraft(bodyDraftKey)
 	if a.createFormReturnFocus != nil {
 		a.app.SetFocus(a.createFormReturnFocus)
@@ -648,13 +651,44 @@ func (a *App) onCreateFormMutationChanged() {
 	}
 }
 
-// routeCreateFormKey handles the "createform" overlay: Esc cancels (asking
-// to discard when dirty), Ctrl-s submits; every other key is forwarded
-// unchanged to the Form's own InputHandler (InputField/Checkbox/buttons),
-// exactly like routeEditFormKey does for "editform".
+// routeCreateFormKey handles the "createform" overlay: forwards every key
+// to the Form's own InputHandler (InputField/Checkbox/buttons), rewritten
+// first by rewriteFormNavKey (formnav.go) so Up/Down also move between
+// items exactly like Tab/Backtab already do — except while the currently
+// focused Repository/Head/Base field's own autocomplete drop-down is shown
+// (createFormRepoSuggesting/createFormHeadSuggesting/createFormBaseSuggesting,
+// each kept in sync with tview's own, otherwise unexported, "is the
+// drop-down populated" state by wrapFormAutocomplete, forced false here
+// whenever its own field does not currently have focus — see
+// wrapFormAutocomplete's own doc comment for why that alone is enough to
+// never leave it stale), in which case Tab/Backtab instead navigate the
+// drop-down's own candidates and Enter is left to tview's own native
+// "select the highlighted candidate" handling. Esc cancels (asking to
+// discard when dirty) — except while a drop-down is shown, when a literal
+// Escape must only close it: tview's own InputField.InputHandler does so
+// directly on Escape, bypassing SetAutocompleteFunc entirely, so this
+// router resets the tracked state itself here to stay in sync, rather than
+// leaving it stale for the next routed key — and Ctrl-s submits.
 func (a *App) routeCreateFormKey(ev *tcell.EventKey, normalized []keys.Key) *tcell.EventKey {
+	if a.app.GetFocus() != a.createFormRepoField {
+		a.createFormRepoSuggesting = false
+	}
+	if a.app.GetFocus() != a.createFormHeadField {
+		a.createFormHeadSuggesting = false
+	}
+	if a.app.GetFocus() != a.createFormBaseField {
+		a.createFormBaseSuggesting = false
+	}
+	suggesting := a.createFormRepoSuggesting || a.createFormHeadSuggesting || a.createFormBaseSuggesting
+
 	for _, k := range normalized {
 		if isEscKey(k) {
+			if suggesting {
+				a.createFormRepoSuggesting = false
+				a.createFormHeadSuggesting = false
+				a.createFormBaseSuggesting = false
+				return ev
+			}
 			a.cancelCreateForm()
 			return nil
 		}
@@ -663,5 +697,5 @@ func (a *App) routeCreateFormKey(ev *tcell.EventKey, normalized []keys.Key) *tce
 			return nil
 		}
 	}
-	return ev
+	return rewriteFormNavKey(ev, suggesting)
 }

@@ -277,6 +277,12 @@ type App struct {
 	// forever.
 	editFormBranchLastQuery string
 	editFormBranchTimer     *time.Timer
+	// editFormBaseSuggesting mirrors whether editFormBaseField's own
+	// autocomplete drop-down is currently shown (wrapFormAutocomplete,
+	// formnav.go) — routeEditFormKey consults it (forced false whenever
+	// the field does not currently have focus) to decide whether Up/Down/
+	// Tab/Backtab navigate the drop-down or the form itself.
+	editFormBaseSuggesting bool
 	// editFormSteps is the FIFO of Save's own in-flight mutation steps —
 	// pendingMutation's single slot is not enough for a batch of more than
 	// one mutation (see pendingSimpleMutation's own doc comment): each
@@ -383,6 +389,12 @@ type App struct {
 	createFormBaseSuggestions []string
 	createFormBaseLastQuery   string
 	createFormBaseTimer       *time.Timer
+	// createFormRepoSuggesting/createFormHeadSuggesting/createFormBaseSuggesting
+	// mirror editFormBaseSuggesting for each of the create form's own three
+	// autocompleted fields.
+	createFormRepoSuggesting bool
+	createFormHeadSuggesting bool
+	createFormBaseSuggesting bool
 	// createFormPending tracks Submit's own single, unscoped
 	// CreatePullRequest mutation from enqueue to its EventMutationChanged
 	// resolution — see onCreateFormMutationChanged's own doc comment for
