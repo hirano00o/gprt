@@ -82,6 +82,11 @@ type GitHub interface {
 	Branches(ctx context.Context, repo model.RepoRef, query string, first int) ([]model.Branch, model.RateLimit, error)
 	Teams(ctx context.Context, org, query string, first int) ([]model.Team, model.RateLimit, error)
 
+	// CompareFiles fetches the changed files between two branches (see
+	// compare.go's CompareBranches, the create-PR form's diff preview data
+	// source).
+	CompareFiles(ctx context.Context, repo model.RepoRef, base, head string) (gh.CompareResult, error)
+
 	// Pull request edit/merge/create mutations (see pr_edit.go, pr_create.go).
 	UpdatePullRequest(ctx context.Context, id string, in gh.UpdatePullRequestInput) (model.PullRequest, error)
 	RequestReviewers(ctx context.Context, id string, userIDs, teamIDs []string, union bool) ([]model.Reviewer, error)
@@ -452,6 +457,11 @@ type Store struct {
 	// comment).
 	branchSearchGen int
 	teamSearchGen   int
+
+	// compareGen is CompareBranches' own generation token (see compare.go),
+	// following the same drop-if-superseded pattern as branchSearchGen/
+	// teamSearchGen above.
+	compareGen int
 
 	subscribers []func(Event)
 }
