@@ -140,8 +140,11 @@ func TestMergeDialogSubmitConfirmsThenCallsStoreMerge(t *testing.T) {
 
 	act(app.app, func() { app.submitMergeForm() })
 	waitFor(t, app.app, func() bool { return app.overlay == "confirm" })
-	if got := confirmText(app, screen); !containsSubstring(got, "Merge #1 with Squash?") {
-		t.Fatalf("confirm dialog text = %q, want it to contain %q", got, "Merge #1 with Squash?")
+	got := confirmText(app, screen)
+	for _, want := range []string{"Merge #1 with Squash?", "acme/widgets #1", "by @alice"} {
+		if !containsSubstring(got, want) {
+			t.Fatalf("confirm dialog text = %q, want it to contain %q", got, want)
+		}
 	}
 	confirmYes(app.app)
 

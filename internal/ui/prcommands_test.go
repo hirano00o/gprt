@@ -2,13 +2,15 @@
 // commands: an open, loaded pull request is required; each refuses locally
 // (a toast, no store call) when the viewer lacks the matching viewer-can-*
 // flag or the pull request's state does not fit; otherwise a confirm
-// dialog ("Close #N?"/"Reopen #N?") gates the actual Store.Close/Reopen
-// call, whose outcome (Store.MutationError()) surfaces as a "closed"/
-// "reopened" success toast or a failure one.
+// dialog ("Close #N?"/"Reopen #N?", followed by the repository, title and
+// author) gates the actual Store.Close/Reopen call, whose outcome
+// (Store.MutationError()) surfaces as a "closed"/"reopened" success toast
+// or a failure one.
 package ui
 
 import (
 	"errors"
+	"strconv"
 	"testing"
 
 	"github.com/gdamore/tcell/v2"
@@ -53,6 +55,33 @@ func reopenablePR(ref model.PRRef) model.PullRequest {
 	return pr
 }
 
+func TestPRConfirmMessage(t *testing.T) {
+	tests := []struct {
+		name string
+		pr   model.PullRequest
+		want string
+	}{
+		{
+			name: "names the repository, title and author",
+			pr:   model.PullRequest{Ref: fixtureRef(12), Title: "Add widget support", Author: model.User{Login: "alice"}},
+			want: "Close #12?\n\nacme/widgets #12\nAdd widget support\nby @alice",
+		},
+		{
+			name: "escapes a title that looks like a style tag",
+			pr:   model.PullRequest{Ref: fixtureRef(3), Title: "[red] fix", Author: model.User{Login: "bob"}},
+			want: "Close #3?\n\nacme/widgets #3\n[red[] fix\nby @bob",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			q := "Close #" + strconv.Itoa(tt.pr.Ref.Number) + "?"
+			if got := prConfirmMessage(q, &tt.pr); got != tt.want {
+				t.Errorf("prConfirmMessage() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestCmdCloseConfirmsThenCallsStoreClose(t *testing.T) {
 	app, _, fake, screen := newTestApp(t, nil)
 	ref := fixtureRef(1)
@@ -60,8 +89,11 @@ func TestCmdCloseConfirmsThenCallsStoreClose(t *testing.T) {
 
 	sendCommand(app, "close")
 	waitFor(t, app.app, func() bool { return app.overlay == "confirm" })
-	if got := confirmText(app, screen); !containsSubstring(got, "Close #1?") {
-		t.Fatalf("confirm dialog text = %q, want it to contain %q", got, "Close #1?")
+	got := confirmText(app, screen)
+	for _, want := range []string{"Close #1?", "acme/widgets #1", "by @alice"} {
+		if !containsSubstring(got, want) {
+			t.Fatalf("confirm dialog text = %q, want it to contain %q", got, want)
+		}
 	}
 
 	confirmYes(app.app) // "Cancel" is the Modal's default button; Tab then Enter reaches "Close"
