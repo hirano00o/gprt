@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/rivo/tview"
 
@@ -29,10 +30,13 @@ func (a *App) openHelp() {
 	a.savedFocus = a.app.GetFocus()
 	a.overlay = "help"
 
-	a.helpView = tview.NewTextView().SetScrollable(true).SetRegions(true)
+	// No wrapping: buildHelpText's returned line number counts raw lines,
+	// which ScrollTo only lands on exactly while one raw line is one row.
+	a.helpView = tview.NewTextView().SetScrollable(true).SetDynamicColors(true).SetWrap(false)
 	a.helpView.SetBorder(true).SetTitle(helpTitleDefault)
-	text, _ := a.buildHelpText(nil)
+	text, _, _, _ := a.buildHelpText(nil, 0)
 	a.helpView.SetText(text)
+	a.helpSearchRE = nil
 	a.helpMatchCount, a.helpMatchIdx = 0, 0
 
 	a.helpFlex = tview.NewFlex().SetDirection(tview.FlexRow)
@@ -67,18 +71,19 @@ func (a *App) closeHelpSearch() {
 }
 
 // submitHelpSearch runs the pattern currently typed into helpSearchInput
-// (Enter): recompiles the help text with every match wrapped in a
-// Highlight()-able region and jumps to the first one. Feedback (match
-// count, "no match", or an invalid pattern) is shown in the help
-// TextView's own title, since the overlay covers the status bar.
+// (Enter): recompiles the help text with its first match marked and
+// scrolls to it (see buildHelpText's own doc comment for why a style tag
+// rather than a tview region/Highlight()). Feedback (match count, "no
+// match", or an invalid pattern) is shown in the help TextView's own
+// title, since the overlay covers the status bar.
 func (a *App) submitHelpSearch() {
 	pattern := a.helpSearchInput.GetText()
 	a.closeHelpSearch()
 
 	if pattern == "" {
-		text, _ := a.buildHelpText(nil)
+		text, _, _, _ := a.buildHelpText(nil, 0)
 		a.helpView.SetText(text)
-		a.helpView.Highlight()
+		a.helpSearchRE = nil
 		a.helpMatchCount, a.helpMatchIdx = 0, 0
 		a.helpView.SetTitle(helpTitleDefault)
 		return
@@ -90,29 +95,41 @@ func (a *App) submitHelpSearch() {
 		return
 	}
 
-	text, n := a.buildHelpText(re)
+	text, n, line, endCol := a.buildHelpText(re, 0)
 	a.helpView.SetText(text)
+	a.helpSearchRE = re
 	a.helpMatchCount = n
 	if n == 0 {
+		a.helpMatchIdx = 0
 		a.helpView.SetTitle(fmt.Sprintf(" gprt help — no match: %s ", pattern))
 		return
 	}
 	a.helpMatchIdx = 0
-	a.helpView.Highlight("m0")
-	a.helpView.ScrollToHighlight()
+	a.scrollHelpTo(line, endCol)
 	a.helpView.SetTitle(fmt.Sprintf(" gprt help — %d matches (n/N) ", n))
 }
 
-// helpSearchStep cycles the help overlay's search highlight to the next
-// (dir > 0) or previous (dir < 0) match, wrapping around. A no-op with no
-// active search.
+// helpSearchStep cycles the help overlay's search to the next (dir > 0) or
+// previous (dir < 0) match, wrapping around, rebuilding the text so it
+// marks (and scrolling to) the newly current one. A no-op with no active
+// search.
 func (a *App) helpSearchStep(dir int) {
 	if a.helpMatchCount == 0 {
 		return
 	}
 	a.helpMatchIdx = (a.helpMatchIdx + dir + a.helpMatchCount) % a.helpMatchCount
-	a.helpView.Highlight(fmt.Sprintf("m%d", a.helpMatchIdx))
-	a.helpView.ScrollToHighlight()
+	text, _, line, endCol := a.buildHelpText(a.helpSearchRE, a.helpMatchIdx)
+	a.helpView.SetText(text)
+	a.scrollHelpTo(line, endCol)
+}
+
+// scrollHelpTo scrolls the help view so row line is at the top and a match
+// ending at column endCol is inside the view horizontally (the view does
+// not wrap, so a match far right on a long line is otherwise off-screen on
+// a narrow terminal).
+func (a *App) scrollHelpTo(line, endCol int) {
+	_, _, width, _ := a.helpView.GetInnerRect()
+	a.helpView.ScrollTo(line, max(0, endCol-width))
 }
 
 // openMessages opens the ":messages" overlay: the ring buffer of recent
@@ -163,21 +180,30 @@ const helpCommandsLine = ": commands: q, quit, help, messages, reload, close, re
 // buildHelpText renders the help overlay's full text: gprt's version, then
 // every effective binding (defaults merged with the user's config) for
 // each of helpContexts, then helpCommandsLine. Every line is passed
-// through tview.Escape: helpView enables region tags (SetRegions(true),
-// for the search highlighting below), which would otherwise misparse a
-// literal "[" in a binding sequence like "[c"/"]f" as the start of a
-// region/colour tag.
+// through tview.Escape: helpView enables dynamic colours
+// (SetDynamicColors(true), for the style tag below), which would
+// otherwise misparse a literal "[" in a binding sequence like "[c"/"]f" as
+// the start of a colour tag.
 //
-// re == nil renders plain text with no highlighting (n is 0). re != nil
-// wraps every regexp match within each *raw* (pre-escape) line as a
-// ["m<N>"]...[""] region — N counting up from 0 across the whole text, so
-// TextView.Highlight("mN")/ScrollToHighlight can jump to it — and n is the
-// total number of matches found. Each line is built piecewise (escaped
-// prefix, then an escaped match inside the region tags, ...) rather than
-// searching the already-escaped line, since tview.Escape can change a
-// line's length and would otherwise invalidate the match's own byte
-// offsets.
-func (a *App) buildHelpText(re *regexp.Regexp) (string, int) {
+// re == nil renders plain text with no match marked (n, line and endCol
+// are all 0). re != nil counts every regexp match across the whole text (n) and
+// marks the current-th one (0-based, wrapping is the caller's job) with
+// "[::r]"/"[::-]" (reverse video) rather than a tview region tag: an
+// earlier version wrapped every match in a ["m<N>"]...[""] region and drove
+// TextView.Highlight("mN")/ScrollToHighlight to jump to it, but calling
+// Highlight() outside of Draw lazily builds tview's line index only as far
+// as the highlighted region — for a match near the top of a buffer taller
+// than the view, ScrollToHighlight's own (negative, pre-clamp) scroll
+// offset then made Draw's "index has enough lines" step under-build it,
+// leaving the view's lower rows showing stale content for a frame (see
+// TestAppHelpSearchFillsViewportOnFirstDraw). Marking only the current
+// match and returning its own line number (0-based) and end column (for
+// the caller's own scrollHelpTo) sidesteps that lazy index entirely. Each line is built
+// piecewise (escaped prefix, then an escaped match inside the style tags,
+// ...) rather than searching the already-escaped line, since tview.Escape
+// can change a line's length and would otherwise invalidate the match's
+// own byte offsets.
+func (a *App) buildHelpText(re *regexp.Regexp, current int) (text string, n, line, endCol int) {
 	var raw []string
 	raw = append(raw, fmt.Sprintf("gprt %s", a.deps.Version), "")
 	for _, hc := range helpContexts {
@@ -194,24 +220,31 @@ func (a *App) buildHelpText(re *regexp.Regexp) (string, int) {
 	raw = append(raw, helpCommandsLine)
 
 	var b strings.Builder
-	n := 0
-	for _, line := range raw {
+	for lineNo, rawLine := range raw {
 		if re == nil {
-			b.WriteString(tview.Escape(line))
+			b.WriteString(tview.Escape(rawLine))
 			b.WriteByte('\n')
 			continue
 		}
 		last := 0
-		for _, r := range re.FindAllStringIndex(line, -1) {
-			b.WriteString(tview.Escape(line[last:r[0]]))
-			fmt.Fprintf(&b, "[\"m%d\"]%s[\"\"]", n, tview.Escape(line[r[0]:r[1]]))
+		for _, r := range re.FindAllStringIndex(rawLine, -1) {
+			b.WriteString(tview.Escape(rawLine[last:r[0]]))
+			if n == current {
+				line = lineNo
+				endCol = utf8.RuneCountInString(rawLine[:r[1]])
+				b.WriteString("[::r]")
+				b.WriteString(tview.Escape(rawLine[r[0]:r[1]]))
+				b.WriteString("[::-]")
+			} else {
+				b.WriteString(tview.Escape(rawLine[r[0]:r[1]]))
+			}
 			n++
 			last = r[1]
 		}
-		b.WriteString(tview.Escape(line[last:]))
+		b.WriteString(tview.Escape(rawLine[last:]))
 		b.WriteByte('\n')
 	}
-	return b.String(), n
+	return b.String(), n, line, endCol
 }
 
 // buildMessagesView lists the ring buffer of recent error-and-above log
