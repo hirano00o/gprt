@@ -339,9 +339,31 @@ func (a *App) openComposer(target composerTarget, prefill string) {
 	a.composerFlex = tview.NewFlex().SetDirection(tview.FlexRow)
 	a.composerFlex.AddItem(a.composerTitle, 1, 0, false)
 	a.composerFlex.AddItem(a.composerEditor, 0, 1, true)
-	a.detailColumn.AddItem(a.composerFlex, a.composerHeight(), 0, true)
+	if target.kind == composerKindNewPRBody {
+		// The create-PR form's own body slot hosts this composer instead of
+		// detailColumn (composerHost below) — swap out its read-only body
+		// view in favour of the composer's own Flex, proportionally sized
+		// (composerHeight() is detailColumn-based, meaningless here).
+		a.createFormBodySlot.RemoveItem(a.createFormBodyView)
+		a.createFormBodySlot.AddItem(a.composerFlex, 0, 1, true)
+	} else {
+		a.detailColumn.AddItem(a.composerFlex, a.composerHeight(), 0, true)
+	}
 
 	a.app.SetFocus(a.composerEditor)
+}
+
+// composerHost returns the container that hosts the composer's own Flex
+// for kind: a.detailColumn for every kind except composerKindNewPRBody,
+// whose own host is the create-PR form's own body slot instead (see
+// composerKindNewPRBody's own doc comment for why that composer lives
+// inside the create form's dialog rather than the detail column like every
+// other one).
+func (a *App) composerHost(kind composerKind) *tview.Flex {
+	if kind == composerKindNewPRBody {
+		return a.createFormBodySlot
+	}
+	return a.detailColumn
 }
 
 // closeComposerIfWrongPR closes the open composer, saving its draft
@@ -392,7 +414,8 @@ func (a *App) composerHeight() int {
 // closeComposer removes the composer pane, saving its draft (keepDraft)
 // or deleting it (send, or ":q!"), and restores focus to whichever pane
 // had it before the composer opened — or, for composerKindNewPRBody, to
-// the create-PR form itself (see the reopen branch below).
+// the create-PR form itself (see the restoreCreateFormBodySlot branch
+// below).
 func (a *App) closeComposer(keepDraft bool) {
 	if a.composerFlex == nil {
 		return
@@ -401,7 +424,7 @@ func (a *App) closeComposer(keepDraft bool) {
 	text := a.composerEditor.Text()
 
 	a.composerCtrlWPending = false
-	a.detailColumn.RemoveItem(a.composerFlex)
+	a.composerHost(target.kind).RemoveItem(a.composerFlex)
 	a.composerFlex = nil
 	a.composerTitle = nil
 	a.composerEditor = nil
@@ -436,15 +459,13 @@ func (a *App) closeComposer(keepDraft bool) {
 	}
 
 	if target.kind == composerKindNewPRBody {
-		// The create-PR form's own page was removed from a.root when this
-		// composer opened (openCreatePRBodyComposer), since a root Pages
-		// overlay page and the composer, a detailColumn child, would
-		// otherwise both be visible at once with the overlay drawn on top,
-		// hiding the composer entirely — re-add it now and give it focus
+		// The create-PR form's own body slot hosted this composer's own
+		// Flex in place of its usual read-only body view (openComposer's
+		// own host-swap above) — swap back and give the form focus
 		// directly, ignoring composerReturnFocus (openCreatePRBodyComposer
 		// clears it for exactly this reason).
 		a.composerReturnFocus = nil
-		a.reopenCreatePRFormAfterBodyComposer()
+		a.restoreCreateFormBodySlot()
 	} else if a.composerReturnFocus != nil {
 		a.app.SetFocus(a.composerReturnFocus)
 		a.composerReturnFocus = nil

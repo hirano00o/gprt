@@ -12,14 +12,17 @@ package ui
 
 import (
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
 	"github.com/gdamore/tcell/v2"
+	"github.com/rivo/tview"
 
 	"github.com/hirano00o/gprt/internal/drafts"
 	"github.com/hirano00o/gprt/internal/gh"
 	"github.com/hirano00o/gprt/internal/model"
+	"github.com/hirano00o/gprt/internal/ui/theme"
 )
 
 func TestOpenCreatePRFormOpensFromList(t *testing.T) {
@@ -307,10 +310,13 @@ func TestSubmitCreateFormRefusedWithBlankTitle(t *testing.T) {
 	}
 }
 
-// TestCreateFormBodyComposerRoundTrip covers "Edit body": Ctrl-s hands the
-// typed text back to the form (App.createFormBody) instead of calling the
-// store, and the create-PR form's own page is visible again once the
-// composer closes.
+// TestCreateFormBodyComposerRoundTrip covers "Edit body": it mounts inside
+// the create-PR form's own body slot (not a.detailColumn — the composer
+// used to live there behind a removed "createform" page, before this test
+// was updated for the redesign), Ctrl-s hands the typed text back to the
+// form (App.createFormBody) instead of calling the store, the read-only
+// body view shows that text once the composer closes, and the create-PR
+// form's own page is visible again.
 func TestCreateFormBodyComposerRoundTrip(t *testing.T) {
 	app, _, fake, _ := newTestApp(t, nil)
 	repo := model.RepoRef{Host: "github.com", Owner: "acme", Name: "widgets"}
@@ -323,6 +329,16 @@ func TestCreateFormBodyComposerRoundTrip(t *testing.T) {
 	act(app.app, func() { app.openCreatePRBodyComposer() })
 	waitFor(t, app.app, func() bool { return composerOpen(app) })
 
+	if got := query(app.app, func() bool { return flexContains(app.createFormBodySlot, app.composerFlex) }); !got {
+		t.Fatal("the body composer must be mounted inside the create-PR form's own body slot")
+	}
+	if got := query(app.app, func() bool { return flexContains(app.detailColumn, app.composerFlex) }); got {
+		t.Fatal("the body composer must not be mounted in the detail column")
+	}
+	if got := query(app.app, func() bool { return app.root.HasPage("createform") }); !got {
+		t.Fatal("the create-PR form's own root page must stay mounted while its body composer is open")
+	}
+
 	sendRune(app.app, 'i')
 	for _, r := range "This PR does X" {
 		sendRune(app.app, r)
@@ -334,6 +350,9 @@ func TestCreateFormBodyComposerRoundTrip(t *testing.T) {
 	if got := query(app.app, func() string { return app.createFormBody }); got != "This PR does X" {
 		t.Errorf("createFormBody = %q, want %q", got, "This PR does X")
 	}
+	if got := query(app.app, func() string { return app.createFormBodyView.GetText(true) }); got != "This PR does X" {
+		t.Errorf("body view text = %q, want %q", got, "This PR does X")
+	}
 	if app.createForm == nil {
 		t.Fatal("the create-PR form must still exist after the body composer closes")
 	}
@@ -343,6 +362,16 @@ func TestCreateFormBodyComposerRoundTrip(t *testing.T) {
 	if len(fake.CreatePullRequestCalls()) != 0 {
 		t.Fatal("sending the body composer must never call the store")
 	}
+}
+
+// flexContains reports whether item is one of flex's own children.
+func flexContains(flex *tview.Flex, item tview.Primitive) bool {
+	for i := 0; i < flex.GetItemCount(); i++ {
+		if flex.GetItem(i) == item {
+			return true
+		}
+	}
+	return false
 }
 
 // TestCreateFormBodyDraftSurvivesCloseAndReopen covers ":q" (unlike ":q!",
@@ -1158,4 +1187,209 @@ func TestCreateFormRepoAutocompleteEscClosesListNotForm(t *testing.T) {
 
 	sendSpecial(app.app, tcell.KeyEsc)
 	waitFor(t, app.app, func() bool { return app.overlay == "" })
+}
+
+// TestCreateFormPreviewShowsIncompleteHintInitially covers
+// scheduleCreateFormPreview's own immediate (non-debounced) placeholder
+// while nothing has been chosen yet.
+func TestCreateFormPreviewShowsIncompleteHintInitially(t *testing.T) {
+	app, _, _, _ := newTestApp(t, nil)
+
+	sendRune(app.app, 'n')
+	waitFor(t, app.app, func() bool { return app.createForm != nil })
+
+	got := query(app.app, func() string { return app.createFormPreview.GetText(true) })
+	if got != createFormPreviewIncompleteHint {
+		t.Errorf("preview text = %q, want %q", got, createFormPreviewIncompleteHint)
+	}
+}
+
+// TestCreateFormPreviewRendersFileHeaderAndPatchLines covers
+// scheduleCreateFormPreview's own debounced Store.CompareBranches call,
+// fired once the repository, head, and base are all set, and
+// renderCompareResult's own file-header/patch-line rendering of its result.
+func TestCreateFormPreviewRendersFileHeaderAndPatchLines(t *testing.T) {
+	old := createFormPreviewDebounce
+	createFormPreviewDebounce = 5 * time.Millisecond
+	t.Cleanup(func() { createFormPreviewDebounce = old })
+
+	app, _, fake, _ := newTestApp(t, nil)
+	repo := model.RepoRef{Host: "github.com", Owner: "acme", Name: "widgets"}
+	fake.SetViewerRepositories([]model.RepositorySummary{{Ref: repo, ID: "R_1", DefaultBranch: "main"}})
+	fake.SetRepositoryInfo(repo, model.RepositoryInfo{ID: "R_1", Ref: repo, DefaultBranch: "main"})
+	fake.SetCompareResult(gh.CompareResult{Files: []model.ChangedFile{
+		{
+			Path: "internal/a.go", Status: model.FileStatusModified,
+			Additions: 3, Deletions: 1, HasPatch: true,
+			Patch: "@@ -1,3 +1,4 @@\n+foo\n context",
+		},
+	}})
+
+	sendRune(app.app, 'n')
+	waitFor(t, app.app, func() bool { return app.createForm != nil })
+	act(app.app, func() { app.createFormRepoField.SetText("acme/widgets") })
+	// Wait for repository metadata (and its own Base-field prefill) to
+	// resolve before typing Head/Base, exactly like the submit-validation
+	// tests above do: otherwise its own later, asynchronous
+	// applyCreateFormRepositoryInfoIfResolved could still overwrite
+	// whatever Base is set to below (createFormBaseApplied is per-repository,
+	// not per-field-value), racing scheduleCreateFormPreview's own debounce.
+	waitFor(t, app.app, func() bool { _, ok := app.deps.Store.RepositoryInfo(repo); return ok })
+	act(app.app, func() {
+		app.createFormHeadField.SetText("feature")
+		app.createFormBaseField.SetText("main")
+	})
+
+	waitFor(t, app.app, func() bool {
+		return containsSubstring(app.createFormPreview.GetText(true), "internal/a.go")
+	})
+	got := query(app.app, func() string { return app.createFormPreview.GetText(true) })
+	for _, want := range []string{"internal/a.go", "+3", "-1", "+foo", "context"} {
+		if !containsSubstring(got, want) {
+			t.Errorf("preview text = %q, want it to contain %q", got, want)
+		}
+	}
+	if calls := fake.CompareCalls(); len(calls) != 1 || calls[0].repo != repo || calls[0].base != "main" || calls[0].head != "feature" {
+		t.Errorf("CompareFiles calls = %+v, want exactly one for (repo=%+v, base=main, head=feature)", calls, repo)
+	}
+}
+
+// TestRenderCompareResult is a pure-function, table-driven test of
+// renderCompareResult/compareFileHeader — no *App, no store, no timers.
+// Expected "+"/"-"/"@@" colour tags are computed via styleColorTag itself
+// (the same helper renderCompareResult uses) rather than hardcoded, so this
+// stays correct if theme.Success/Error/Info's own colours ever change.
+func TestRenderCompareResult(t *testing.T) {
+	addTag := styleColorTag(theme.Success)
+	delTag := styleColorTag(theme.Error)
+
+	tests := []struct {
+		name string
+		res  gh.CompareResult
+		want string
+	}{
+		{
+			name: "no files",
+			res:  gh.CompareResult{},
+			want: "(no differences)",
+		},
+		{
+			name: "binary or too-large file has no patch lines",
+			res: gh.CompareResult{Files: []model.ChangedFile{
+				{Path: "assets/logo.png", Status: model.FileStatusModified, Additions: 2, Deletions: 1, HasPatch: false},
+			}},
+			want: fmt.Sprintf("assets/logo.png  [%s]+2[-] [%s]-1[-]\n(binary or too large to display)\n", addTag, delTag),
+		},
+		{
+			name: "renamed file spells out both paths",
+			res: gh.CompareResult{Files: []model.ChangedFile{
+				{PreviousPath: "old.go", Path: "new.go", Status: model.FileStatusRenamed, Additions: 1, Deletions: 1, HasPatch: false},
+			}},
+			want: fmt.Sprintf("old.go -> new.go (renamed)  [%s]+1[-] [%s]-1[-]\n(binary or too large to display)\n", addTag, delTag),
+		},
+		{
+			name: "removed file is marked as such",
+			res: gh.CompareResult{Files: []model.ChangedFile{
+				{Path: "deleted.go", Status: model.FileStatusRemoved, Additions: 0, Deletions: 9, HasPatch: false},
+			}},
+			want: fmt.Sprintf("deleted.go (removed)  [%s]+0[-] [%s]-9[-]\n(binary or too large to display)\n", addTag, delTag),
+		},
+		{
+			name: "truncated note is appended after every file's own patch",
+			res: gh.CompareResult{
+				Files:     []model.ChangedFile{{Path: "a.go", Status: model.FileStatusModified, Additions: 1, HasPatch: false}},
+				Truncated: true,
+			},
+			want: fmt.Sprintf(
+				"a.go  [%s]+1[-] [%s]-0[-]\n(binary or too large to display)\n\n(more files changed than shown; GitHub's own compare endpoint truncated this response)\n",
+				addTag, delTag,
+			),
+		},
+		{
+			name: "a context patch line containing a literal '[red]' is escaped, not left as a real colour tag",
+			res: gh.CompareResult{Files: []model.ChangedFile{
+				{Path: "a.go", Status: model.FileStatusModified, HasPatch: true, Patch: "unchanged [red] middle"},
+			}},
+			want: fmt.Sprintf("a.go  [%s]+0[-] [%s]-0[-]\nunchanged [red[] middle\n", addTag, delTag),
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := renderCompareResult(tc.res); got != tc.want {
+				t.Errorf("renderCompareResult() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestCreateFormPreviewShowsErrorOnFailure covers applyCreateFormPreview's
+// own error rendering.
+func TestCreateFormPreviewShowsErrorOnFailure(t *testing.T) {
+	old := createFormPreviewDebounce
+	createFormPreviewDebounce = 5 * time.Millisecond
+	t.Cleanup(func() { createFormPreviewDebounce = old })
+
+	app, _, fake, _ := newTestApp(t, nil)
+	repo := model.RepoRef{Host: "github.com", Owner: "acme", Name: "widgets"}
+	fake.SetViewerRepositories([]model.RepositorySummary{{Ref: repo, ID: "R_1", DefaultBranch: "main"}})
+	fake.SetRepositoryInfo(repo, model.RepositoryInfo{ID: "R_1", Ref: repo, DefaultBranch: "main"})
+	fake.SetCompareError(errors.New("boom"))
+
+	sendRune(app.app, 'n')
+	waitFor(t, app.app, func() bool { return app.createForm != nil })
+	act(app.app, func() { app.createFormRepoField.SetText("acme/widgets") })
+	waitFor(t, app.app, func() bool { _, ok := app.deps.Store.RepositoryInfo(repo); return ok })
+	act(app.app, func() {
+		app.createFormHeadField.SetText("feature")
+		app.createFormBaseField.SetText("main")
+	})
+
+	waitFor(t, app.app, func() bool {
+		return containsSubstring(app.createFormPreview.GetText(true), "boom")
+	})
+}
+
+// TestCreateFormCtrlWLFocusesPreviewHReturnsToForm covers Ctrl-w l/h moving
+// focus between the form and its own diff preview.
+func TestCreateFormCtrlWLFocusesPreviewHReturnsToForm(t *testing.T) {
+	app, _, _, _ := newTestApp(t, nil)
+
+	sendRune(app.app, 'n')
+	waitFor(t, app.app, func() bool { return app.createForm != nil })
+
+	sendKey(app.app, tcell.NewEventKey(tcell.KeyRune, 'w', tcell.ModCtrl))
+	sendRune(app.app, 'l')
+	if got := query(app.app, func() bool { return app.app.GetFocus() == app.createFormPreview }); !got {
+		t.Fatal("Ctrl-w l must focus the diff preview")
+	}
+
+	sendKey(app.app, tcell.NewEventKey(tcell.KeyRune, 'w', tcell.ModCtrl))
+	sendRune(app.app, 'h')
+	if got := query(app.app, func() bool { return app.app.GetFocus() == app.createFormRepoField }); !got {
+		t.Fatal("Ctrl-w h must return focus to the form")
+	}
+}
+
+// TestCreateFormEscOnPreviewReturnsFocusInsteadOfCancelling covers Esc's
+// different meaning while the preview has focus: it must return focus to
+// the form instead of triggering cancelCreateForm's own discard confirm.
+func TestCreateFormEscOnPreviewReturnsFocusInsteadOfCancelling(t *testing.T) {
+	app, _, _, _ := newTestApp(t, nil)
+
+	sendRune(app.app, 'n')
+	waitFor(t, app.app, func() bool { return app.createForm != nil })
+	act(app.app, func() { app.createFormTitleField.SetText("dirty") }) // would otherwise trigger a discard confirm
+
+	sendKey(app.app, tcell.NewEventKey(tcell.KeyRune, 'w', tcell.ModCtrl))
+	sendRune(app.app, 'l')
+	waitFor(t, app.app, func() bool { return app.app.GetFocus() == app.createFormPreview })
+
+	sendSpecial(app.app, tcell.KeyEsc)
+
+	if got := query(app.app, func() bool { return app.app.GetFocus() == app.createFormRepoField }); !got {
+		t.Fatal("Esc on the preview must return focus to the form, not cancel it")
+	}
+	if app.createForm == nil {
+		t.Fatal("Esc on the preview must not close the create-PR form")
+	}
 }

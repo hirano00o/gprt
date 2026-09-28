@@ -1,13 +1,17 @@
 // createform.go implements the "n" (list.new_pr, bound only in ContextList)
-// create-pull-request form: a tview.Form with a repository picker
-// (fuzzy-autocompleted over Store.ViewerRepositories(), an exact
-// "owner/name" not in that list also accepted), head/base branch fields
-// (debounced Store.SearchBranches autocomplete, mirroring the edit-PR
-// form's own base field), a title field, an "Edit body" button opening the
-// vim composer (composerKindNewPRBody, composer.go), a "Reviewers" button
-// reusing the edit-PR form's own stacked overlay (editreviewers.go), and a
-// Draft checkbox. Esc asks to discard first only once something has been
-// entered (createFormComputeDirty); Ctrl-s validates locally and calls
+// create-pull-request form: a bordered dialog (createFormLayout) with a
+// tview.Form (createForm) — a repository picker (fuzzy-autocompleted over
+// Store.ViewerRepositories(), an exact "owner/name" not in that list also
+// accepted), head/base branch fields (debounced Store.SearchBranches
+// autocomplete, mirroring the edit-PR form's own base field), a title
+// field, an "Edit body" button opening the vim composer
+// (composerKindNewPRBody, composer.go) directly inside the form's own body
+// slot (createFormBodySlot), a "Reviewers" button reusing the edit-PR
+// form's own stacked overlay (editreviewers.go), and a Draft checkbox — on
+// the left, and a live diff preview between the chosen head and base
+// branches (createFormPreview, scheduleCreateFormPreview) on the right. Esc
+// asks to discard first only once something has been entered
+// (createFormComputeDirty); Ctrl-s validates locally and calls
 // Store.CreatePullRequest.
 //
 // Unlike every other overlay in this package, the create-PR form is not
@@ -73,7 +77,38 @@ func (a *App) openCreatePRForm() {
 	a.buildCreateForm()
 }
 
-// buildCreateForm constructs and shows the *tview.Form itself.
+// createFormFieldsHeight is the fixed row count buildCreateForm's own left
+// column gives createForm (its border/title removed — createFormLayout's
+// own carries both instead), mirroring tview.Form.Draw's own vertical
+// layout arithmetic exactly for its 5 single-line items (item height 1 +
+// itemPadding 1, advanced once per item — the form's own default,
+// vertical, non-horizontal layout) plus one single-line buttons row drawn
+// immediately after the last item with no extra blank line (itemPadding !=
+// 0): 5*2 items rows + 1 buttons row. This assumes the buttons row itself
+// never wraps, which buildCreateForm's own 2:1 left:right column split is
+// sized wide enough for at any reasonably sized terminal — tview.Form's own
+// vertical layout does not wrap an overflowing buttons row to a second
+// line at all, it simply stops drawing whatever no longer fits, so this
+// would otherwise silently hide "Cancel" rather than merely misalign it.
+const createFormFieldsHeight = 2*5 + 1
+
+// createFormPreviewIncompleteHint/createFormPreviewLoadingHint are
+// createFormPreview's own placeholder text while there is nothing to
+// compare yet, or a comparison is in flight — see scheduleCreateFormPreview.
+const (
+	createFormPreviewIncompleteHint = "(choose repository, head and base to preview)"
+	createFormPreviewLoadingHint    = "(loading…)"
+)
+
+// buildCreateForm constructs and shows the form/body/preview layout itself
+// (createFormLayout): a bordered two-column Flex — left, a Flex(rows) of
+// createForm over createFormBodySlot (createFormBodyView, a read-only
+// preview of createFormBody, until "Edit body" swaps in the vim composer's
+// own Flex in its place, composerHost/openComposer/closeComposer,
+// composer.go); right, createFormPreview, the diff preview
+// (scheduleCreateFormPreview). createForm itself, not createFormLayout,
+// keeps its own border/title removed — createFormLayout's own single
+// border/title, " Create pull request ", covers the whole dialog instead.
 func (a *App) buildCreateForm() {
 	a.overlay = "createform"
 
@@ -83,8 +118,10 @@ func (a *App) buildCreateForm() {
 
 	head := tview.NewInputField().SetLabel("Head branch")
 	wireFormAutocomplete(head, &a.createFormHeadSuggesting, a.createFormHeadAutocomplete)
+	head.SetChangedFunc(a.onCreateFormBranchFieldChanged)
 	base := tview.NewInputField().SetLabel("Base branch")
 	wireFormAutocomplete(base, &a.createFormBaseSuggesting, a.createFormBaseAutocomplete)
+	base.SetChangedFunc(a.onCreateFormBranchFieldChanged)
 	title := tview.NewInputField().SetLabel("Title")
 	draft := tview.NewCheckbox().SetLabel("Draft")
 
@@ -102,9 +139,30 @@ func (a *App) buildCreateForm() {
 	form.AddButton(a.createFormReviewersButtonText(), a.openCreateReviewersOverlay)
 	form.AddButton("Create", a.submitCreateForm)
 	form.AddButton("Cancel", a.cancelCreateForm)
-	form.SetBorder(true).SetTitle(" Create pull request ")
+
+	bodyView := tview.NewTextView().SetDynamicColors(true)
+	bodyView.SetBorder(true).SetTitle(" Body ")
+	bodySlot := tview.NewFlex().SetDirection(tview.FlexRow)
+	bodySlot.AddItem(bodyView, 0, 1, false)
+
+	left := tview.NewFlex().SetDirection(tview.FlexRow)
+	left.AddItem(form, createFormFieldsHeight, 0, true)
+	left.AddItem(bodySlot, 0, 1, false)
+
+	preview := tview.NewTextView().SetDynamicColors(true).SetScrollable(true)
+	preview.SetBorder(true).SetTitle(" diff (base...head) ")
+	preview.SetText(createFormPreviewIncompleteHint)
+
+	layout := tview.NewFlex().SetDirection(tview.FlexColumn)
+	layout.AddItem(left, 0, 2, true)
+	layout.AddItem(preview, 0, 1, false)
+	layout.SetBorder(true).SetTitle(" Create pull request ")
 
 	a.createForm = form
+	a.createFormLayout = layout
+	a.createFormBodySlot = bodySlot
+	a.createFormBodyView = bodyView
+	a.createFormPreview = preview
 	a.createFormRepoField = repoField
 	a.createFormHeadField = head
 	a.createFormBaseField = base
@@ -112,7 +170,9 @@ func (a *App) buildCreateForm() {
 	a.createFormDraftBox = draft
 	a.createFormSelectedReviewers = map[string]model.Reviewer{}
 
-	a.root.AddPage("createform", form, true, true)
+	a.refreshCreateFormBodyView()
+
+	a.root.AddPage("createform", layout, true, true)
 	a.app.SetFocus(form)
 }
 
@@ -212,6 +272,7 @@ func (a *App) onCreateFormRepoChanged(text string) {
 	owner, name, ok := createFormParseRepo(text)
 	if !ok {
 		a.createFormRepoChosen = false
+		a.scheduleCreateFormPreview()
 		return
 	}
 	repos := a.deps.Store.ViewerRepositories()
@@ -249,6 +310,7 @@ func (a *App) onCreateFormRepoChanged(text string) {
 	a.deps.Store.EnsureRepositoryMetadata(ref)
 	a.deps.Store.EnsureMentionableUsers(ref)
 	a.applyCreateFormRepositoryInfoIfResolved(ref)
+	a.scheduleCreateFormPreview()
 }
 
 // applyCreateFormRepositoryInfoIfResolved preselects the Base branch with
@@ -277,6 +339,151 @@ func (a *App) applyCreateFormRepositoryInfoIfResolved(repo model.RepoRef) {
 		if templates, ok := a.deps.Store.Templates(repo); ok && len(templates) > 0 && a.createFormBody == "" {
 			a.createFormBody = templates[0].Body
 		}
+	}
+}
+
+// createFormPreviewDebounce is how long scheduleCreateFormPreview waits
+// after the last repository/head/base change before calling
+// Store.CompareBranches — a package var (not a const) so tests can shorten
+// it, mirroring createFormBranchDebounce.
+var createFormPreviewDebounce = 300 * time.Millisecond
+
+// onCreateFormBranchFieldChanged is the Head/Base fields' own shared
+// SetChangedFunc callback, alongside onCreateFormRepoChanged: any of the
+// three changing (a real keystroke, or an autocomplete selection — see
+// wireFormAutocomplete's own doc comment for why that also fires this)
+// reschedules the diff preview.
+func (a *App) onCreateFormBranchFieldChanged(string) {
+	a.scheduleCreateFormPreview()
+}
+
+// scheduleCreateFormPreview (re)starts the create-PR form's own debounced
+// diff-preview refresh, called whenever the repository, head, or base field
+// changes. Running Store.CompareBranches — a real network round trip,
+// unlike the repository field's own purely local ViewerRepositories()
+// filtering — once per keystroke would be wasteful, so this debounces it
+// exactly like createFormHeadAutocomplete debounces Store.SearchBranches.
+// Shows createFormPreviewIncompleteHint immediately, with no debounce at
+// all, whenever the repository is not yet chosen or either branch field is
+// still blank: there is nothing to compare yet, so there is no fetch to
+// debounce in the first place.
+func (a *App) scheduleCreateFormPreview() {
+	if a.createFormPreviewTimer != nil {
+		a.createFormPreviewTimer.Stop()
+		a.createFormPreviewTimer = nil
+	}
+	if a.createForm == nil {
+		return
+	}
+	repo := a.createFormRepo
+	head := strings.TrimSpace(a.createFormHeadField.GetText())
+	base := strings.TrimSpace(a.createFormBaseField.GetText())
+	if !a.createFormRepoChosen || head == "" || base == "" {
+		a.createFormPreview.SetText(createFormPreviewIncompleteHint)
+		return
+	}
+	a.createFormPreview.SetText(createFormPreviewLoadingHint)
+	a.createFormPreviewTimer = time.AfterFunc(createFormPreviewDebounce, func() {
+		a.app.QueueUpdateDraw(func() {
+			a.deps.Store.CompareBranches(repo, base, head, func(res gh.CompareResult, err error) {
+				a.applyCreateFormPreview(repo, base, head, res, err)
+			})
+		})
+	})
+}
+
+// applyCreateFormPreview renders the CompareBranches result triggered for
+// (repo, base, head) into createFormPreview — dropped silently when the
+// create form has since closed, or the repository/head/base no longer
+// match what this particular call was made for: Store.CompareBranches' own
+// generation token only ever drops a result superseded by a *later*
+// CompareBranches call, not one still in flight when the user keeps typing
+// before scheduleCreateFormPreview's own debounce next fires, so this
+// re-checks the triple itself rather than relying on that alone.
+func (a *App) applyCreateFormPreview(repo model.RepoRef, base, head string, res gh.CompareResult, err error) {
+	if a.createForm == nil || !a.createFormRepoChosen || a.createFormRepo != repo {
+		return
+	}
+	if strings.TrimSpace(a.createFormHeadField.GetText()) != head || strings.TrimSpace(a.createFormBaseField.GetText()) != base {
+		return
+	}
+	if err != nil {
+		a.createFormPreview.SetText(tview.Escape(err.Error()))
+		return
+	}
+	a.createFormPreview.SetText(renderCompareResult(res))
+}
+
+// styleColorTag returns style's own foreground colour's tcell name (falling
+// back to its "#rrggbb" CSS hex form for a colour with no W3C name) — the
+// exact string a tview dynamic-colour tag ("[name]") needs, since tview
+// feeds a tag's contents straight into tcell.GetColor, which accepts both
+// forms.
+func styleColorTag(style tcell.Style) string {
+	fg, _, _ := style.Decompose()
+	return fg.Name(true)
+}
+
+// renderCompareResult renders res as createFormPreview's own dynamic-colour
+// text: one "path  +A -D" header line per file (compareFileHeader spells
+// out a renamed/removed file's own status too), followed by its patch —
+// "+"/"-" lines and "@@" hunk headers coloured via theme.Success/Error/Info
+// respectively, every other line (context, or the patch itself entirely
+// absent for a binary/too-large file) left plain. Every line is
+// tview.Escape'd: a real diff's own content can contain literal "["
+// characters, which dynamic colours would otherwise misparse as the start
+// of a tag.
+func renderCompareResult(res gh.CompareResult) string {
+	if len(res.Files) == 0 {
+		return "(no differences)"
+	}
+	addTag := styleColorTag(theme.Success)
+	delTag := styleColorTag(theme.Error)
+	hunkTag := styleColorTag(theme.Info)
+
+	var b strings.Builder
+	for i, f := range res.Files {
+		if i > 0 {
+			b.WriteByte('\n')
+		}
+		fmt.Fprintf(&b, "%s  [%s]+%d[-] [%s]-%d[-]\n", tview.Escape(compareFileHeader(f)), addTag, f.Additions, delTag, f.Deletions)
+		if !f.HasPatch {
+			b.WriteString("(binary or too large to display)\n")
+			continue
+		}
+		for _, line := range strings.Split(f.Patch, "\n") {
+			escaped := tview.Escape(line)
+			switch {
+			case strings.HasPrefix(line, "@@"):
+				fmt.Fprintf(&b, "[%s]%s[-]\n", hunkTag, escaped)
+			case strings.HasPrefix(line, "+"):
+				fmt.Fprintf(&b, "[%s]%s[-]\n", addTag, escaped)
+			case strings.HasPrefix(line, "-"):
+				fmt.Fprintf(&b, "[%s]%s[-]\n", delTag, escaped)
+			default:
+				b.WriteString(escaped)
+				b.WriteByte('\n')
+			}
+		}
+	}
+	if res.Truncated {
+		b.WriteString("\n(more files changed than shown; GitHub's own compare endpoint truncated this response)\n")
+	}
+	return b.String()
+}
+
+// compareFileHeader renders one changed file's own path for
+// renderCompareResult's header line: a renamed file spells out both sides,
+// a removed file is marked as such — every other status (added, modified,
+// …) is unambiguous from its own +/- counts alone.
+func compareFileHeader(f model.ChangedFile) string {
+	switch f.Status {
+	case model.FileStatusRenamed:
+		return f.PreviousPath + " -> " + f.Path + " (renamed)"
+	case model.FileStatusRemoved:
+		return f.Path + " (removed)"
+	default:
+		return f.Path
 	}
 }
 
@@ -365,16 +572,17 @@ func (a *App) deleteCreateFormBodyDraft(key drafts.Key) {
 }
 
 // openCreatePRBodyComposer opens the "Edit body" composer
-// (composerKindNewPRBody). The create-PR form's own root Pages page is
-// removed first: it and the composer — a detailColumn child, drawn behind
-// whatever root Pages page is on top — would otherwise both be "open" at
-// once, with the form's own full-screen Form hiding the composer entirely.
-// reopenCreatePRFormAfterBodyComposer (called from composer.go's
-// closeComposer) adds the page back once the composer closes.
+// (composerKindNewPRBody) directly inside the create-PR form's own dialog:
+// openComposer's own host-swap (composerHost, composer.go) mounts the
+// composer's Flex in the form's body slot (createFormBodySlot) in place of
+// its read-only body view, rather than removing the form's own root Pages
+// page the way an earlier revision of this did — both the form's other
+// fields (repository/head/base/title/draft) and its diff preview stay
+// visible, and live, the whole time the body is being edited.
 // composerReturnFocus is cleared right after opening so Ctrl-w j/k (which
-// would otherwise move focus to whatever RemovePage happened to leave
-// focused, underneath the still-conceptually-open create form) is a no-op
-// instead: the only way out of this composer is its own :w/Ctrl-s/:q/:q!.
+// would otherwise move focus back to whatever field had it before "Edit
+// body") is a no-op instead: the only way out of this composer is its own
+// :w/Ctrl-s/:q/:q!.
 func (a *App) openCreatePRBodyComposer() {
 	if a.createForm == nil {
 		return
@@ -388,7 +596,6 @@ func (a *App) openCreatePRBodyComposer() {
 		a.showToast("choose a repository first", theme.Warning)
 		return
 	}
-	a.root.RemovePage("createform")
 	a.openComposer(composerTarget{
 		kind:     composerKindNewPRBody,
 		ref:      model.PRRef{Repo: a.createFormRepo, Number: 0},
@@ -398,16 +605,32 @@ func (a *App) openCreatePRBodyComposer() {
 	a.composerReturnFocus = nil
 }
 
-// reopenCreatePRFormAfterBodyComposer re-adds the create-PR form's own root
-// Pages page (removed by openCreatePRBodyComposer) and focuses it, once the
-// body composer closes. A no-op if the form was somehow closed in the
-// meantime (should not normally happen: nothing else can close it while
-// its own body composer has focus).
-func (a *App) reopenCreatePRFormAfterBodyComposer() {
+// refreshCreateFormBodyView updates the create-PR form's own read-only body
+// view (createFormBodySlot's default content, swapped out for the body
+// composer's own Flex while "Edit body" is open) from the current
+// createFormBody: a dim placeholder while it is still empty, the body text
+// itself otherwise (tview.Escape'd, since createFormBodyView has dynamic
+// colours on for the placeholder).
+func (a *App) refreshCreateFormBodyView() {
+	if a.createFormBody == "" {
+		a.createFormBodyView.SetText(fmt.Sprintf("[%s](empty — press Edit body)[-]", styleColorTag(theme.Muted)))
+		return
+	}
+	a.createFormBodyView.SetText(tview.Escape(a.createFormBody))
+}
+
+// restoreCreateFormBodySlot re-adds the create-PR form's own read-only body
+// view to its body slot in place of the composer's own Flex (already
+// removed by closeComposer, composer.go) and focuses the form itself —
+// undoing openCreatePRBodyComposer's own swap the other way. A no-op if the
+// create form was somehow closed already (should not normally happen:
+// nothing else can close it while its own body composer has focus).
+func (a *App) restoreCreateFormBodySlot() {
 	if a.createForm == nil {
 		return
 	}
-	a.root.AddPage("createform", a.createForm, true, true)
+	a.refreshCreateFormBodyView()
+	a.createFormBodySlot.AddItem(a.createFormBodyView, 0, 1, false)
 	a.app.SetFocus(a.createForm)
 }
 
@@ -478,9 +701,18 @@ func (a *App) closeCreateForm() {
 		a.createFormBaseTimer.Stop()
 		a.createFormBaseTimer = nil
 	}
+	if a.createFormPreviewTimer != nil {
+		a.createFormPreviewTimer.Stop()
+		a.createFormPreviewTimer = nil
+	}
 	a.root.RemovePage("createform")
 	a.overlay = ""
 	a.createForm = nil
+	a.createFormLayout = nil
+	a.createFormBodySlot = nil
+	a.createFormBodyView = nil
+	a.createFormPreview = nil
+	a.createFormCtrlWPending = false
 	a.createFormRepoField = nil
 	a.createFormHeadField = nil
 	a.createFormBaseField = nil
@@ -651,11 +883,14 @@ func (a *App) onCreateFormMutationChanged() {
 	}
 }
 
-// routeCreateFormKey handles the "createform" overlay: forwards every key
-// to the Form's own InputHandler (InputField/Checkbox/buttons), rewritten
-// first by rewriteFormNavKey (formnav.go) so Up/Down also move between
-// items exactly like Tab/Backtab already do — except while the currently
-// focused Repository/Head/Base field's own autocomplete drop-down is shown
+// routeCreateFormKey handles the "createform" overlay. While the diff
+// preview has focus (Ctrl-w l below), it delegates to
+// routeCreateFormPreviewKey instead of everything that follows. Otherwise:
+// forwards every key to the Form's own InputHandler (InputField/Checkbox/
+// buttons), rewritten first by rewriteFormNavKey (formnav.go) so Up/Down
+// also move between items exactly like Tab/Backtab already do — except
+// while the currently focused Repository/Head/Base field's own autocomplete
+// drop-down is shown
 // (createFormRepoSuggesting/createFormHeadSuggesting/createFormBaseSuggesting,
 // each kept in sync with tview's own, otherwise unexported, "is the
 // drop-down populated" state by wrapFormAutocomplete, forced false here
@@ -663,12 +898,14 @@ func (a *App) onCreateFormMutationChanged() {
 // wrapFormAutocomplete's own doc comment for why that alone is enough to
 // never leave it stale), in which case Tab/Backtab instead navigate the
 // drop-down's own candidates and Enter is left to tview's own native
-// "select the highlighted candidate" handling. Esc cancels (asking to
-// discard when dirty) — except while a drop-down is shown, when a literal
-// Escape must only close it: tview's own InputField.InputHandler does so
-// directly on Escape, bypassing SetAutocompleteFunc entirely, so this
-// router resets the tracked state itself here to stay in sync, rather than
-// leaving it stale for the next routed key — and Ctrl-s submits.
+// "select the highlighted candidate" handling. Ctrl-w l moves focus to the
+// preview (routeCreateFormPreviewKey below then handles the next key on).
+// Esc cancels (asking to discard when dirty) — except while a drop-down is
+// shown, when a literal Escape must only close it: tview's own
+// InputField.InputHandler does so directly on Escape, bypassing
+// SetAutocompleteFunc entirely, so this router resets the tracked state
+// itself here to stay in sync, rather than leaving it stale for the next
+// routed key — and Ctrl-s submits.
 func (a *App) routeCreateFormKey(ev *tcell.EventKey, normalized []keys.Key) *tcell.EventKey {
 	if a.app.GetFocus() != a.createFormRepoField {
 		a.createFormRepoSuggesting = false
@@ -679,9 +916,26 @@ func (a *App) routeCreateFormKey(ev *tcell.EventKey, normalized []keys.Key) *tce
 	if a.app.GetFocus() != a.createFormBaseField {
 		a.createFormBaseSuggesting = false
 	}
+
+	if a.app.GetFocus() == a.createFormPreview {
+		return a.routeCreateFormPreviewKey(ev, normalized)
+	}
+
 	suggesting := a.createFormRepoSuggesting || a.createFormHeadSuggesting || a.createFormBaseSuggesting
 
 	for _, k := range normalized {
+		if a.createFormCtrlWPending {
+			a.createFormCtrlWPending = false
+			if isPlainRune(k, 'l') {
+				a.app.SetFocus(a.createFormPreview)
+				return nil
+			}
+			continue
+		}
+		if isCtrlW(k) {
+			a.createFormCtrlWPending = true
+			continue
+		}
 		if isEscKey(k) {
 			if suggesting {
 				a.createFormRepoSuggesting = false
@@ -698,4 +952,34 @@ func (a *App) routeCreateFormKey(ev *tcell.EventKey, normalized []keys.Key) *tce
 		}
 	}
 	return rewriteFormNavKey(ev, suggesting)
+}
+
+// routeCreateFormPreviewKey handles the "createform" overlay while its own
+// diff preview has focus (Ctrl-w l, routeCreateFormKey above): every key
+// not consumed here is returned unchanged, reaching the TextView's own
+// native j/k/g/G/h/l/PgUp/PgDn/arrow scrolling directly —
+// rewriteFormNavKey's Up/Down-as-Tab rewriting must not apply here, unlike
+// everywhere else in this overlay. Ctrl-w h and a literal Esc both return
+// focus to the form instead of scrolling, or — Esc's usual meaning
+// everywhere else in this overlay — cancelling it.
+func (a *App) routeCreateFormPreviewKey(ev *tcell.EventKey, normalized []keys.Key) *tcell.EventKey {
+	for _, k := range normalized {
+		if a.createFormCtrlWPending {
+			a.createFormCtrlWPending = false
+			if isPlainRune(k, 'h') {
+				a.app.SetFocus(a.createForm)
+				return nil
+			}
+			continue
+		}
+		switch {
+		case isCtrlW(k):
+			a.createFormCtrlWPending = true
+			continue
+		case isEscKey(k):
+			a.app.SetFocus(a.createForm)
+			return nil
+		}
+	}
+	return ev
 }

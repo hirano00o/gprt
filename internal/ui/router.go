@@ -609,13 +609,15 @@ func (a *App) routeComposerKey(ev *tcell.EventKey, normalized []keys.Key) *tcell
 		if a.composerCtrlWPending {
 			a.composerCtrlWPending = false
 			// composerKindNewPRBody (the create-PR form's own body
-			// composer) is a no-op for every direction of this chord: its
-			// containing form's own root Pages page is removed while the
-			// composer is open (see createform.go's openCreatePRBodyComposer),
-			// so focusPrevPane/focusNextPane would hand focus to whatever
-			// the main list/detail layout has instead — leaving the
-			// composer's Flex mounted but unreachable (a.overlay still
-			// reads "createform", so the *next* key would then reach
+			// composer) is a no-op for every direction of this chord: even
+			// though its containing "createform" root page now stays
+			// mounted while the composer is open (see createform.go's
+			// openCreatePRBodyComposer), focusPrevPane/focusNextPane are
+			// global pane-focus functions with no notion of an open
+			// overlay at all — they would still hand focus to the main
+			// list/detail layout underneath it, leaving the composer's
+			// Flex mounted but unreachable (a.overlay still reads
+			// "createform", so the *next* key would then reach
 			// routeCreateFormKey instead, a real bug found in review: Ctrl-s
 			// from there fell through to the outer form's own Submit). j/k
 			// were already safe (toggleComposerFocus is a no-op when

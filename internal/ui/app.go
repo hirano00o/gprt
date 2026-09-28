@@ -159,7 +159,9 @@ type App struct {
 	searchIdx     int
 	searchRef     model.PRRef
 
-	// composerFlex is added to detailColumn (a title line over
+	// composerFlex is added to its own host (composerHost, composer.go —
+	// detailColumn for every kind, or the create-PR form's own
+	// createFormBodySlot for composerKindNewPRBody; a title line over
 	// composerEditor) while a composer is open, and nil otherwise — see
 	// openComposer/closeComposer in composer.go. composerReturnFocus is
 	// whichever primitive had focus right before the composer opened, so
@@ -350,13 +352,36 @@ type App struct {
 	// composerKindNewPRBody's own doc comment for the body composer's
 	// matching rule) — so there is no closeCreateFormIfWrongPR wired into
 	// EventPRChanged.
-	createForm            *tview.Form
-	createFormReturnFocus tview.Primitive
-	createFormRepoField   *tview.InputField
-	createFormHeadField   *tview.InputField
-	createFormBaseField   *tview.InputField
-	createFormTitleField  *tview.InputField
-	createFormDraftBox    *tview.Checkbox
+	createForm *tview.Form
+	// createFormLayout is the bordered two-column Flex actually added to
+	// a.root ("createform" page): left, a Flex(rows) of createForm (its
+	// own border/title removed — createFormLayout's own carries both)
+	// over createFormBodySlot; right, createFormPreview. createForm
+	// itself, not createFormLayout, still gets focus — see buildCreateForm.
+	createFormLayout *tview.Flex
+	// createFormBodySlot hosts createFormBodyView (the create-PR form's
+	// own read-only body preview) until "Edit body" swaps it out for the
+	// vim composer's own Flex in its place (composerKindNewPRBody's host,
+	// composer.go's composerHost) — restored, refreshed from
+	// createFormBody, once the composer closes.
+	createFormBodySlot *tview.Flex
+	createFormBodyView *tview.TextView
+	// createFormPreview shows the diff between the chosen head and base
+	// branches (scheduleCreateFormPreview, debounced via
+	// createFormPreviewTimer), or a hint/error/loading placeholder in its
+	// place. createFormCtrlWPending tracks a Ctrl-w chord's own pending
+	// second key (routeCreateFormKey/routeCreateFormPreviewKey), moving
+	// focus between the form and this preview — the createform overlay's
+	// own analogue of composerCtrlWPending.
+	createFormPreview      *tview.TextView
+	createFormPreviewTimer *time.Timer
+	createFormCtrlWPending bool
+	createFormReturnFocus  tview.Primitive
+	createFormRepoField    *tview.InputField
+	createFormHeadField    *tview.InputField
+	createFormBaseField    *tview.InputField
+	createFormTitleField   *tview.InputField
+	createFormDraftBox     *tview.Checkbox
 	// createFormRepo/createFormRepoChosen are set the moment the
 	// repository field's own text parses as a syntactically valid
 	// "owner/name" (onCreateFormRepoChanged) — chosen, not merely typed:
