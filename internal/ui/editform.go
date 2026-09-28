@@ -434,12 +434,13 @@ func (a *App) cancelEditForm() {
 // silent no-op in exactly that state, in two different ways: (1)
 // closeEditFormIfWrongPR (a PR switch) never actually tore the form down
 // while a child overlay was open over it, and (2) cancelEditForm's own
-// "Discard changes?" confirm passes closeEditForm as onConfirm, but
-// showConfirm's SetDoneFunc already resets a.overlay to "" *before*
-// calling onConfirm — so even with no child overlay involved at all, the
-// old guard compared "" != "editform" and refused to close, silently
-// leaving the discarded form's own page (and every editForm* field)
-// exactly as they were. Closing a still-open child overlay first
+// "Discard changes?" confirm passes closeEditForm as onConfirm, and
+// showConfirm then reset a.overlay to "" *before* calling onConfirm — so
+// even with no child overlay involved at all, the old guard compared
+// "" != "editform" and refused to close, silently leaving the discarded
+// form's own page (and every editForm* field) exactly as they were;
+// keying on the form's own field keeps closeEditForm independent of what
+// a.overlay reads at the time. Closing a still-open child overlay first
 // (discarding its own in-progress selection, matching what Esc/q there
 // already does) avoids leaving its page orphaned in a.root once
 // "editform" itself is removed underneath it.

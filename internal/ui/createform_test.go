@@ -699,13 +699,44 @@ func TestCreateFormEscWithChangesDiscardConfirmDefaultsToCancel(t *testing.T) {
 	waitFor(t, app.app, func() bool { return app.overlay == "confirm" })
 
 	sendSpecial(app.app, tcell.KeyEnter) // bare Enter: "Cancel" is the default focus
-	waitFor(t, app.app, func() bool { return app.overlay == "" })
+	waitFor(t, app.app, func() bool { return app.overlay == "createform" })
 	if app.createForm == nil {
 		t.Fatal("a bare Enter on the discard confirm must default to Cancel, keeping the form's own data")
 	}
 	if got := query(app.app, func() string { return app.createFormTitleField.GetText() }); got != "changed" {
 		t.Errorf("title field after Cancel = %q, want unchanged (%q)", got, "changed")
 	}
+}
+
+// TestCreateFormDiscardCancelKeepsFormOnScreen covers the confirm dialog
+// stacking over the form instead of closing it: after Cancel the form's
+// page is still shown with focus back on the item it had, and a second Esc
+// asks again.
+func TestCreateFormDiscardCancelKeepsFormOnScreen(t *testing.T) {
+	app, _, fake, _ := newTestApp(t, nil)
+	fake.SetViewerRepositories(nil)
+
+	openCreateFormDismissingRepoAutocomplete(t, app)
+	act(app.app, func() { app.createFormTitleField.SetText("changed") })
+	focused := query(app.app, func() tview.Primitive { return app.app.GetFocus() })
+
+	sendSpecial(app.app, tcell.KeyEsc)
+	waitFor(t, app.app, func() bool { return app.overlay == "confirm" })
+	if onScreen := query(app.app, func() bool { return app.root.HasPage("createform") }); !onScreen {
+		t.Fatal("the create form's page must stay under the discard confirm")
+	}
+
+	sendSpecial(app.app, tcell.KeyEsc) // Esc on the Modal cancels too
+	waitFor(t, app.app, func() bool { return app.overlay == "createform" })
+	if onScreen := query(app.app, func() bool { return app.root.HasPage("createform") }); !onScreen {
+		t.Fatal("the create form's page must still be shown after Cancel")
+	}
+	if got := query(app.app, func() tview.Primitive { return app.app.GetFocus() }); got != focused {
+		t.Errorf("focus after Cancel = %T, want the form item focused before Esc (%T)", got, focused)
+	}
+
+	sendSpecial(app.app, tcell.KeyEsc)
+	waitFor(t, app.app, func() bool { return app.overlay == "confirm" })
 }
 
 // TestCreateFormEscWithChangesConfirmDiscardClosesForm covers the same
