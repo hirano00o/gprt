@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
@@ -1641,6 +1642,60 @@ func sendSpecial(app *tview.Application, key tcell.Key) {
 	sendKey(app, tcell.NewEventKey(key, 0, tcell.ModNone))
 }
 
+// screenLines renders screen's current contents as one string per row, for
+// tests that need to inspect actual drawn characters rather than widget
+// state (for example, whether a TextView's Draw call actually painted every
+// row it claims to, rather than leaving stale content from a previous
+// frame — see TestAppHelpSearchFillsViewportOnFirstDraw).
+func screenLines(screen tcell.SimulationScreen) []string {
+	cells, w, h := screen.GetContents()
+	lines := make([]string, h)
+	for y := 0; y < h; y++ {
+		var sb strings.Builder
+		for x := 0; x < w; x++ {
+			if c := cells[y*w+x]; len(c.Runes) > 0 {
+				sb.WriteRune(c.Runes[0])
+			} else {
+				sb.WriteRune(' ')
+			}
+		}
+		lines[y] = sb.String()
+	}
+	return lines
+}
+
+// reverseVideoSpans returns the maximal runs of screen row y that were
+// drawn with tcell's reverse-video attribute (gprt's own way of marking the
+// help search's current match — see buildHelpText's doc comment), in
+// left-to-right order.
+func reverseVideoSpans(screen tcell.SimulationScreen, y int) []string {
+	cells, w, h := screen.GetContents()
+	if y < 0 || y >= h {
+		return nil
+	}
+	var spans []string
+	var cur strings.Builder
+	flush := func() {
+		if cur.Len() > 0 {
+			spans = append(spans, cur.String())
+			cur.Reset()
+		}
+	}
+	for x := 0; x < w; x++ {
+		c := cells[y*w+x]
+		_, _, attrs := c.Style.Decompose()
+		if attrs&tcell.AttrReverse == 0 {
+			flush()
+			continue
+		}
+		if len(c.Runes) > 0 {
+			cur.WriteRune(c.Runes[0])
+		}
+	}
+	flush()
+	return spans
+}
+
 // confirmYes navigates a showConfirm-style *tview.Modal (or the
 // pendingConfirm/merge/close/reopen dialogs, which share its shape) from
 // its default-focused "Cancel" button to the confirm button and selects
@@ -1966,12 +2021,106 @@ func TestAppHelpAlsoClosesOnQuestionMark(t *testing.T) {
 	waitFor(t, app.app, func() bool { return app.overlay == "" })
 }
 
+// TestAppHelpSearchFillsViewportOnFirstDraw guards against a tview
+// TextView pitfall previously hit by the region/Highlight()-based
+// approach: calling Highlight() directly (outside Draw) lazily builds the
+// line index only up to the highlighted region, so for a match near the
+// top of a buffer taller than the view, the (negative, pre-clamp) scroll
+// offset ScrollToHighlight computes makes Draw's own "index has enough
+// lines" step under-build it — the first Draw after Enter then left the
+// view's lower rows showing stale content from before the search instead
+// of the help text that belongs there. buildHelpText's current fix (a
+// reverse-video style tag on the current match, no tview regions at all)
+// sidesteps the lazy index entirely, so this must render every row.
+func TestAppHelpSearchFillsViewportOnFirstDraw(t *testing.T) {
+	app, _, _, screen := newTestApp(t, nil)
+
+	sendRune(app.app, '?')
+	waitFor(t, app.app, func() bool { return app.overlay == "help" })
+
+	sendRune(app.app, '/')
+	waitFor(t, app.app, func() bool { return app.app.GetFocus() == app.helpSearchInput })
+	for _, r := range "Global:" {
+		sendRune(app.app, r)
+	}
+	sendSpecial(app.app, tcell.KeyEnter)
+
+	// Read the screen with exactly one forced draw (query's own) after
+	// Enter — no intervening waitFor, which would force an extra draw of
+	// its own and paper over a glitch a real terminal only ever renders
+	// for this one frame. Sliced to the inner rect's own columns, not the
+	// full screen row, since the border characters either side of it would
+	// otherwise always make it look non-blank.
+	lastRow := query(app.app, func() string {
+		x, y, w, h := app.helpView.GetInnerRect()
+		row := []rune(screenLines(screen)[y+h-1])
+		return string(row[x : x+w])
+	})
+	if strings.TrimSpace(lastRow) == "" {
+		t.Errorf("help view's last content row is blank right after the search, want the rest of the help text still visible there")
+	}
+}
+
+// TestAppHelpSearchScrollsToMatchOnNarrowScreen covers a match beyond the
+// right edge of a narrow terminal: the help view does not wrap (so
+// buildHelpText's raw line number is the row ScrollTo lands on), so the
+// search must also scroll horizontally to bring the match into view.
+func TestAppHelpSearchScrollsToMatchOnNarrowScreen(t *testing.T) {
+	app, _, _, screen := newTestApp(t, nil)
+	screen.SetSize(40, 30)
+
+	sendRune(app.app, '?')
+	waitFor(t, app.app, func() bool { return app.overlay == "help" })
+
+	sendRune(app.app, '/')
+	waitFor(t, app.app, func() bool { return app.app.GetFocus() == app.helpSearchInput })
+	for _, r := range "reopen, merge" {
+		sendRune(app.app, r)
+	}
+	sendSpecial(app.app, tcell.KeyEnter)
+	waitFor(t, app.app, func() bool { return app.helpMatchCount > 0 })
+
+	assertHelpCurrentMatchVisible(t, app, screen, "reopen, merge")
+}
+
+// assertHelpCurrentMatchVisible fails t unless exactly one row of the help
+// view's own visible rect shows a reverse-video span matching pattern
+// (smartcase, like the search itself). submitHelpSearch/helpSearchStep
+// always ScrollTo the current match's own line — normally putting it at
+// the very top of the view, though a match near the end of the text can
+// still get clamped a little further down if too little text remains
+// below it to fill the view (see buildHelpText's doc comment for why a
+// style tag rather than a tview region/Highlight()). A regexp match (not a
+// literal substring check) since pattern may itself contain regexp syntax
+// (a literal "." in "list.", for instance, also matches whatever single
+// character actually follows "list" case-insensitively — the "List:"
+// section header's own trailing ":", not just a binding row's ".").
+func assertHelpCurrentMatchVisible(t *testing.T, app *App, screen tcell.SimulationScreen, pattern string) {
+	t.Helper()
+	re := regexp.MustCompile(smartcase(pattern))
+	var matches []string
+	query(app.app, func() bool {
+		_, y, _, h := app.helpView.GetInnerRect()
+		for row := y; row < y+h; row++ {
+			for _, span := range reverseVideoSpans(screen, row) {
+				if re.MatchString(span) {
+					matches = append(matches, span)
+				}
+			}
+		}
+		return true
+	})
+	if len(matches) != 1 {
+		t.Fatalf("help view's visible rows have %d reverse-video span(s) matching %q, want exactly 1 (got %v)", len(matches), pattern, matches)
+	}
+}
+
 // TestAppHelpSearchHighlightsAndCycles covers the help overlay's own "/"
 // search: "list." matches every list.* binding row across the Global/List/
 // Detail/Files/Diff sections buildHelpText renders, giving more than one
 // hit to cycle through with n/N (including wrapping past either end).
 func TestAppHelpSearchHighlightsAndCycles(t *testing.T) {
-	app, _, _, _ := newTestApp(t, nil)
+	app, _, _, screen := newTestApp(t, nil)
 
 	sendRune(app.app, '?')
 	waitFor(t, app.app, func() bool { return app.overlay == "help" })
@@ -1982,40 +2131,29 @@ func TestAppHelpSearchHighlightsAndCycles(t *testing.T) {
 		sendRune(app.app, r)
 	}
 	sendSpecial(app.app, tcell.KeyEnter)
+	waitFor(t, app.app, func() bool { return app.helpMatchCount > 0 })
 
-	// waitFor's own cond runs inside a QueueUpdate callback already on the
-	// UI goroutine (see its doc comment): every read below is a direct
-	// field/method access, never query() nested inside one, which would
-	// deadlock trying to queue a second update from within the first.
-	waitFor(t, app.app, func() bool {
-		hl := app.helpView.GetHighlights()
-		return len(hl) == 1 && hl[0] == "m0"
-	})
 	title := query(app.app, func() string { return app.helpView.GetTitle() })
 	if !containsSubstring(title, "matches") {
 		t.Errorf("help view title = %q, want it to mention the match count", title)
 	}
+	assertHelpCurrentMatchVisible(t, app, screen, "list.")
+
+	idx0 := query(app.app, func() int { return app.helpMatchIdx })
 
 	sendRune(app.app, 'n')
-	waitFor(t, app.app, func() bool {
-		hl := app.helpView.GetHighlights()
-		return len(hl) == 1 && hl[0] == "m1"
-	})
+	waitFor(t, app.app, func() bool { return app.helpMatchIdx == idx0+1 })
+	assertHelpCurrentMatchVisible(t, app, screen, "list.")
 
 	sendRune(app.app, 'N')
-	waitFor(t, app.app, func() bool {
-		hl := app.helpView.GetHighlights()
-		return len(hl) == 1 && hl[0] == "m0"
-	})
+	waitFor(t, app.app, func() bool { return app.helpMatchIdx == idx0 })
+	assertHelpCurrentMatchVisible(t, app, screen, "list.")
 
 	// A further N from the first match must wrap around to the last one.
 	count := query(app.app, func() int { return app.helpMatchCount })
-	want := fmt.Sprintf("m%d", count-1)
 	sendRune(app.app, 'N')
-	waitFor(t, app.app, func() bool {
-		hl := app.helpView.GetHighlights()
-		return len(hl) == 1 && hl[0] == want
-	})
+	waitFor(t, app.app, func() bool { return app.helpMatchIdx == count-1 })
+	assertHelpCurrentMatchVisible(t, app, screen, "list.")
 }
 
 func TestAppHelpSearchInvalidPatternShowsInTitle(t *testing.T) {

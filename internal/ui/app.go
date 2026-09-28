@@ -223,12 +223,15 @@ type App struct {
 	// the list filter/pending list). helpSearchInput itself is built once,
 	// in buildStatusBar, alongside cmdLine/searchInput, so a focus-switch
 	// comparison against it in the router is never made before help has
-	// ever opened. helpMatchCount/helpMatchIdx are the current help
-	// search's total match count and the index Highlight() currently
-	// points at (both 0 with no search active).
+	// ever opened. helpSearchRE is the current search's compiled pattern
+	// (nil with none active); helpMatchCount/helpMatchIdx are its total
+	// match count and which one buildHelpText currently marks (both 0/0
+	// with no search active) — see buildHelpText's own doc comment for why
+	// this is a style tag on the rebuilt text rather than a tview region.
 	helpView        *tview.TextView
 	helpFlex        *tview.Flex
 	helpSearchInput *tview.InputField
+	helpSearchRE    *regexp.Regexp
 	helpMatchCount  int
 	helpMatchIdx    int
 
