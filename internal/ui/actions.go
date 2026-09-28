@@ -373,11 +373,13 @@ func (a *App) closeCommandLine() {
 }
 
 // openDiffSearch shows the "/" diff-search input in the status bar row,
-// prefilled with the last pattern searched for (so opening it again to
-// refine a search does not start from empty).
+// always empty (never prefilled with the last pattern searched for, unlike
+// openFilter/openCommandLine's own history recall) — vim's own "/" opens
+// empty too, and n/N already repeat the last search without reopening the
+// input, so prefilling would only ever cost the user a backspace.
 func (a *App) openDiffSearch() {
 	a.savedFocus = a.app.GetFocus()
-	a.searchInput.SetText(a.searchPattern)
+	a.searchInput.SetText("")
 	a.bottomPages.SwitchToPage("search")
 	a.app.SetFocus(a.searchInput)
 }

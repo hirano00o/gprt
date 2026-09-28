@@ -52,6 +52,12 @@ var (
 	// Reverse survives Style.Background() and still reads clearly even on
 	// the cursor row.
 	SearchMatch = tcell.StyleDefault.Foreground(colorWarning).Background(colorBg).Reverse(true)
+	// SearchCurrent highlights the *current* "/" search match (the one
+	// searchIdx points to) distinctly from every other match, which
+	// SearchMatch styles instead: same Reverse trick as SearchMatch (see its
+	// doc comment for why), a different foreground so the two read apart on
+	// the same line, plus Bold to make the current one stand out further.
+	SearchCurrent = tcell.StyleDefault.Foreground(colorAccent).Background(colorBg).Reverse(true).Bold(true)
 )
 
 // Apply sets tview's package-global Styles to gprt's dark theme. It must be

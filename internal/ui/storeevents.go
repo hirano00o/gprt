@@ -69,6 +69,12 @@ func (a *App) subscribeStore() {
 			if a.searchRE != nil {
 				a.searchMatches = a.computeSearchMatches(a.searchRE)
 				a.searchIdx = -1
+				// searchIdx above is reset, not preserved (the recomputed
+				// list's order/length can shift under a changed file), so
+				// any current-match marker DiffView is still showing from
+				// before this recompute would now point at a stale
+				// coordinate — drop it until the next n/N sets a new one.
+				a.diffView.ClearSearchCurrent()
 			}
 		case store.EventFileHighlighted:
 			// FilesState().Highlighting (the status bar's "highlighting N"

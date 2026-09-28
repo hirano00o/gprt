@@ -252,21 +252,68 @@ type DiffView struct {
 	// same span-precomputation rule every other line decoration here
 	// follows.
 	searchRE *regexp.Regexp
+
+	// searchCurrentSet/Path/Hunk/Line/Start/End name the one match (among
+	// every one searchRE highlights) styled theme.SearchCurrent instead of
+	// theme.SearchMatch — see SetSearchCurrent. Path guards against a stale
+	// hunk/line/byte-offset triple left over from a different file falsely
+	// matching an unrelated row after SetFile switches the displayed file:
+	// hunk/line indices (and byte offsets within a line) are only
+	// meaningful relative to the file they were computed against, and
+	// SetFile does not clear this state on a file switch (nor need it,
+	// given the path guard) so revisiting the file the current match is in
+	// shows it again without another n/N.
+	searchCurrentSet                     bool
+	searchCurrentPath                    string
+	searchCurrentHunk, searchCurrentLine int
+	searchCurrentStart, searchCurrentEnd int
 }
 
 // SetSearch activates re: every line matching it is highlighted (see
-// lineRow) starting at the next rebuild.
+// lineRow) starting at the next rebuild. Any current-match marker from a
+// previous search (SetSearchCurrent) is cleared, since it belongs to that
+// search's own match list, not this one; callers that jump to a match right
+// after (diffSearchStep, submitDiffSearch) call SetSearchCurrent again to
+// re-mark it.
 func (dv *DiffView) SetSearch(re *regexp.Regexp) {
 	dv.searchRE = re
+	dv.searchCurrentSet = false
 	dv.lastWidth = -1
 }
 
 // ClearSearch deactivates the current search highlight (for example Esc on
-// the diff outside visual mode). It does not touch any other search state
-// (the caller's own match list/cursor, kept so a later n/N can reactivate
-// the same search via SetSearch without recomputing it).
+// the diff outside visual mode), including the current-match marker. It
+// does not touch any other search state (the caller's own match
+// list/cursor, kept so a later n/N can reactivate the same search via
+// SetSearch without recomputing it).
 func (dv *DiffView) ClearSearch() {
 	dv.searchRE = nil
+	dv.searchCurrentSet = false
+	dv.lastWidth = -1
+}
+
+// SetSearchCurrent marks the match at (path, hunk, line, start:end) — the
+// same coordinates search.go's searchMatch carries — as the current one
+// among every match searchRE highlights (see SetSearch): styled
+// theme.SearchCurrent instead of theme.SearchMatch, starting at the next
+// rebuild.
+func (dv *DiffView) SetSearchCurrent(path string, hunk, line, start, end int) {
+	dv.searchCurrentSet = true
+	dv.searchCurrentPath = path
+	dv.searchCurrentHunk = hunk
+	dv.searchCurrentLine = line
+	dv.searchCurrentStart = start
+	dv.searchCurrentEnd = end
+	dv.lastWidth = -1
+}
+
+// ClearSearchCurrent removes the current-match marker without touching the
+// rest of the active search (SetSearch's own highlight, and searchRE
+// itself, are left alone) — used when a caller's own notion of "current"
+// goes stale (for example internal/ui's EventFilesChanged recompute, which
+// resets its searchIdx to -1) without the whole search being cleared.
+func (dv *DiffView) ClearSearchCurrent() {
+	dv.searchCurrentSet = false
 	dv.lastWidth = -1
 }
 
@@ -1043,13 +1090,43 @@ func (b *diffBuilder) lineRow(f DiffFile, hunkIdx, lineIdx int, l diff.Line) dif
 	row.content = contentSpansFor(f, hunkIdx, lineIdx, l)
 	if b.dv.searchRE != nil {
 		if ranges := b.dv.searchRE.FindAllStringIndex(l.Text, -1); len(ranges) > 0 {
-			row.content = highlightRanges(row.content, l.Text, ranges, theme.SearchMatch)
+			row.content = b.dv.highlightSearchRanges(row.content, f.Path, hunkIdx, lineIdx, l.Text, ranges)
 		}
 	}
 	if w := SpanWidth(row.content); w > b.longestContent {
 		b.longestContent = w
 	}
 	return row
+}
+
+// highlightSearchRanges applies theme.SearchMatch to every range in ranges
+// (as returned by dv.searchRE.FindAllStringIndex against text, the line's
+// own diff.Line.Text), except the one matching dv.searchCurrent*'s own
+// (path, hunk, line, start, end) coordinates, if any — that one gets
+// theme.SearchCurrent instead. Splitting the ranges and calling
+// highlightRanges twice is safe: each call only ever splits spans further
+// without changing their concatenated text, so the second call's spans
+// still reconstruct text exactly, same as the first's.
+func (dv *DiffView) highlightSearchRanges(spans []Span, path string, hunkIdx, lineIdx int, text string, ranges [][]int) []Span {
+	current := -1
+	if dv.searchCurrentSet && dv.searchCurrentPath == path &&
+		dv.searchCurrentHunk == hunkIdx && dv.searchCurrentLine == lineIdx {
+		for i, r := range ranges {
+			if r[0] == dv.searchCurrentStart && r[1] == dv.searchCurrentEnd {
+				current = i
+				break
+			}
+		}
+	}
+	if current < 0 {
+		return highlightRanges(spans, text, ranges, theme.SearchMatch)
+	}
+
+	others := make([][]int, 0, len(ranges)-1)
+	others = append(others, ranges[:current]...)
+	others = append(others, ranges[current+1:]...)
+	spans = highlightRanges(spans, text, others, theme.SearchMatch)
+	return highlightRanges(spans, text, ranges[current:current+1], theme.SearchCurrent)
 }
 
 // gutterSpansFor renders one line's "old-no new-no marker draft-mark "
