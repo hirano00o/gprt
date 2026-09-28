@@ -9,6 +9,8 @@ package ui
 import (
 	"fmt"
 
+	"github.com/rivo/tview"
+
 	"github.com/hirano00o/gprt/internal/model"
 	"github.com/hirano00o/gprt/internal/ui/theme"
 )
@@ -72,9 +74,18 @@ func (a *App) confirmSimplePRMutation(
 		return
 	}
 	ref, _ := a.deps.Store.CurrentRef()
-	a.showConfirm(fmt.Sprintf("%s #%d?", title, ref.Number), title, func() {
+	a.showConfirm(prConfirmMessage(fmt.Sprintf("%s #%d?", title, ref.Number), pr), title, func() {
 		a.runSimpleMutation(ref, successVerb, enqueue)
 	})
+}
+
+// prConfirmMessage follows question with the pull request it acts on —
+// repository, number, title and author — so a state-changing confirmation
+// can be checked against more than a bare number. The title is escaped
+// because tview.Modal renders its text with style tags enabled.
+func prConfirmMessage(question string, pr *model.PullRequest) string {
+	return fmt.Sprintf("%s\n\n%s #%d\n%s\nby @%s",
+		question, pr.Ref.Repo.NameWithOwner(), pr.Ref.Number, tview.Escape(pr.Title), pr.Author.Login)
 }
 
 // runSimpleMutation re-checks Store.CurrentRef() against ref, refuses with

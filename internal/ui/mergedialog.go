@@ -288,7 +288,8 @@ func (a *App) submitMergeForm() {
 	}
 
 	a.closeMergeDialog()
-	a.showConfirm(fmt.Sprintf("Merge #%d with %s?", ref.Number, mergeMethodLabel(method)), "Merge", func() {
+	question := fmt.Sprintf("Merge #%d with %s?", ref.Number, mergeMethodLabel(method))
+	a.showConfirm(prConfirmMessage(question, pr), "Merge", func() {
 		a.runSimpleMutation(ref, "merged", func() bool {
 			return a.deps.Store.Merge(method, headline, body)
 		})

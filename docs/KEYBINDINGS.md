@@ -100,9 +100,9 @@ Entered via `global.command` (`:`), these exist only as typed commands, never as
 
 | Command | Effect | Status |
 |---------|--------|--------|
-| `:merge` | Open the merge dialog (method picker restricted to the repository's own allowed methods, with a single allowed one preselected; commit headline/body; a `Mergeable`/`MergeStateStatus`/review-decision summary line), then a confirmation dialog ("Merge #N with `<method>`?") | Done (M5) |
-| `:close` | Close the current PR, after a confirmation dialog ("Close #N?") — refused with a toast when `ViewerCanClose` is false or the pull request is not `OPEN` | Done (M5) |
-| `:reopen` | Reopen the current PR, after a confirmation dialog ("Reopen #N?") — refused with a toast when `ViewerCanReopen` is false or the pull request is not `CLOSED` | Done (M5) |
+| `:merge` | Open the merge dialog (method picker restricted to the repository's own allowed methods, with a single allowed one preselected; commit headline/body; a `Mergeable`/`MergeStateStatus`/review-decision summary line), then a confirmation dialog ("Merge #N with `<method>`?", followed by the repository, title and author) | Done (M5) |
+| `:close` | Close the current PR, after a confirmation dialog ("Close #N?", followed by the repository, title and author) — refused with a toast when `ViewerCanClose` is false or the pull request is not `OPEN` | Done (M5) |
+| `:reopen` | Reopen the current PR, after a confirmation dialog ("Reopen #N?", followed by the repository, title and author) — refused with a toast when `ViewerCanReopen` is false or the pull request is not `CLOSED` | Done (M5) |
 | `:messages` | Show the ring buffer of recent log messages (see `internal/logging`) | Done (M1a) |
 | `:help` | Show the help screen (same as `?`) | Done (M1a) |
 | `:q` | Quit, asking for confirmation first while a mutation is in flight (same `quitWithConfirmIfMutating` as `q`/`Ctrl-c`) | Done (M1a) |
