@@ -285,4 +285,5 @@ func (a *App) jumpToMatch(idx int) {
 
 	side, no := diff.Anchor(entry.Hunks[m.hunk].Lines[m.line])
 	a.diffView.JumpToLine(side, no)
+	a.diffView.SetSearchCurrent(m.path, m.hunk, m.line, m.start, m.end)
 }

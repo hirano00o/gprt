@@ -264,3 +264,61 @@ func TestDiffSearchEscInVisualOnlyEndsSelection(t *testing.T) {
 	sendSpecial(app.app, tcell.KeyEsc)
 	waitFor(t, app.app, func() bool { return !app.diffView.HasSearch() })
 }
+
+// TestDiffSearchReopensEmpty covers openDiffSearch's own no-prefill
+// behaviour: opening "/" again after a previous search must start from an
+// empty input, not the last pattern searched for, so the user is never
+// stuck backspacing an old keyword before typing a new one.
+func TestDiffSearchReopensEmpty(t *testing.T) {
+	app, _, _, _ := openFilesTabForFixture(t)
+	focusDiffViewForTest(t, app)
+
+	sendRune(app.app, '/')
+	waitFor(t, app.app, func() bool { return app.app.GetFocus() == app.searchInput })
+	typeString(app, "oldCall")
+	sendSpecial(app.app, tcell.KeyEnter)
+	waitFor(t, app.app, func() bool { return app.searchRE != nil })
+
+	sendRune(app.app, '/')
+	waitFor(t, app.app, func() bool { return app.app.GetFocus() == app.searchInput })
+	if got := query(app.app, func() string { return app.searchInput.GetText() }); got != "" {
+		t.Errorf("searchInput.GetText() after reopening \"/\" = %q, want empty", got)
+	}
+}
+
+// TestDiffSearchNextStepsToSecondMatchOnSameLine covers jumpToMatch's own
+// current-match coordinates (widget.DiffView.SetSearchCurrent) end to end
+// through diffSearchStep's per-line stepping: exampleGoPatch's added
+// comment line contains "so" twice (the word "so", then the start of
+// "somewhere"), so submitting that search lands on the first occurrence and
+// a further "n" must move searchIdx — and so the current-match highlight,
+// covered directly at the widget level by
+// TestDiffViewSearchCurrentHighlightsOnlyTheCurrentMatch — to the second,
+// without leaving the line at all.
+func TestDiffSearchNextStepsToSecondMatchOnSameLine(t *testing.T) {
+	app, _, _, _ := openFilesTabForFixture(t)
+	focusDiffViewForTest(t, app)
+
+	sendRune(app.app, '/')
+	waitFor(t, app.app, func() bool { return app.app.GetFocus() == app.searchInput })
+	typeString(app, "so")
+	sendSpecial(app.app, tcell.KeyEnter)
+	waitFor(t, app.app, func() bool { return len(app.searchMatches) > 0 })
+
+	first := query(app.app, func() searchMatch { return app.searchMatches[app.searchIdx] })
+	if first.start != 60 || first.end != 62 {
+		t.Fatalf("first match = %+v, want start=60 end=62 (the word %q)", first, "so")
+	}
+
+	sendRune(app.app, 'n')
+	waitFor(t, app.app, func() bool { return app.searchMatches[app.searchIdx].start == 94 })
+
+	second := query(app.app, func() searchMatch { return app.searchMatches[app.searchIdx] })
+	if second.path != first.path || second.hunk != first.hunk || second.line != first.line {
+		t.Errorf("second match (path=%q hunk=%d line=%d) is not on the same line as the first (path=%q hunk=%d line=%d)",
+			second.path, second.hunk, second.line, first.path, first.hunk, first.line)
+	}
+	if second.end != 96 {
+		t.Errorf("second match = %+v, want end=96 (%q in %q)", second, "so", "somewhere")
+	}
+}

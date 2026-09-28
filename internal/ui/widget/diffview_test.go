@@ -1089,6 +1089,73 @@ func TestDiffViewSearchHighlightsMatchedCellsOnly(t *testing.T) {
 	}
 }
 
+// repeatedMatchPatch has one hunk with a single added line containing the
+// same short string twice ("foo" at byte [0,3) and [8,11)), for
+// TestDiffViewSearchCurrentHighlightsOnlyTheCurrentMatch.
+const repeatedMatchPatch = `@@ -1,1 +1,1 @@
++foo bar foo
+`
+
+func repeatedMatchFile(t *testing.T) DiffFile {
+	t.Helper()
+	hunks, err := diff.Parse(repeatedMatchPatch)
+	if err != nil {
+		t.Fatalf("diff.Parse: %v", err)
+	}
+	return DiffFile{Path: "pkg/repeated.go", Status: model.FileStatusModified, Additions: 1, HasPatch: true, Hunks: hunks}
+}
+
+// TestDiffViewSearchCurrentHighlightsOnlyTheCurrentMatch guards
+// SetSearchCurrent: when a line has more than one match for the active
+// search, only the one SetSearchCurrent names is drawn theme.SearchCurrent;
+// every other match on the same line stays theme.SearchMatch.
+func TestDiffViewSearchCurrentHighlightsOnlyTheCurrentMatch(t *testing.T) {
+	dv := NewDiffView()
+	dv.SetFile(repeatedMatchFile(t))
+	dv.SetSearch(regexp.MustCompile("foo"))
+	dv.SetSearchCurrent("pkg/repeated.go", 0, 0, 8, 11) // the second "foo"
+	dv.SetRect(0, 0, 60, 20)
+	screen := newTestScreen(t, 60, 20)
+	dv.Draw(screen)
+
+	// Row layout for repeatedMatchFile: file header(0), hunk header(1),
+	// "+foo bar foo"(2).
+	row := dv.rows[2]
+	if row.kind != rowKindLine || row.hunk != 0 || row.line != 0 {
+		t.Fatalf("rows[2] = %+v, want the +foo bar foo line (hunk 0, line index 0)", row)
+	}
+	gw := SpanWidth(row.gutter)
+	x, y, _, _ := dv.GetRect()
+
+	matchFg, _, _ := theme.SearchMatch.Decompose()
+	currentFg, _, _ := theme.SearchCurrent.Decompose()
+
+	for i := range 3 { // first "foo" (bytes 0-2): the other match
+		fg, _, attr := cellStyle(screen, x+gw+i, y+2).Decompose()
+		if attr&tcell.AttrReverse == 0 {
+			t.Errorf("other-match cell %d not drawn Reverse", i)
+		}
+		if attr&tcell.AttrBold != 0 {
+			t.Errorf("other-match cell %d drawn Bold, want only the current match to be", i)
+		}
+		if fg != matchFg {
+			t.Errorf("other-match cell %d foreground = %v, want theme.SearchMatch's %v", i, fg, matchFg)
+		}
+	}
+	for i := 8; i < 11; i++ { // second "foo" (bytes 8-10): the current match
+		fg, _, attr := cellStyle(screen, x+gw+i, y+2).Decompose()
+		if attr&tcell.AttrReverse == 0 {
+			t.Errorf("current-match cell %d not drawn Reverse", i)
+		}
+		if attr&tcell.AttrBold == 0 {
+			t.Errorf("current-match cell %d not drawn Bold", i)
+		}
+		if fg != currentFg {
+			t.Errorf("current-match cell %d foreground = %v, want theme.SearchCurrent's %v", i, fg, currentFg)
+		}
+	}
+}
+
 // gapFixturePatch has two hunks: the first starts at new-side line 5 (a
 // 4-line gap before it, lines 1-4), the second at new-side line 10 (a
 // 3-line gap between them, lines 7-9).
