@@ -200,7 +200,7 @@ func (a *App) buildEditForm(pr *model.PullRequest) {
 
 	title := tview.NewInputField().SetLabel("Title").SetText(pr.Title)
 	base := tview.NewInputField().SetLabel("Base branch").SetText(pr.BaseRefName)
-	base.SetAutocompleteFunc(a.editFormBranchAutocomplete)
+	wireFormAutocomplete(base, &a.editFormBaseSuggesting, a.editFormBranchAutocomplete)
 	draft := tview.NewCheckbox().SetLabel("Draft").SetChecked(pr.IsDraft)
 
 	form := tview.NewForm()
@@ -464,6 +464,7 @@ func (a *App) closeEditForm() {
 	a.editFormSelectedReviewers = nil
 	a.editFormBranchSuggestions = nil
 	a.editFormBranchLastQuery = ""
+	a.editFormBaseSuggesting = false
 	if a.editFormReturnFocus != nil {
 		a.app.SetFocus(a.editFormReturnFocus)
 		a.editFormReturnFocus = nil
@@ -485,14 +486,31 @@ func (a *App) closeEditFormIfWrongPR() {
 	}
 }
 
-// routeEditFormKey handles the "editform" overlay: Esc cancels (asking to
-// discard when dirty), Ctrl-s saves; every other key is forwarded
-// unchanged to the Form's own InputHandler (InputField/Checkbox/buttons),
-// exactly like the router does for the "confirm"/"merge" overlays' own
-// tview built-ins.
+// routeEditFormKey handles the "editform" overlay: forwards every key to
+// the Form's own InputHandler (InputField/Checkbox/buttons), rewritten
+// first by rewriteFormNavKey (formnav.go, see routeCreateFormKey's own doc
+// comment for the exact rules and why they never collide) so Up/Down also
+// move between items exactly like Tab/Backtab already do — except while
+// the Base field's own autocomplete drop-down is shown
+// (editFormBaseSuggesting, wrapFormAutocomplete, forced false whenever the
+// field does not currently have focus), in which case Tab/Backtab instead
+// navigate its own candidates. Esc cancels (asking to discard when dirty)
+// — except while that drop-down is shown, when a literal Escape must only
+// close it (see routeCreateFormKey's own doc comment for why this router
+// resets the tracked state itself here rather than leaving it stale) — and
+// Ctrl-s saves.
 func (a *App) routeEditFormKey(ev *tcell.EventKey, normalized []keys.Key) *tcell.EventKey {
+	if a.app.GetFocus() != a.editFormBaseField {
+		a.editFormBaseSuggesting = false
+	}
+	suggesting := a.editFormBaseSuggesting
+
 	for _, k := range normalized {
 		if isEscKey(k) {
+			if suggesting {
+				a.editFormBaseSuggesting = false
+				return ev
+			}
 			a.cancelEditForm()
 			return nil
 		}
@@ -501,5 +519,5 @@ func (a *App) routeEditFormKey(ev *tcell.EventKey, normalized []keys.Key) *tcell
 			return nil
 		}
 	}
-	return ev
+	return rewriteFormNavKey(ev, suggesting)
 }

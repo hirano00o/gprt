@@ -426,6 +426,46 @@ func TestEditFormAltKeyDoesNotPanic(t *testing.T) {
 	waitFor(t, app.app, func() bool { return app.overlay == "" })
 }
 
+// TestEditFormArrowKeysMoveBetweenTitleBaseAndDraft covers rewriteFormNavKey
+// (formnav.go) applied by routeEditFormKey: Up/Down move between the
+// form's three items exactly like Tab/Backtab already do. Unlike the
+// create-PR form's own Repository field, Base's own autocomplete
+// drop-down starts closed here (editFormBranchAutocomplete's own
+// lastQuery guard short-circuits its very first, eager call — text and
+// editFormBranchLastQuery are both "" — to the current, still-nil
+// suggestions, matching zero entries), so no dismissal is needed first.
+func TestEditFormArrowKeysMoveBetweenTitleBaseAndDraft(t *testing.T) {
+	app, _, fake, _ := newTestApp(t, nil)
+	ref := fixtureRef(1)
+	openDetailForComposer(t, app, fake, editablePR(ref))
+
+	sendRune(app.app, 'E')
+	waitFor(t, app.app, func() bool { return app.editForm != nil })
+	if item, _ := formFocusIndex(app.app, app.editForm); item != 0 {
+		t.Fatalf("focused form item when the edit form opens = %d, want 0 (Title)", item)
+	}
+
+	sendSpecial(app.app, tcell.KeyDown) // Title -> Base
+	if item, _ := formFocusIndex(app.app, app.editForm); item != 1 {
+		t.Fatalf("focused form item after Down from Title = %d, want 1 (Base)", item)
+	}
+
+	sendSpecial(app.app, tcell.KeyDown) // Base -> Draft
+	if item, _ := formFocusIndex(app.app, app.editForm); item != 2 {
+		t.Fatalf("focused form item after Down from Base = %d, want 2 (Draft)", item)
+	}
+
+	sendSpecial(app.app, tcell.KeyUp) // Draft -> Base
+	if item, _ := formFocusIndex(app.app, app.editForm); item != 1 {
+		t.Fatalf("focused form item after Up from Draft = %d, want 1 (Base)", item)
+	}
+
+	sendSpecial(app.app, tcell.KeyUp) // Base -> Title
+	if item, _ := formFocusIndex(app.app, app.editForm); item != 0 {
+		t.Fatalf("focused form item after Up from Base = %d, want 0 (Title)", item)
+	}
+}
+
 // TestEditLabelsAltKeyDoesNotPanic mirrors TestEditFormAltKeyDoesNotPanic
 // for routeEditLabelsKey.
 func TestEditLabelsAltKeyDoesNotPanic(t *testing.T) {

@@ -1709,6 +1709,20 @@ func confirmYes(app *tview.Application) {
 	sendSpecial(app, tcell.KeyEnter)
 }
 
+// formFocusIndex reads form.GetFocusedItemIndex() (formItem, button) on
+// the UI goroutine, for tests asserting Up/Down/Tab/Backtab navigation
+// within a *tview.Form (createform_test.go/editform_test.go's own
+// arrow-key tests) — formItem is -1 while a button has focus, and vice
+// versa, matching GetFocusedItemIndex's own doc comment.
+func formFocusIndex(app *tview.Application, form *tview.Form) (formItem, button int) {
+	type idx struct{ item, button int }
+	got := query(app, func() idx {
+		i, b := form.GetFocusedItemIndex()
+		return idx{i, b}
+	})
+	return got.item, got.button
+}
+
 func TestAppInitialRenderShowsSectionsAndRows(t *testing.T) {
 	app, _, _, _ := newTestApp(t, nil)
 

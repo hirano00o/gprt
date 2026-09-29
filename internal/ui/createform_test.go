@@ -624,12 +624,30 @@ func TestCreateFormSubmitPartialReviewerFailureToastsCombinedMessage(t *testing.
 	})
 }
 
+// openCreateFormDismissingRepoAutocomplete opens the create-PR form (like
+// sendRune(app.app, 'n') alone) and sends the one Esc needed to close the
+// Repository field's own autocomplete drop-down: SetAutocompleteFunc's own
+// eager Autocomplete() call (buildCreateForm) already populates it — with
+// every viewer repository, or the "(loading repositories…)" placeholder
+// while that list is still nil — the moment the field gets focus, before
+// anything is even typed (see TestCreateFormRepoAutocompleteEscClosesListNotForm,
+// which covers that first Esc's own "close the drop-down, not the form"
+// behavior directly). Every test below that sends its own, separate Esc
+// afterward needs this first so that one actually reaches
+// routeCreateFormKey's cancel path, not the drop-down's own close-only Esc.
+func openCreateFormDismissingRepoAutocomplete(t *testing.T, app *App) {
+	t.Helper()
+	sendRune(app.app, 'n')
+	waitFor(t, app.app, func() bool { return app.createForm != nil })
+	sendSpecial(app.app, tcell.KeyEsc)
+	waitFor(t, app.app, func() bool { return app.overlay == "createform" })
+}
+
 func TestCreateFormEscWithNoChangesClosesImmediately(t *testing.T) {
 	app, _, fake, _ := newTestApp(t, nil)
 	fake.SetViewerRepositories(nil)
 
-	sendRune(app.app, 'n')
-	waitFor(t, app.app, func() bool { return app.createForm != nil })
+	openCreateFormDismissingRepoAutocomplete(t, app)
 
 	sendSpecial(app.app, tcell.KeyEsc)
 
@@ -645,8 +663,7 @@ func TestCreateFormEscWithChangesDiscardConfirmDefaultsToCancel(t *testing.T) {
 	app, _, fake, _ := newTestApp(t, nil)
 	fake.SetViewerRepositories(nil)
 
-	sendRune(app.app, 'n')
-	waitFor(t, app.app, func() bool { return app.createForm != nil })
+	openCreateFormDismissingRepoAutocomplete(t, app)
 	act(app.app, func() { app.createFormTitleField.SetText("changed") })
 
 	sendSpecial(app.app, tcell.KeyEsc)
@@ -669,8 +686,7 @@ func TestCreateFormEscWithChangesConfirmDiscardClosesForm(t *testing.T) {
 	app, _, fake, _ := newTestApp(t, nil)
 	fake.SetViewerRepositories(nil)
 
-	sendRune(app.app, 'n')
-	waitFor(t, app.app, func() bool { return app.createForm != nil })
+	openCreateFormDismissingRepoAutocomplete(t, app)
 	act(app.app, func() { app.createFormTitleField.SetText("changed") })
 
 	sendSpecial(app.app, tcell.KeyEsc)
@@ -689,8 +705,7 @@ func TestCreateFormAltKeyDoesNotPanic(t *testing.T) {
 	app, _, fake, _ := newTestApp(t, nil)
 	fake.SetViewerRepositories(nil)
 
-	sendRune(app.app, 'n')
-	waitFor(t, app.app, func() bool { return app.createForm != nil })
+	openCreateFormDismissingRepoAutocomplete(t, app)
 
 	sendKey(app.app, tcell.NewEventKey(tcell.KeyRune, 'j', tcell.ModAlt))
 	waitFor(t, app.app, func() bool { return app.overlay == "" })
@@ -906,8 +921,7 @@ func TestCreateFormDiscardDeletesBodyDraft(t *testing.T) {
 	app, _, fake, _ := newTestApp(t, nil)
 	fake.SetViewerRepositories(nil)
 
-	sendRune(app.app, 'n')
-	waitFor(t, app.app, func() bool { return app.createForm != nil })
+	openCreateFormDismissingRepoAutocomplete(t, app)
 	act(app.app, func() { app.createFormRepoField.SetText("acme/widgets") })
 
 	key := app.createFormBodyDraftKey()
@@ -1007,4 +1021,141 @@ func TestSubmitCreateFormTrimsHeadBaseTitle(t *testing.T) {
 	if got.HeadRefName != "feature" || got.BaseRefName != "main" || got.Title != "Add widgets" {
 		t.Errorf("CreatePullRequest input = %+v, want head/base/title trimmed", got)
 	}
+}
+
+// TestCreateFormArrowKeysMoveBetweenTitleAndDraft covers rewriteFormNavKey
+// (formnav.go) applied by routeCreateFormKey: Up/Down move between form
+// items exactly like Tab/Backtab already do, for two plain fields with no
+// autocomplete of their own (Title/Draft) — so suggesting is always false
+// here and every Up/Down is simply rewritten to Backtab/Tab.
+func TestCreateFormArrowKeysMoveBetweenTitleAndDraft(t *testing.T) {
+	app, _, fake, _ := newTestApp(t, nil)
+	fake.SetViewerRepositories(nil)
+
+	openCreateFormDismissingRepoAutocomplete(t, app)
+	// Walk to Title via real Tab presses (not Application.SetFocus
+	// directly on the field): the latter would move tview's own focus
+	// without telling the Form itself, leaving its internal
+	// focusedElement — which the very Tab/Backtab this test exercises
+	// relies on — stale at the Repository field's own index.
+	sendSpecial(app.app, tcell.KeyTab) // repo -> head
+	sendSpecial(app.app, tcell.KeyTab) // head -> base
+	sendSpecial(app.app, tcell.KeyTab) // base -> title
+	if item, _ := formFocusIndex(app.app, app.createForm); item != 3 {
+		t.Fatalf("focused form item after walking to Title = %d, want 3", item)
+	}
+
+	sendSpecial(app.app, tcell.KeyDown)
+	if item, _ := formFocusIndex(app.app, app.createForm); item != 4 {
+		t.Fatalf("focused form item after Down from Title = %d, want 4 (Draft)", item)
+	}
+
+	sendSpecial(app.app, tcell.KeyUp)
+	if item, _ := formFocusIndex(app.app, app.createForm); item != 3 {
+		t.Fatalf("focused form item after Up from Draft = %d, want 3 (Title)", item)
+	}
+}
+
+// TestCreateFormArrowKeysReachButtonsAndBack covers the same rewriting at
+// the form's own item/button boundary: Down from the last field (Draft)
+// reaches the first button, and Up from a button returns to the field
+// above.
+func TestCreateFormArrowKeysReachButtonsAndBack(t *testing.T) {
+	app, _, fake, _ := newTestApp(t, nil)
+	fake.SetViewerRepositories(nil)
+
+	openCreateFormDismissingRepoAutocomplete(t, app)
+	sendSpecial(app.app, tcell.KeyTab) // repo -> head
+	sendSpecial(app.app, tcell.KeyTab) // head -> base
+	sendSpecial(app.app, tcell.KeyTab) // base -> title
+	sendSpecial(app.app, tcell.KeyTab) // title -> draft
+	if item, _ := formFocusIndex(app.app, app.createForm); item != 4 {
+		t.Fatalf("focused form item after walking to Draft = %d, want 4", item)
+	}
+
+	sendSpecial(app.app, tcell.KeyDown)
+	if item, button := formFocusIndex(app.app, app.createForm); item != -1 || button != 0 {
+		t.Fatalf("focus after Down from Draft = (item %d, button %d), want (-1, 0) (\"Edit body\")", item, button)
+	}
+
+	sendSpecial(app.app, tcell.KeyUp)
+	if item, _ := formFocusIndex(app.app, app.createForm); item != 4 {
+		t.Fatalf("focused form item after Up from the first button = %d, want 4 (Draft)", item)
+	}
+}
+
+// TestCreateFormRepoAutocompleteTabNavigatesCandidatesEnterSelects covers
+// the other half of rewriteFormNavKey: while the Repository field's own
+// autocomplete drop-down is shown, Tab navigates its candidates instead of
+// moving focus, and Enter selects the highlighted one — filling the field
+// and leaving focus right where it was — after which the drop-down is
+// closed, so a following Down moves to the next field like normal.
+func TestCreateFormRepoAutocompleteTabNavigatesCandidatesEnterSelects(t *testing.T) {
+	app, _, fake, _ := newTestApp(t, nil)
+	fake.SetViewerRepositories([]model.RepositorySummary{
+		{Ref: model.RepoRef{Host: "github.com", Owner: "acme", Name: "widgets"}, ID: "R_1", DefaultBranch: "main"},
+		{Ref: model.RepoRef{Host: "github.com", Owner: "acme", Name: "gadgets"}, ID: "R_2", DefaultBranch: "main"},
+	})
+
+	sendRune(app.app, 'n')
+	waitFor(t, app.app, func() bool { return app.createForm != nil })
+	waitFor(t, app.app, func() bool { return app.deps.Store.ViewerRepositories() != nil })
+	// The drop-down shown when the field first got focus was still built
+	// from the "(loading repositories…)" placeholder (ViewerRepositories()
+	// was still nil at that point); refresh it now that the real list has
+	// resolved, exactly like a real keystroke would (InputField.InputHandler
+	// calls Autocomplete() itself whenever the text actually changes).
+	act(app.app, func() { app.createFormRepoField.Autocomplete() })
+
+	sendSpecial(app.app, tcell.KeyTab) // navigates the candidate list, not the form
+	if got := query(app.app, func() bool { return app.app.GetFocus() == app.createFormRepoField }); !got {
+		t.Fatal("focus after Tab with candidates shown must stay on the Repository field")
+	}
+	if got := query(app.app, func() string { return app.overlay }); got != "createform" {
+		t.Fatalf("overlay after Tab with candidates shown = %q, want still %q", got, "createform")
+	}
+	if got := query(app.app, func() string { return app.createFormRepoField.GetText() }); got != "" {
+		t.Fatalf("repo field text after Tab = %q, want the typed query (empty) kept while navigating", got)
+	}
+
+	sendSpecial(app.app, tcell.KeyEnter) // selects the highlighted (second) candidate
+	if got := query(app.app, func() string { return app.createFormRepoField.GetText() }); got != "acme/gadgets" {
+		t.Fatalf("repo field text after Tab, Enter = %q, want the second candidate %q", got, "acme/gadgets")
+	}
+	if got := query(app.app, func() bool { return app.app.GetFocus() == app.createFormRepoField }); !got {
+		t.Fatal("focus after Enter's selection must stay on the Repository field")
+	}
+
+	sendSpecial(app.app, tcell.KeyDown) // the drop-down is now closed: Down moves to the next field
+	if got := query(app.app, func() bool { return app.app.GetFocus() == app.createFormHeadField }); !got {
+		t.Fatal("Down after selecting a candidate must move focus to the Head branch field")
+	}
+}
+
+// TestCreateFormRepoAutocompleteEscClosesListNotForm covers
+// routeCreateFormKey's own "Esc while suggesting" branch directly: the
+// Repository field's own autocomplete drop-down is already shown the
+// moment the field gets focus (SetAutocompleteFunc's own eager
+// Autocomplete() call, buildCreateForm) — even with no viewer repository
+// list resolved yet, the "(loading repositories…)" placeholder alone is
+// enough — so the very first Esc must only close it, leaving the form
+// (and focus) untouched; only a second Esc, now that nothing is shown,
+// reaches the real cancel path.
+func TestCreateFormRepoAutocompleteEscClosesListNotForm(t *testing.T) {
+	app, _, fake, _ := newTestApp(t, nil)
+	fake.SetViewerRepositories(nil)
+
+	sendRune(app.app, 'n')
+	waitFor(t, app.app, func() bool { return app.createForm != nil })
+
+	sendSpecial(app.app, tcell.KeyEsc)
+	if got := query(app.app, func() string { return app.overlay }); got != "createform" {
+		t.Fatalf("overlay after Esc closing the suggestion drop-down = %q, want still %q", got, "createform")
+	}
+	if got := query(app.app, func() bool { return app.app.GetFocus() == app.createFormRepoField }); !got {
+		t.Fatal("Esc closing the drop-down must not move focus away from the Repository field")
+	}
+
+	sendSpecial(app.app, tcell.KeyEsc)
+	waitFor(t, app.app, func() bool { return app.overlay == "" })
 }
