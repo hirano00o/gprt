@@ -132,12 +132,23 @@ type fakeGitHub struct {
 	createPullRequestCalls  []createPullRequestCall
 	createPullRequestErr    error
 	createPullRequestResult model.PullRequest
+
+	compareResult gh.CompareResult
+	compareErr    error
+	compareCalls  []compareCall
 }
 
 type branchesCall struct {
 	repo  model.RepoRef
 	query string
 	first int
+}
+
+// compareCall records one CompareFiles invocation (the create-PR form's
+// diff preview, createform.go's scheduleCreateFormPreview).
+type compareCall struct {
+	repo       model.RepoRef
+	base, head string
 }
 
 type teamsCall struct {
@@ -1022,6 +1033,37 @@ func (f *fakeGitHub) SetBranchesBlock(ch chan struct{}) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.branchesBlock = ch
+}
+
+// SetCompareResult makes every subsequent CompareFiles call return res.
+func (f *fakeGitHub) SetCompareResult(res gh.CompareResult) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.compareResult = res
+}
+
+// SetCompareError makes every CompareFiles call fail with err.
+func (f *fakeGitHub) SetCompareError(err error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.compareErr = err
+}
+
+// CompareCalls returns every CompareFiles call so far, in call order.
+func (f *fakeGitHub) CompareCalls() []compareCall {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]compareCall(nil), f.compareCalls...)
+}
+
+func (f *fakeGitHub) CompareFiles(_ context.Context, repo model.RepoRef, base, head string) (gh.CompareResult, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.compareCalls = append(f.compareCalls, compareCall{repo: repo, base: base, head: head})
+	if f.compareErr != nil {
+		return gh.CompareResult{}, f.compareErr
+	}
+	return f.compareResult, nil
 }
 
 func (f *fakeGitHub) Branches(ctx context.Context, repo model.RepoRef, query string, first int) ([]model.Branch, model.RateLimit, error) {

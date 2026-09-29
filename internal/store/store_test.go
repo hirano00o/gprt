@@ -115,6 +115,7 @@ type fakeGitHub struct {
 	viewerRepositoriesFunc   func(ctx context.Context, first int) ([]model.RepositorySummary, model.RateLimit, error)
 	branchesFunc             func(ctx context.Context, repo model.RepoRef, query string, first int) ([]model.Branch, model.RateLimit, error)
 	teamsFunc                func(ctx context.Context, org, query string, first int) ([]model.Team, model.RateLimit, error)
+	compareFilesFunc         func(ctx context.Context, repo model.RepoRef, base, head string) (gh.CompareResult, error)
 	updatePullRequestFunc    func(ctx context.Context, id string, in gh.UpdatePullRequestInput) (model.PullRequest, error)
 	requestReviewersFunc     func(ctx context.Context, id string, userIDs, teamIDs []string, union bool) ([]model.Reviewer, error)
 	markReadyForReviewFunc   func(ctx context.Context, id string) (bool, error)
@@ -153,6 +154,7 @@ type fakeGitHub struct {
 	viewerRepositoriesCalls   []int
 	branchesCalls             []branchesCall
 	teamsCalls                []teamsCall
+	compareFilesCalls         []compareFilesCall
 	updatePullRequestCalls    []updatePullRequestCall
 	requestReviewersCalls     []requestReviewersCall
 	markReadyForReviewCalls   []string
@@ -174,6 +176,12 @@ type branchesCall struct {
 type teamsCall struct {
 	org, query string
 	first      int
+}
+
+// compareFilesCall records one CompareFiles invocation.
+type compareFilesCall struct {
+	repo       model.RepoRef
+	base, head string
 }
 
 // updatePullRequestCall records one UpdatePullRequest invocation.
@@ -367,6 +375,9 @@ func newFakeGitHub() *fakeGitHub {
 		},
 		teamsFunc: func(context.Context, string, string, int) ([]model.Team, model.RateLimit, error) {
 			return nil, model.RateLimit{}, nil
+		},
+		compareFilesFunc: func(context.Context, model.RepoRef, string, string) (gh.CompareResult, error) {
+			return gh.CompareResult{}, nil
 		},
 		updatePullRequestFunc: func(context.Context, string, gh.UpdatePullRequestInput) (model.PullRequest, error) {
 			return model.PullRequest{}, nil
@@ -639,6 +650,14 @@ func (f *fakeGitHub) Teams(ctx context.Context, org, query string, first int) ([
 	fn := f.teamsFunc
 	f.mu.Unlock()
 	return fn(ctx, org, query, first)
+}
+
+func (f *fakeGitHub) CompareFiles(ctx context.Context, repo model.RepoRef, base, head string) (gh.CompareResult, error) {
+	f.mu.Lock()
+	f.compareFilesCalls = append(f.compareFilesCalls, compareFilesCall{repo: repo, base: base, head: head})
+	fn := f.compareFilesFunc
+	f.mu.Unlock()
+	return fn(ctx, repo, base, head)
 }
 
 func (f *fakeGitHub) UpdatePullRequest(
@@ -1041,6 +1060,16 @@ func (f *fakeGitHub) setTeamsFunc(fn func(ctx context.Context, org, query string
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.teamsFunc = fn
+}
+
+// setCompareFilesFunc reassigns compareFilesFunc under the lock, for the
+// same reason setSearchFunc does.
+func (f *fakeGitHub) setCompareFilesFunc(
+	fn func(ctx context.Context, repo model.RepoRef, base, head string) (gh.CompareResult, error),
+) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.compareFilesFunc = fn
 }
 
 // setUpdatePullRequestFunc reassigns updatePullRequestFunc under the lock,
