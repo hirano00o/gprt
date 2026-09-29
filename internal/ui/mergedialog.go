@@ -283,12 +283,15 @@ func (a *App) openMergeForm(info model.RepositoryInfo) {
 
 	a.root.AddPage("merge", form, true, true)
 	if a.overlay == "confirm" {
-		// The placeholder was replaced while a Ctrl-C confirm sat on top
-		// of it: AddPage just drew the form over that confirm, so put the
-		// confirm back in front and let it return to the form (not the
-		// discarded placeholder it captured) when it closes.
-		a.root.SendToFront("confirm")
-		a.confirmReturnFocus = form
+		// The placeholder was replaced while one or more Ctrl-C confirms
+		// sat on top of it: AddPage just drew the form over the whole
+		// stack, so raise every confirm page back to the front (bottom
+		// frame first, so the top ends up on top again) and point the
+		// bottom frame's own returnFocus at the form (not the discarded
+		// placeholder it captured) for when the stack finally unwinds to
+		// it.
+		a.raiseConfirms()
+		a.retargetConfirmReturn("merge", form)
 		return
 	}
 	a.overlay = "merge"

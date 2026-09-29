@@ -216,14 +216,18 @@ type App struct {
 
 	seq *keys.Sequencer
 
-	overlay    string // "" | "help" | "messages" | "confirm" | "choice" | "pending" | "pendingConfirm" | "threads" | "reaction" | "merge" | "editform" | "editlabels" | "editreviewers" | "createform"
+	overlay    string // "" | "help" | "messages" | "confirm" | "choice" | "pending" | "threads" | "reaction" | "merge" | "editform" | "editlabels" | "editreviewers" | "createform"
 	savedFocus tview.Primitive
-	// confirmReturnFocus is where an open showConfirm dialog returns focus
-	// when it closes over a still-open parent. It is a field, not a local
-	// of showConfirm, so a parent that replaces its focused primitive while
-	// the dialog is up (openMergeForm swapping out its loading placeholder)
-	// can point it at the replacement.
-	confirmReturnFocus tview.Primitive
+	// confirms is the stack of currently open showConfirm dialogs (usually
+	// just one; Ctrl-C-while-mutating can stack its own "Quit anyway?"
+	// confirm on top of whichever confirm dialog — including pendinglist.go's
+	// own delete/discard confirm — was already showing, see showConfirm's
+	// own doc comment). a.overlay reads "confirm" for as long as this is
+	// non-empty, regardless of depth; each *confirmFrame is a field, not a
+	// showConfirm local, so a parent that replaces its focused primitive
+	// while a dialog is up (openMergeForm swapping out its loading
+	// placeholder) can retarget it via retargetConfirmReturn.
+	confirms []*confirmFrame
 
 	// Help overlay (overlay.go, "?"/":help"): helpFlex wraps helpView (the
 	// scrollable binding list) and helpSearchInput (app.go's build, a

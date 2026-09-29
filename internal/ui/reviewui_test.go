@@ -762,7 +762,7 @@ func TestPendingListDDiscardsWholeReviewAfterConfirm(t *testing.T) {
 	waitFor(t, app.app, func() bool { return app.overlay == "pending" })
 
 	sendRune(app.app, 'D')
-	waitFor(t, app.app, func() bool { return app.overlay == "pendingConfirm" })
+	waitFor(t, app.app, func() bool { return app.overlay == "confirm" })
 	confirmYes(app.app) // "Cancel" is the Modal's default button; Tab then Enter reaches "Delete"
 
 	waitFor(t, app.app, func() bool { return len(fake.DeletePendingReviewCalls()) == 1 })
@@ -790,7 +790,7 @@ func TestPendingListDDeletesADraftAfterConfirm(t *testing.T) {
 
 	sendRune(app.app, 'j')
 	sendRune(app.app, 'd')
-	waitFor(t, app.app, func() bool { return app.overlay == "pendingConfirm" })
+	waitFor(t, app.app, func() bool { return app.overlay == "confirm" })
 	confirmYes(app.app) // "Cancel" is the Modal's default button; Tab then Enter reaches "Delete"
 
 	waitFor(t, app.app, func() bool { return app.overlay == "pending" && len(app.pendingListEntries) == 1 })
@@ -849,7 +849,7 @@ func TestPendingListDeletingALineCommentDraftRefreshesTheGutterMarker(t *testing
 		}
 	})
 	sendRune(app.app, 'd')
-	waitFor(t, app.app, func() bool { return app.overlay == "pendingConfirm" })
+	waitFor(t, app.app, func() bool { return app.overlay == "confirm" })
 	confirmYes(app.app) // "Cancel" is the Modal's default button; Tab then Enter reaches "Delete"
 	waitFor(t, app.app, func() bool { return app.overlay == "pending" })
 	sendRune(app.app, 'q')

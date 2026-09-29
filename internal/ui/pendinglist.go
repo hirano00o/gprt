@@ -231,37 +231,6 @@ func (a *App) routePendingKey(_ *tcell.EventKey, normalized []keys.Key) *tcell.E
 	return nil
 }
 
-// confirmWithinPendingList shows a confirm modal stacked on top of the
-// still-open "p" dialog: the router treats "pendingConfirm" exactly like
-// "confirm" (return the event unchanged, letting the Modal's own
-// InputHandler run), and the done func pops back to "pending" and
-// refocuses the list either way, running onConfirm only when the user
-// picked "Delete". showConfirm itself now also stacks over every overlay
-// (see its own doc comment) and could show a plain confirm here instead,
-// but is a deliberate no-op while "pendingConfirm" is already up — the
-// simplest correct behaviour for Ctrl-C-while-mutating landing on top of
-// an already-nested overlay, with no caller that needs a third one
-// stacked deeper still. "Cancel" (button index 1) defaults focus,
-// mirroring showConfirm's own SetFocus(1) — this modal is built directly,
-// not through showConfirm, so it needs the identical fix applied
-// independently (see showConfirm's own doc comment for why a bare Enter
-// must never default to the destructive choice).
-func (a *App) confirmWithinPendingList(message string, onConfirm func()) {
-	a.overlay = "pendingConfirm"
-	modal := tview.NewModal().SetText(message).AddButtons([]string{"Delete", "Cancel"})
-	modal.SetFocus(1)
-	modal.SetDoneFunc(func(_ int, label string) {
-		a.root.RemovePage("pendingConfirm")
-		a.overlay = "pending"
-		a.app.SetFocus(a.pendingListView)
-		if label == "Delete" {
-			onConfirm()
-		}
-	})
-	a.root.AddPage("pendingConfirm", modal, true, true)
-	a.app.SetFocus(modal)
-}
-
 // openPendingListEntry implements Enter: a pending comment opens its edit
 // composer; a draft opens the composer for its own target, restoring its
 // text (openComposer's own Drafts.Load does that automatically once the
@@ -405,7 +374,7 @@ func (a *App) deletePendingListEntry() {
 
 	if entry.isDraft {
 		key := entry.draft.Key
-		a.confirmWithinPendingList("Delete this draft?", func() {
+		a.showConfirm("Delete this draft?", "Delete", func() {
 			if a.deps.Drafts != nil {
 				if err := a.deps.Drafts.Delete(key); err != nil {
 					a.showErrorToast("draft delete failed: " + err.Error())
@@ -424,7 +393,7 @@ func (a *App) deletePendingListEntry() {
 	}
 
 	id := entry.comment.ID
-	a.confirmWithinPendingList("Delete this pending comment?", func() {
+	a.showConfirm("Delete this pending comment?", "Delete", func() {
 		a.deps.Store.DeleteReviewComment(id)
 	})
 }
@@ -436,7 +405,7 @@ func (a *App) discardPendingReviewFromList() {
 		a.showToast("no pending review to discard", theme.Warning)
 		return
 	}
-	a.confirmWithinPendingList("Discard the entire pending review?", func() {
+	a.showConfirm("Discard the entire pending review?", "Delete", func() {
 		a.deps.Store.DiscardPendingReview()
 	})
 }

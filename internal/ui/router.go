@@ -58,17 +58,17 @@ func (a *App) handleKey(ev *tcell.EventKey) *tcell.EventKey {
 
 	if a.overlay != "" {
 		switch a.overlay {
-		case "confirm", "pendingConfirm":
+		case "confirm":
 			// A confirm dialog is a real focused *tview.Modal, not a
 			// scrollable TextView like help/messages: returning ev lets
 			// tview's own event loop hand it straight to the Modal's
 			// native InputHandler (arrow keys/Enter to pick a button,
 			// Escape to cancel), rather than routeOverlayKey's
 			// q/Esc-only handling, which would otherwise swallow every
-			// key the Modal itself needs. pendingConfirm is the same
-			// shape, stacked on top of the "pending" list overlay for
-			// its own d/D confirmations — see pendinglist.go's
-			// confirmWithinPendingList.
+			// key the Modal itself needs. This is true regardless of how
+			// many showConfirm frames are stacked (App.confirms) — only
+			// the top one is ever focused, and tview.Pages always draws
+			// (and delivers input to) the front page's own primitive.
 			return ev
 		case "choice":
 			return a.routeChoiceKey(ev, normalized)
@@ -576,7 +576,11 @@ func (a *App) dispatch(action keys.Action, count int) {
 // quitWithConfirmIfMutating quits immediately, unless a mutation is
 // currently in flight (a comment being sent, edited, or deleted), in
 // which case it asks for confirmation first so Ctrl-C can never silently
-// discard a mutation the user cannot tell has not landed yet.
+// discard a mutation the user cannot tell has not landed yet. A second
+// Ctrl-C while that confirm is already the top of App.confirms does not
+// stack a duplicate — showConfirm itself rejects an identical message
+// already on top, rather than this function tracking its own "already
+// shown" state.
 func (a *App) quitWithConfirmIfMutating() {
 	if !a.deps.Store.Mutating() {
 		a.quit()
