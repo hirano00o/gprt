@@ -6,22 +6,24 @@ import "github.com/rivo/tview"
 // dialog with message, running onConfirm only if the user picks
 // confirmLabel — never on "Cancel" or Escape (tview.Modal's SetDoneFunc
 // reports Escape as index -1 with an empty label, which never equals
-// confirmLabel). A no-op only while another confirm is already open (so
-// dialogs never stack); any other overlay sharing the same a.overlay
-// field is closed first instead of also blocking this — Ctrl-C while a
-// mutation is in flight must always get a confirm dialog, not silently do
-// nothing merely because "?" happened to be open.
+// confirmLabel). A no-op while another confirm is already open, or while
+// pendingConfirm (pendinglist.go's own nested delete/discard confirm) is —
+// stacking a third modal on top of a second would only ever complicate an
+// already-nested overlay, with no caller that needs it: Ctrl-C reaching
+// here while pendingConfirm is up (Store.Mutating() from an unrelated,
+// still in-flight mutation) is simply ignored, exactly like it already is
+// while "confirm" itself is up.
 //
-// The create/edit PR forms are the exception (stacksConfirm): they stay on
-// screen underneath and become a.overlay again when the dialog closes,
-// with focus back on the item it had. Closing them here removed their page
-// while the form itself (and its debounce timers) stayed allocated, so
-// "Cancel" on their own discard confirm dropped the form from the screen
-// without discarding it. Only they stack because their teardown keys on
-// their own fields (a.createForm/a.editForm); the other overlays' store
-// event handlers key on a.overlay's value and would miss events while a
-// confirm sat on top. The return focus is kept locally rather than in
-// App.savedFocus, which is single-shot.
+// Every other overlay stays open underneath, becoming a.overlay again
+// (with focus back on whatever had it, captured locally rather than in
+// App.savedFocus, which is single-shot) once the dialog closes normally.
+// This used to close whatever overlay was already open first (except the
+// create/edit PR forms, kept open as the one exception, "stacksConfirm"),
+// since most overlays' own store-event handlers keyed on a.overlay's own
+// value and would otherwise silently miss events while a confirm sat on
+// top of them — see overlayStillOpen's own doc comment for how every such
+// check is now keyed on each overlay's own field(s) instead, which is what
+// makes stacking safe everywhere, not just for the two forms.
 //
 // "Cancel" (button index 1) is the default focus (SetFocus(1)): tview's
 // own Form (which Modal wraps its buttons in) otherwise defaults to
@@ -32,16 +34,12 @@ import "github.com/rivo/tview"
 // point of asking; every caller (delete/discard, :merge/:close/:reopen,
 // Ctrl-C-while-mutating) relies on this shared default, not its own.
 func (a *App) showConfirm(message, confirmLabel string, onConfirm func()) {
-	if a.overlay == "confirm" {
+	if a.overlay == "confirm" || a.overlay == "pendingConfirm" {
 		return
 	}
-	parent := ""
-	if stacksConfirm(a.overlay) {
-		parent = a.overlay
-	} else if a.overlay != "" {
-		a.closeOverlay()
-	}
-	returnFocus := a.app.GetFocus()
+	parent := a.overlay
+	a.confirmReturnFocus = a.app.GetFocus()
+	fromComposer := a.composerEditor != nil && a.composerEditor.HasFocus()
 	a.overlay = "confirm"
 
 	modal := tview.NewModal().
@@ -50,11 +48,42 @@ func (a *App) showConfirm(message, confirmLabel string, onConfirm func()) {
 	modal.SetFocus(1)
 	modal.SetDoneFunc(func(_ int, label string) {
 		a.root.RemovePage("confirm")
-		a.overlay = parent
-		if returnFocus != nil {
-			a.app.SetFocus(returnFocus)
+		returnFocus := a.confirmReturnFocus
+		a.confirmReturnFocus = nil
+		if fromComposer && a.composerEditor == nil {
+			// The composer this dialog was opened from was closed while it
+			// showed (closeComposer deferred its own refocus): returnFocus
+			// is its detached text area, so go where the composer itself
+			// would have returned.
+			a.overlay = parent
+			if a.composerReturnFocus != nil {
+				a.app.SetFocus(a.composerReturnFocus)
+				a.composerReturnFocus = nil
+			} else {
+				a.focusDetail()
+			}
+		} else if a.overlayStillOpen(parent) {
+			a.overlay = parent
+			if returnFocus != nil {
+				a.app.SetFocus(returnFocus)
+			} else {
+				a.focusList()
+			}
 		} else {
-			a.focusList()
+			// A store event closed parent out from under this dialog
+			// while it was showing (e.g. closeMergeDialogIfWrongPR on a
+			// PR switch): that close already tore its own page/fields
+			// down, deferring only the focus/overlay reset that would
+			// otherwise have stolen focus from this still-visible Modal —
+			// see those close functions' own "a.overlay == confirm" guard.
+			// restoreFocus() picks up wherever App.savedFocus still points
+			// (left untouched by that deferred close); for editform/
+			// createform, which use their own dedicated return-focus field
+			// instead (see closeEditForm's own doc comment for why),
+			// App.savedFocus was never touched in the first place, so this
+			// falls back to the list, same as returnFocus being nil above.
+			a.overlay = ""
+			a.restoreFocus()
 		}
 		if label == confirmLabel {
 			onConfirm()
@@ -64,10 +93,43 @@ func (a *App) showConfirm(message, confirmLabel string, onConfirm func()) {
 	a.app.SetFocus(modal)
 }
 
-// stacksConfirm reports whether overlay stays open underneath a
-// showConfirm dialog rather than being closed by it (see showConfirm).
-func stacksConfirm(overlay string) bool {
-	return overlay == "createform" || overlay == "editform"
+// overlayStillOpen reports whether the overlay last named by parent (an
+// App.overlay value captured before showConfirm stacked "confirm" over it)
+// is still open by the time the confirm dialog itself closes — keyed on
+// each overlay's own field(s), not a.overlay's string (which reads
+// "confirm" for as long as this matters), exactly like closeEditForm's own
+// a.editForm == nil guard. parent == "" (no overlay was open when the
+// confirm appeared) is trivially "still open": there is nothing that could
+// have closed it.
+func (a *App) overlayStillOpen(parent string) bool {
+	switch parent {
+	case "":
+		return true
+	case "help":
+		return a.helpView != nil
+	case "messages":
+		return a.messagesView != nil
+	case "choice":
+		return a.choiceMenu != nil
+	case "pending":
+		return a.pendingListView != nil
+	case "threads":
+		return a.threadListView != nil
+	case "reaction":
+		return a.reactionPickerView != nil
+	case "merge":
+		return a.mergeDialogOpen()
+	case "editform":
+		return a.editForm != nil
+	case "editlabels":
+		return a.editLabelsView != nil
+	case "editreviewers":
+		return a.editReviewersView != nil
+	case "createform":
+		return a.createForm != nil
+	default:
+		return false
+	}
 }
 
 // showChoiceMenu shows a small overlay list of items (labels only, no
@@ -99,16 +161,27 @@ func (a *App) showChoiceMenu(title string, items []string, onChoose func(index i
 // closeChoiceMenu closes the choice menu opened by showChoiceMenu. It
 // invokes the stored callback with index only when chosen is true (Enter);
 // Esc/q (chosen == false) close it without invoking anything at all.
+//
+// The guard is a.choiceMenu == nil, not a.overlay != "choice": a confirm
+// dialog can be stacked on top of this one (a.overlay == "confirm") when a
+// store event closes it out from under that confirm — see
+// closeComposerIfWrongPR's own call to this — so keying on a.overlay would
+// silently miss it, mirroring closeEditForm's own a.editForm-based guard.
+// When that happens, a.overlay/focus are left alone (the confirm stays the
+// visible, focused overlay); its own done func notices via
+// overlayStillOpen("choice") and falls back once it closes.
 func (a *App) closeChoiceMenu(chosen bool, index int) {
-	if a.overlay != "choice" {
+	if a.choiceMenu == nil {
 		return
 	}
 	onChoose := a.choiceOnChoose
 	a.choiceOnChoose = nil
 	a.choiceMenu = nil
 	a.root.RemovePage("choice")
-	a.overlay = ""
-	a.restoreFocus()
+	if a.overlay != "confirm" {
+		a.overlay = ""
+		a.restoreFocus()
+	}
 	if chosen && onChoose != nil {
 		onChoose(index)
 	}

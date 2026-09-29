@@ -82,6 +82,15 @@ func (a *App) openMergeLoading() {
 	a.app.SetFocus(view)
 }
 
+// mergeDialogOpen reports whether the merge dialog — the loading
+// placeholder or the real form — is currently open, keyed on its own
+// fields rather than a.overlay's string (which reads "confirm" for as long
+// as a Ctrl-C-while-mutating confirm is stacked over it), exactly like
+// closeEditForm's own a.editForm == nil guard.
+func (a *App) mergeDialogOpen() bool {
+	return a.mergeLoading || a.mergeForm != nil
+}
+
 // onRepositoryMetadataChangedForMerge reacts to
 // store.EventRepositoryMetadataChanged: replaces the merge dialog's
 // loading placeholder with the real form once repo's RepositoryInfo
@@ -89,7 +98,7 @@ func (a *App) openMergeLoading() {
 // false, so a later, unrelated event never discards a filled-in form) or
 // for a repository other than the one the dialog was opened for.
 func (a *App) onRepositoryMetadataChangedForMerge(repo model.RepoRef) {
-	if a.overlay != "merge" || !a.mergeLoading || repo != a.mergeRepo {
+	if !a.mergeLoading || repo != a.mergeRepo {
 		return
 	}
 	info, ok := a.deps.Store.RepositoryInfo(repo)
@@ -106,7 +115,7 @@ func (a *App) onRepositoryMetadataChangedForMerge(repo model.RepoRef) {
 // already showing (a later, unrelated fetch failure must not discard a
 // filled-in form) or when no merge dialog is open at all.
 func (a *App) closeMergeDialogOnError() {
-	if a.overlay != "merge" || !a.mergeLoading {
+	if !a.mergeLoading {
 		return
 	}
 	a.closeMergeDialog()
@@ -117,7 +126,7 @@ func (a *App) closeMergeDialogOnError() {
 // it was open), mirroring composer.go's closeComposerIfWrongPR — called
 // from EventPRChanged.
 func (a *App) closeMergeDialogIfWrongPR() {
-	if a.overlay != "merge" {
+	if !a.mergeDialogOpen() {
 		return
 	}
 	if ref, ok := a.deps.Store.CurrentRef(); !ok || ref != a.mergeRef {
@@ -127,16 +136,28 @@ func (a *App) closeMergeDialogIfWrongPR() {
 
 // closeMergeDialog closes the merge dialog (the loading placeholder or the
 // real form) and restores focus. A no-op when it is not open.
+//
+// The guard is mergeDialogOpen(), not a.overlay != "merge": a Ctrl-C-while-
+// mutating confirm can be stacked on top (a.overlay == "confirm") when a
+// store event (closeMergeDialogIfWrongPR/closeMergeDialogOnError) closes
+// this out from under it, mirroring closeEditForm's own a.editForm-based
+// guard. When that happens, the page/fields below are still torn down, but
+// a.overlay/focus are left alone (the confirm stays the visible, focused
+// overlay) — showConfirm's own done func notices via
+// overlayStillOpen("merge") and falls back once it closes.
 func (a *App) closeMergeDialog() {
-	if a.overlay != "merge" {
+	if !a.mergeDialogOpen() {
 		return
 	}
 	a.root.RemovePage("merge")
-	a.overlay = ""
 	a.mergeForm = nil
 	a.mergeSummaryView = nil
 	a.mergeLoading = false
 	a.mergeMethods = nil
+	if a.overlay == "confirm" {
+		return
+	}
+	a.overlay = ""
 	a.restoreFocus()
 }
 
@@ -211,11 +232,18 @@ func (a *App) openMergeForm(info model.RepositoryInfo) {
 	methods := allowedMergeMethods(info)
 	if len(methods) == 0 {
 		a.showToast("no merge methods are allowed for this repository", theme.Warning)
-		a.overlay = "merge" // so closeMergeDialog's own guard (a no-op otherwise) actually tears the loading page down
+		// cmdMerge's own direct-call path (RepositoryInfo already
+		// resolved) reaches here with mergeLoading still false and
+		// mergeForm still nil — nothing mounted yet for closeMergeDialog's
+		// own mergeDialogOpen() guard to see — so this forces it true
+		// first, purely so that call still consumes a.savedFocus (set by
+		// cmdMerge just before this) via closeMergeDialog's own
+		// restoreFocus(), exactly as if the loading placeholder had
+		// briefly existed.
+		a.mergeLoading = true
 		a.closeMergeDialog()
 		return
 	}
-	a.overlay = "merge"
 	a.mergeLoading = false
 	a.mergeMethods = methods
 
@@ -254,6 +282,16 @@ func (a *App) openMergeForm(info model.RepositoryInfo) {
 	a.mergeSummaryView = summary
 
 	a.root.AddPage("merge", form, true, true)
+	if a.overlay == "confirm" {
+		// The placeholder was replaced while a Ctrl-C confirm sat on top
+		// of it: AddPage just drew the form over that confirm, so put the
+		// confirm back in front and let it return to the form (not the
+		// discarded placeholder it captured) when it closes.
+		a.root.SendToFront("confirm")
+		a.confirmReturnFocus = form
+		return
+	}
+	a.overlay = "merge"
 	a.app.SetFocus(form)
 }
 

@@ -140,18 +140,30 @@ func (a *App) openMessages() {
 	}
 	a.savedFocus = a.app.GetFocus()
 	a.overlay = "messages"
-	view := a.buildMessagesView()
-	a.root.AddPage("messages", view, true, true)
-	a.app.SetFocus(view)
+	a.messagesView = a.buildMessagesView()
+	a.root.AddPage("messages", a.messagesView, true, true)
+	a.app.SetFocus(a.messagesView)
 }
 
 // closeOverlay closes whichever overlay is open, if any, and restores
-// focus to whatever had it before the overlay opened.
+// focus to whatever had it before the overlay opened. Only ever called for
+// "help"/"messages" (routeOverlayKey's own q/Esc handling) — never while a
+// confirm dialog is stacked over one of them (the router sends "confirm"
+// straight to the Modal instead, see handleKey's own switch), so unlike
+// closeMergeDialog/closeChoiceMenu/etc. this needs no a.overlay == "confirm"
+// guard of its own.
 func (a *App) closeOverlay() {
 	if a.overlay == "" {
 		return
 	}
 	a.root.RemovePage(a.overlay)
+	switch a.overlay {
+	case "help":
+		a.helpView = nil
+		a.helpFlex = nil
+	case "messages":
+		a.messagesView = nil
+	}
 	a.overlay = ""
 	a.restoreFocus()
 }

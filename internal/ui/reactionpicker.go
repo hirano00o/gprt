@@ -120,15 +120,27 @@ func (a *App) openReactionPicker(subjectID string) {
 }
 
 // closeReactionPicker closes the picker and restores focus.
+//
+// The guard is a.reactionPickerView == nil, not a.overlay != "reaction": a
+// Ctrl-C-while-mutating confirm can be stacked on top (a.overlay ==
+// "confirm") when rebuildReactionPicker's own auto-close (its subject can
+// no longer be found — an EventPRChanged handler, see its doc comment)
+// runs while that confirm is showing, mirroring closeEditForm's own
+// a.editForm-based guard. When that happens, a.overlay/focus are left
+// alone (the confirm stays the visible, focused overlay) — showConfirm's
+// own done func notices via overlayStillOpen("reaction") and falls back
+// once it closes.
 func (a *App) closeReactionPicker() {
-	if a.overlay != "reaction" {
+	if a.reactionPickerView == nil {
 		return
 	}
 	a.root.RemovePage("reaction")
-	a.overlay = ""
 	a.reactionPickerView = nil
 	a.reactionSubjectID = ""
-	a.restoreFocus()
+	if a.overlay != "confirm" {
+		a.overlay = ""
+		a.restoreFocus()
+	}
 }
 
 // reactionGroupsForSubject returns subjectID's current ReactionGroups on

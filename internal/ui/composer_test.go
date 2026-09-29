@@ -609,11 +609,14 @@ func TestComposerStrayCtrlWChordDoesNotEatNextKeyAfterCtrlC(t *testing.T) {
 	waitFor(t, app.app, func() bool { return !app.deps.Store.Mutating() })
 }
 
-// TestCtrlCWhileMutatingClosesHelpOverlayFirst reproduces showConfirm
-// being a silent no-op while the help/messages overlay is open (both
-// gate on the same App.overlay field): Ctrl-C while a mutation is in
-// flight must still get a confirm dialog, closing whatever overlay was
-// open first rather than doing nothing at all.
+// TestCtrlCWhileMutatingStacksOverHelpAndCancelReturnsToIt covers
+// showConfirm stacking over every overlay (dialogs_test.go's own
+// TestShowConfirmDefaultsFocusToCancelNotConfirmLabel covers the simpler
+// no-overlay-open case): Ctrl-C while a mutation is in flight must show
+// the confirm dialog on top of the still-open help overlay, not close it
+// first, and "Cancel" must land back on it, active and focused again —
+// see dialogs.go's showConfirm for why this now holds for every overlay,
+// not only the create/edit PR forms.
 // TestComposerDraftLoadFailureToasts covers a draft that exists on disk
 // but cannot be read back (as opposed to simply not existing, which Load
 // reports as ok == false with no error at all): opening a composer for
@@ -699,7 +702,7 @@ func TestComposerDraftDeleteFailureAfterSendToasts(t *testing.T) {
 	waitFor(t, app.app, func() bool { return !app.deps.Store.Mutating() })
 }
 
-func TestCtrlCWhileMutatingClosesHelpOverlayFirst(t *testing.T) {
+func TestCtrlCWhileMutatingStacksOverHelpAndCancelReturnsToIt(t *testing.T) {
 	app, _, fake, _ := newTestApp(t, nil)
 	openDetailForComposer(t, app, fake, fixtureDetailPR(fixtureRef(1)))
 
@@ -713,6 +716,15 @@ func TestCtrlCWhileMutatingClosesHelpOverlayFirst(t *testing.T) {
 
 	sendKey(app.app, tcell.NewEventKey(tcell.KeyRune, 'c', tcell.ModCtrl))
 	waitFor(t, app.app, func() bool { return app.overlay == "confirm" })
+	if !query(app.app, func() bool { return app.root.HasPage("help") }) {
+		t.Fatal("the help overlay's own page must stay mounted underneath the confirm, not closed first")
+	}
+
+	sendSpecial(app.app, tcell.KeyEsc) // "Cancel" is the Modal's default focus
+	waitFor(t, app.app, func() bool { return app.overlay == "help" })
+	if !query(app.app, func() bool { return app.helpView.HasFocus() }) {
+		t.Fatal("the help overlay must be active (focused) again after cancelling")
+	}
 
 	close(block)
 	waitFor(t, app.app, func() bool { return !app.deps.Store.Mutating() })

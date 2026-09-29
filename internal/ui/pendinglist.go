@@ -49,15 +49,24 @@ func (a *App) openPendingList() {
 }
 
 // closePendingList closes the "p" dialog and restores focus.
+//
+// The guard is a.pendingListView == nil, not a.overlay != "pending": a
+// Ctrl-C-while-mutating confirm can be stacked on top (a.overlay ==
+// "confirm"), mirroring closeEditForm's own a.editForm-based guard. When
+// that happens, a.overlay/focus are left alone (the confirm stays the
+// visible, focused overlay) — showConfirm's own done func notices via
+// overlayStillOpen("pending") and falls back once it closes.
 func (a *App) closePendingList() {
-	if a.overlay != "pending" {
+	if a.pendingListView == nil {
 		return
 	}
 	a.root.RemovePage("pending")
-	a.overlay = ""
 	a.pendingListView = nil
 	a.pendingListEntries = nil
-	a.restoreFocus()
+	if a.overlay != "confirm" {
+		a.overlay = ""
+		a.restoreFocus()
+	}
 }
 
 // rebuildPendingList re-renders the "p" dialog's contents from the current
@@ -223,17 +232,20 @@ func (a *App) routePendingKey(_ *tcell.EventKey, normalized []keys.Key) *tcell.E
 }
 
 // confirmWithinPendingList shows a confirm modal stacked on top of the
-// still-open "p" dialog (a plain showConfirm would close it first, since
-// both share the single App.overlay slot — see showConfirm's own doc
-// comment): the router treats "pendingConfirm" exactly like "confirm"
-// (return the event unchanged, letting the Modal's own InputHandler run),
-// and the done func pops back to "pending" and refocuses the list either
-// way, running onConfirm only when the user picked "Delete". "Cancel"
-// (button index 1) defaults focus, mirroring showConfirm's own
-// SetFocus(1) — this modal is built directly, not through showConfirm, so
-// it needs the identical fix applied independently (see showConfirm's own
-// doc comment for why a bare Enter must never default to the destructive
-// choice).
+// still-open "p" dialog: the router treats "pendingConfirm" exactly like
+// "confirm" (return the event unchanged, letting the Modal's own
+// InputHandler run), and the done func pops back to "pending" and
+// refocuses the list either way, running onConfirm only when the user
+// picked "Delete". showConfirm itself now also stacks over every overlay
+// (see its own doc comment) and could show a plain confirm here instead,
+// but is a deliberate no-op while "pendingConfirm" is already up — the
+// simplest correct behaviour for Ctrl-C-while-mutating landing on top of
+// an already-nested overlay, with no caller that needs a third one
+// stacked deeper still. "Cancel" (button index 1) defaults focus,
+// mirroring showConfirm's own SetFocus(1) — this modal is built directly,
+// not through showConfirm, so it needs the identical fix applied
+// independently (see showConfirm's own doc comment for why a bare Enter
+// must never default to the destructive choice).
 func (a *App) confirmWithinPendingList(message string, onConfirm func()) {
 	a.overlay = "pendingConfirm"
 	modal := tview.NewModal().SetText(message).AddButtons([]string{"Delete", "Cancel"})

@@ -393,7 +393,12 @@ func (a *App) closeComposerIfWrongPR() {
 		return
 	}
 	if ref, ok := a.deps.Store.CurrentRef(); !ok || ref != a.composerTarget.ref {
-		if a.overlay == "choice" {
+		// a.choiceMenu != nil, not a.overlay == "choice": a Ctrl-C-while-
+		// mutating confirm can be stacked on top of the choice menu
+		// (a.overlay == "confirm") when this runs, and closeChoiceMenu's
+		// own guard is field-based for exactly that reason — see its doc
+		// comment.
+		if a.choiceMenu != nil {
 			a.closeChoiceMenu(false, -1)
 		}
 		a.closeComposer(true)
@@ -466,6 +471,11 @@ func (a *App) closeComposer(keepDraft bool) {
 		// clears it for exactly this reason).
 		a.composerReturnFocus = nil
 		a.restoreCreateFormBodySlot()
+	} else if a.overlay == "confirm" {
+		// Closed underneath a confirm (closeComposerIfWrongPR on a PR
+		// switch): moving focus now would take it off the still-visible
+		// Modal. composerReturnFocus is left for showConfirm, which
+		// refocuses it once the dialog closes.
 	} else if a.composerReturnFocus != nil {
 		a.app.SetFocus(a.composerReturnFocus)
 		a.composerReturnFocus = nil

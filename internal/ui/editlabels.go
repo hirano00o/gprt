@@ -87,8 +87,15 @@ func (a *App) toggleCurrentEditLabel() {
 // editLabelsWorking back to App.editFormSelectedLabelIDs and refreshes the
 // edit form's own "Labels (N selected)" button text (Enter); false
 // discards it (Esc/q).
+//
+// The guard is a.editLabelsView == nil, not a.overlay != "editlabels",
+// mirroring closeEditForm's own a.editForm-based guard: a Ctrl-C-while-
+// mutating confirm can be stacked on top (a.overlay == "confirm"), in
+// which case a.overlay/focus are left alone below (the confirm stays the
+// visible, focused overlay) — showConfirm's own done func notices via
+// overlayStillOpen("editlabels") and falls back once it closes.
 func (a *App) closeEditLabelsOverlay(apply bool) {
-	if a.overlay != "editlabels" {
+	if a.editLabelsView == nil {
 		return
 	}
 	if apply {
@@ -100,6 +107,9 @@ func (a *App) closeEditLabelsOverlay(apply bool) {
 	a.editLabelsWorking = nil
 	a.editLabelsView = nil
 	a.root.RemovePage("editlabels")
+	if a.overlay == "confirm" {
+		return
+	}
 	a.overlay = "editform"
 	if a.editForm != nil {
 		a.app.SetFocus(a.editForm)

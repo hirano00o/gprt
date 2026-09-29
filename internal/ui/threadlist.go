@@ -42,15 +42,24 @@ func (a *App) openThreadList() {
 }
 
 // closeThreadList closes the "t" dialog and restores focus.
+//
+// The guard is a.threadListView == nil, not a.overlay != "threads": a
+// Ctrl-C-while-mutating confirm can be stacked on top (a.overlay ==
+// "confirm"), mirroring closeEditForm's own a.editForm-based guard. When
+// that happens, a.overlay/focus are left alone (the confirm stays the
+// visible, focused overlay) — showConfirm's own done func notices via
+// overlayStillOpen("threads") and falls back once it closes.
 func (a *App) closeThreadList() {
-	if a.overlay != "threads" {
+	if a.threadListView == nil {
 		return
 	}
 	a.root.RemovePage("threads")
-	a.overlay = ""
 	a.threadListView = nil
 	a.threadListEntries = nil
-	a.restoreFocus()
+	if a.overlay != "confirm" {
+		a.overlay = ""
+		a.restoreFocus()
+	}
 }
 
 // rebuildThreadList re-renders the "t" dialog's contents from the current
