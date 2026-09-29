@@ -243,6 +243,31 @@ func TestEditFormEscWithNoChangesClosesImmediately(t *testing.T) {
 	waitFor(t, app.app, func() bool { return app.overlay == "" })
 }
 
+// TestEditFormDiscardCancelKeepsFormOnScreen mirrors
+// TestCreateFormDiscardCancelKeepsFormOnScreen: Cancel on the discard
+// confirm returns to the still-shown edit form, typed changes intact.
+func TestEditFormDiscardCancelKeepsFormOnScreen(t *testing.T) {
+	app, _, fake, _ := newTestApp(t, nil)
+	ref := fixtureRef(1)
+	openDetailForComposer(t, app, fake, editablePR(ref))
+
+	sendRune(app.app, 'E')
+	waitFor(t, app.app, func() bool { return app.editForm != nil })
+	act(app.app, func() { app.editFormTitleField.SetText("changed") })
+
+	sendSpecial(app.app, tcell.KeyEsc)
+	waitFor(t, app.app, func() bool { return app.overlay == "confirm" })
+
+	sendSpecial(app.app, tcell.KeyEnter) // bare Enter: "Cancel" is the default focus
+	waitFor(t, app.app, func() bool { return app.overlay == "editform" })
+	if onScreen := query(app.app, func() bool { return app.root.HasPage("editform") }); !onScreen {
+		t.Fatal("the edit form's page must still be shown after Cancel")
+	}
+	if got := query(app.app, func() string { return app.editFormTitleField.GetText() }); got != "changed" {
+		t.Errorf("title field after Cancel = %q, want unchanged (%q)", got, "changed")
+	}
+}
+
 func TestEditFormEscWithChangesShowsDiscardConfirm(t *testing.T) {
 	app, _, fake, _ := newTestApp(t, nil)
 	ref := fixtureRef(1)
@@ -260,7 +285,7 @@ func TestEditFormEscWithChangesShowsDiscardConfirm(t *testing.T) {
 	}
 	confirmYes(app.app) // "Cancel" is the Modal's default button; Tab then Enter reaches "Discard"
 	waitFor(t, app.app, func() bool { return app.overlay == "" })
-	// Regression: showConfirm's own SetDoneFunc resets a.overlay to ""
+	// Regression: showConfirm's own SetDoneFunc reset a.overlay to ""
 	// *before* calling onConfirm (closeEditForm), so a guard comparing
 	// a.overlay against "editform" (rather than a.editForm itself) made
 	// this a silent no-op — the form's own page and every editForm*

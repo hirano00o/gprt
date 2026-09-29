@@ -247,14 +247,11 @@ type App struct {
 	//
 	// editFormReturnFocus is a dedicated field — App.savedFocus/
 	// restoreFocus() is deliberately not reused here, mirroring
-	// composerReturnFocus's own doc comment: cancelEditForm's "Discard
-	// changes?" confirm (showConfirm) already consumes the shared
-	// savedFocus/restoreFocus() pair once for its own open/close (and
-	// restoreFocus() nils savedFocus after using it — see its own doc
-	// comment), so closeEditForm calling restoreFocus() a *second* time
-	// when reached via that confirm's onConfirm would find savedFocus
-	// already nil and fall through to its generic list-focused default,
-	// not the pane the edit form itself was actually opened from — a real
+	// composerReturnFocus's own doc comment: restoreFocus() is single-shot
+	// (it nils savedFocus after using it), and when showConfirm still
+	// shared that slot, closeEditForm reached via the "Discard changes?"
+	// confirm's onConfirm found it already consumed and fell through to
+	// the list instead of the pane the edit form was opened from — a real
 	// bug the second M5 review round's own regression test caught.
 	editForm                  *tview.Form
 	editFormReturnFocus       tview.Primitive

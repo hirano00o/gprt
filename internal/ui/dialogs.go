@@ -7,10 +7,21 @@ import "github.com/rivo/tview"
 // confirmLabel — never on "Cancel" or Escape (tview.Modal's SetDoneFunc
 // reports Escape as index -1 with an empty label, which never equals
 // confirmLabel). A no-op only while another confirm is already open (so
-// dialogs never stack); the help/messages overlay, which shares the same
-// a.overlay field, is closed first instead of also blocking this —
-// Ctrl-C while a mutation is in flight must always get a confirm dialog,
-// not silently do nothing merely because "?" happened to be open.
+// dialogs never stack); any other overlay sharing the same a.overlay
+// field is closed first instead of also blocking this — Ctrl-C while a
+// mutation is in flight must always get a confirm dialog, not silently do
+// nothing merely because "?" happened to be open.
+//
+// The create/edit PR forms are the exception (stacksConfirm): they stay on
+// screen underneath and become a.overlay again when the dialog closes,
+// with focus back on the item it had. Closing them here removed their page
+// while the form itself (and its debounce timers) stayed allocated, so
+// "Cancel" on their own discard confirm dropped the form from the screen
+// without discarding it. Only they stack because their teardown keys on
+// their own fields (a.createForm/a.editForm); the other overlays' store
+// event handlers key on a.overlay's value and would miss events while a
+// confirm sat on top. The return focus is kept locally rather than in
+// App.savedFocus, which is single-shot.
 //
 // "Cancel" (button index 1) is the default focus (SetFocus(1)): tview's
 // own Form (which Modal wraps its buttons in) otherwise defaults to
@@ -24,10 +35,13 @@ func (a *App) showConfirm(message, confirmLabel string, onConfirm func()) {
 	if a.overlay == "confirm" {
 		return
 	}
-	if a.overlay != "" {
+	parent := ""
+	if stacksConfirm(a.overlay) {
+		parent = a.overlay
+	} else if a.overlay != "" {
 		a.closeOverlay()
 	}
-	a.savedFocus = a.app.GetFocus()
+	returnFocus := a.app.GetFocus()
 	a.overlay = "confirm"
 
 	modal := tview.NewModal().
@@ -36,14 +50,24 @@ func (a *App) showConfirm(message, confirmLabel string, onConfirm func()) {
 	modal.SetFocus(1)
 	modal.SetDoneFunc(func(_ int, label string) {
 		a.root.RemovePage("confirm")
-		a.overlay = ""
-		a.restoreFocus()
+		a.overlay = parent
+		if returnFocus != nil {
+			a.app.SetFocus(returnFocus)
+		} else {
+			a.focusList()
+		}
 		if label == confirmLabel {
 			onConfirm()
 		}
 	})
 	a.root.AddPage("confirm", modal, true, true)
 	a.app.SetFocus(modal)
+}
+
+// stacksConfirm reports whether overlay stays open underneath a
+// showConfirm dialog rather than being closed by it (see showConfirm).
+func stacksConfirm(overlay string) bool {
+	return overlay == "createform" || overlay == "editform"
 }
 
 // showChoiceMenu shows a small overlay list of items (labels only, no
