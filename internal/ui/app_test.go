@@ -1739,9 +1739,11 @@ func reverseVideoSpans(screen tcell.SimulationScreen, y int) []string {
 }
 
 // confirmYes navigates a showConfirm-style *tview.Modal (or the
-// pendingConfirm/merge/close/reopen dialogs, which share its shape) from
-// its default-focused "Cancel" button to the confirm button and selects
-// it. Tab wraps a two-button Modal's Form around from the last button
+// merge/close/reopen dialogs, which share its shape) from its
+// default-focused "Cancel" button to the confirm button and selects it —
+// whichever Modal is currently focused, so it works just as well on a
+// confirm nested on top of another via App.confirms. Tab wraps a
+// two-button Modal's Form around from the last button
 // (Cancel, index 1, the default focus — see showConfirm's own doc comment
 // for why) back to the first (the confirm button, index 0), so a single
 // Tab then Enter reaches it regardless of which of the two is currently

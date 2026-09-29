@@ -194,12 +194,15 @@ func TestCtrlCWhileMutatingOverEditLabelsReturnsOnCancel(t *testing.T) {
 	waitFor(t, app.app, func() bool { return !app.deps.Store.Mutating() })
 }
 
-// TestCtrlCWhilePendingConfirmShownIsANoOp covers pendinglist.go's own
-// nested "pendingConfirm" (confirmWithinPendingList): showConfirm treats
-// it exactly like "confirm" itself, a deliberate no-op — stacking a third
-// modal on top of an already-nested overlay has no caller that needs it
-// (see showConfirm's own doc comment).
-func TestCtrlCWhilePendingConfirmShownIsANoOp(t *testing.T) {
+// TestCtrlCWhileMutatingOverPendingDeleteConfirmStacksThenBothStillWork
+// covers Ctrl-C-while-mutating stacking its own "Quit anyway?" confirm on
+// top of the pending list's own delete/discard confirm (pendinglist.go's
+// showConfirm call, now that showConfirm nests instead of treating an
+// already-open confirm as a no-op): Cancel on the quit confirm returns to
+// the discard confirm underneath, still focused on the button it had, and
+// choosing "Delete" on it afterwards still discards the pending review and
+// returns to the pending list.
+func TestCtrlCWhileMutatingOverPendingDeleteConfirmStacksThenBothStillWork(t *testing.T) {
 	app, _, fake, _ := newTestApp(t, nil)
 	ref := fixtureRef(1)
 	pr := fixtureDetailPR(ref)
@@ -209,7 +212,8 @@ func TestCtrlCWhilePendingConfirmShownIsANoOp(t *testing.T) {
 	sendRune(app.app, 'p')
 	waitFor(t, app.app, func() bool { return app.overlay == "pending" })
 	sendRune(app.app, 'D')
-	waitFor(t, app.app, func() bool { return app.overlay == "pendingConfirm" })
+	waitFor(t, app.app, func() bool { return app.overlay == "confirm" })
+	discardConfirmFocus := query(app.app, func() tview.Primitive { return app.app.GetFocus() })
 
 	block := make(chan struct{})
 	fake.SetAddCommentBlock(block)
@@ -217,14 +221,87 @@ func TestCtrlCWhilePendingConfirmShownIsANoOp(t *testing.T) {
 	waitFor(t, app.app, func() bool { return app.deps.Store.Mutating() })
 
 	sendKey(app.app, tcell.NewEventKey(tcell.KeyRune, 'c', tcell.ModCtrl))
-	if got := query(app.app, func() string { return app.overlay }); got != "pendingConfirm" {
-		t.Fatalf("overlay = %q after Ctrl-C while pendingConfirm was showing, want it left alone (%q)", got, "pendingConfirm")
+	waitFor(t, app.app, func() bool { return len(app.confirms) == 2 })
+	if got := query(app.app, func() string { return app.overlay }); got != "confirm" {
+		t.Fatalf("overlay = %q, want \"confirm\" while the quit confirm is stacked on top", got)
+	}
+
+	sendSpecial(app.app, tcell.KeyEsc) // Cancel the quit confirm
+	waitFor(t, app.app, func() bool { return len(app.confirms) == 1 })
+	if got := query(app.app, func() tview.Primitive { return app.app.GetFocus() }); got != discardConfirmFocus {
+		t.Fatalf("focus after cancelling the quit confirm = %T, want the discard confirm's own Modal back (%T)", got, discardConfirmFocus)
+	}
+
+	confirmYes(app.app) // "Delete" on the discard confirm, still intact underneath
+	if got := query(app.app, func() string { return app.overlay }); got != "pending" {
+		t.Fatalf("overlay = %q after confirming discard, want back on the pending list", got)
+	}
+
+	// DiscardPendingReview was only just enqueued behind the still-blocked
+	// AddComment mutation (see enqueuePreparedMutation's own doc comment) —
+	// it cannot have run yet.
+	close(block)
+	waitFor(t, app.app, func() bool { return len(fake.DeletePendingReviewCalls()) == 1 })
+}
+
+// TestCtrlCWhileMutatingOverPlainConfirmStacksAndQuitStillWorks mirrors
+// TestCtrlCWhileMutatingOverPendingDeleteConfirmStacksThenBothStillWork for
+// a plain showConfirm caller (the delete-comment confirm) rather than the
+// pending list's own: the quit confirm stacks on top the same way, and
+// "Quit" still quits despite the delete-comment confirm sitting underneath,
+// unresolved.
+func TestCtrlCWhileMutatingOverPlainConfirmStacksAndQuitStillWorks(t *testing.T) {
+	app, done, fake, _ := newTestApp(t, nil)
+	ref := fixtureRef(1)
+	openDetailForComposer(t, app, fake, ownCommentPR(ref))
+	focusCommentBlock(app)
+
+	sendRune(app.app, 'd')
+	waitFor(t, app.app, func() bool { return app.overlay == "confirm" })
+
+	block := make(chan struct{})
+	fake.SetAddCommentBlock(block)
+	act(app.app, func() { app.deps.Store.AddComment("first") })
+	waitFor(t, app.app, func() bool { return app.deps.Store.Mutating() })
+
+	sendKey(app.app, tcell.NewEventKey(tcell.KeyRune, 'c', tcell.ModCtrl))
+	waitFor(t, app.app, func() bool { return len(app.confirms) == 2 })
+
+	close(block)
+	confirmYes(app.app) // the quit confirm is the top of the stack; "Quit" wins
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("app did not quit after confirming \"Quit\" while stacked over the delete-comment confirm")
+	}
+}
+
+// TestSecondCtrlCWhileQuitConfirmShownDoesNotStackAnother covers
+// showConfirm's own duplicate-message guard: a second Ctrl-C while the
+// "Quit anyway?" confirm is already the top of App.confirms must not push
+// a second copy of it.
+func TestSecondCtrlCWhileQuitConfirmShownDoesNotStackAnother(t *testing.T) {
+	app, _, fake, _ := newTestApp(t, nil)
+	openDetailForComposer(t, app, fake, fixtureDetailPR(fixtureRef(1)))
+
+	block := make(chan struct{})
+	fake.SetAddCommentBlock(block)
+	act(app.app, func() { app.deps.Store.AddComment("first") })
+	waitFor(t, app.app, func() bool { return app.deps.Store.Mutating() })
+
+	sendKey(app.app, tcell.NewEventKey(tcell.KeyRune, 'c', tcell.ModCtrl))
+	waitFor(t, app.app, func() bool { return app.overlay == "confirm" })
+	if got := query(app.app, func() int { return len(app.confirms) }); got != 1 {
+		t.Fatalf("confirms depth = %d after the first Ctrl-C, want 1", got)
+	}
+
+	sendKey(app.app, tcell.NewEventKey(tcell.KeyRune, 'c', tcell.ModCtrl))
+	if got := query(app.app, func() int { return len(app.confirms) }); got != 1 {
+		t.Fatalf("confirms depth = %d after a second Ctrl-C while the quit confirm was already on top, want it to stay a no-op (1)", got)
 	}
 
 	close(block)
 	waitFor(t, app.app, func() bool { return !app.deps.Store.Mutating() })
-	sendSpecial(app.app, tcell.KeyEsc)
-	waitFor(t, app.app, func() bool { return app.overlay == "pending" })
 }
 
 // TestConfirmStackedOverMergeDialogStaysOnTopWhenPRSwitchCloses covers a
