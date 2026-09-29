@@ -223,8 +223,15 @@ func (a *App) toggleCurrentEditReviewer() {
 // (App.editFormSelectedReviewers or App.createFormSelectedReviewers) and
 // refreshes its "Reviewers (N selected)" button text (Enter); false
 // discards it (Esc/q).
+//
+// The guard is a.editReviewersView == nil, not a.overlay != "editreviewers",
+// mirroring closeEditForm's own a.editForm-based guard: a Ctrl-C-while-
+// mutating confirm can be stacked on top (a.overlay == "confirm"), in
+// which case a.overlay/focus are left alone below (the confirm stays the
+// visible, focused overlay) — showConfirm's own done func notices via
+// overlayStillOpen("editreviewers") and falls back once it closes.
 func (a *App) closeEditReviewersOverlay(apply bool) {
-	if a.overlay != "editreviewers" {
+	if a.editReviewersView == nil {
 		return
 	}
 	if a.editReviewersSearchTimer != nil {
@@ -253,6 +260,9 @@ func (a *App) closeEditReviewersOverlay(apply bool) {
 	a.root.RemovePage("editreviewers")
 	owner := a.reviewersOwner
 	a.reviewersOwner = ""
+	if a.overlay == "confirm" {
+		return
+	}
 	a.overlay = owner
 	switch owner {
 	case "editform":

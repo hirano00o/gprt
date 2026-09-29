@@ -216,8 +216,14 @@ type App struct {
 
 	seq *keys.Sequencer
 
-	overlay    string // "" | "help" | "messages" | "confirm" | "choice" | "pending" | "pendingConfirm" | "threads" | "reaction" | "merge" | "editform" | "editlabels" | "editreviewers"
+	overlay    string // "" | "help" | "messages" | "confirm" | "choice" | "pending" | "pendingConfirm" | "threads" | "reaction" | "merge" | "editform" | "editlabels" | "editreviewers" | "createform"
 	savedFocus tview.Primitive
+	// confirmReturnFocus is where an open showConfirm dialog returns focus
+	// when it closes over a still-open parent. It is a field, not a local
+	// of showConfirm, so a parent that replaces its focused primitive while
+	// the dialog is up (openMergeForm swapping out its loading placeholder)
+	// can point it at the replacement.
+	confirmReturnFocus tview.Primitive
 
 	// Help overlay (overlay.go, "?"/":help"): helpFlex wraps helpView (the
 	// scrollable binding list) and helpSearchInput (app.go's build, a
@@ -236,6 +242,13 @@ type App struct {
 	helpSearchRE    *regexp.Regexp
 	helpMatchCount  int
 	helpMatchIdx    int
+
+	// messagesView backs the ":messages" overlay (overlay.go): nil while
+	// closed — the field-based "is this overlay open" check
+	// overlayStillOpen (dialogs.go) needs, since a.overlay itself reads
+	// "confirm" for as long as a Ctrl-C-while-mutating confirm is stacked
+	// over it.
+	messagesView *tview.TextView
 
 	// Edit PR form (editform.go, "E"/pr.edit): editForm is nil while
 	// closed. editFormOriginal snapshots the pull request's field values

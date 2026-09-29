@@ -685,7 +685,14 @@ func (a *App) cancelCreateForm() {
 // enumerates the *current* pull request's own drafts, never a not-yet-created
 // one's), and restores focus. Unlike closeEditForm, this is never triggered
 // by a pull request switch (EventPRChanged) — see the App.createForm
-// field's own doc comment.
+// field's own doc comment. It is, however, reachable from onPullRequestCreated
+// (a store event: the form's own CreatePullRequest mutation resolving)
+// while a Ctrl-C-while-mutating confirm is stacked on top (a.overlay ==
+// "confirm"): every field below is still cleared, but a.overlay and
+// createFormReturnFocus's own SetFocus are skipped so the confirm stays
+// the visible, focused overlay — showConfirm's own done func notices via
+// overlayStillOpen("createform") and falls back once it closes, mirroring
+// closeEditForm's own guard.
 func (a *App) closeCreateForm() {
 	if a.createForm == nil {
 		return
@@ -706,7 +713,6 @@ func (a *App) closeCreateForm() {
 		a.createFormPreviewTimer = nil
 	}
 	a.root.RemovePage("createform")
-	a.overlay = ""
 	a.createForm = nil
 	a.createFormLayout = nil
 	a.createFormBodySlot = nil
@@ -732,9 +738,14 @@ func (a *App) closeCreateForm() {
 	a.createFormHeadSuggesting = false
 	a.createFormBaseSuggesting = false
 	a.deleteCreateFormBodyDraft(bodyDraftKey)
-	if a.createFormReturnFocus != nil {
-		a.app.SetFocus(a.createFormReturnFocus)
-		a.createFormReturnFocus = nil
+	returnFocus := a.createFormReturnFocus
+	a.createFormReturnFocus = nil
+	if a.overlay == "confirm" {
+		return
+	}
+	a.overlay = ""
+	if returnFocus != nil {
+		a.app.SetFocus(returnFocus)
 	} else {
 		a.focusList()
 	}
@@ -851,7 +862,13 @@ func (a *App) onPullRequestCreated(ref model.PRRef) {
 
 	a.closeCreateForm()
 	a.deps.Store.OpenPR(ref)
-	a.focusDetail()
+	// Skipped while a Ctrl-C-while-mutating confirm is still stacked on
+	// top of the now-closed form (a.overlay == "confirm", left alone by
+	// closeCreateForm's own guard above): stealing focus to the detail
+	// column here would pull it away from that still-visible Modal.
+	if a.overlay != "confirm" {
+		a.focusDetail()
+	}
 }
 
 // onCreateFormMutationChanged reacts to store.EventMutationChanged for a

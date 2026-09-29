@@ -38,16 +38,16 @@ func (a *App) subscribeStore() {
 			// The status bar's "✎ N" draft count is scoped to whichever
 			// pull request is currently open.
 			a.renderStatusBar(a.spinnerFrame)
-			if a.overlay == "pending" {
+			if a.pendingListView != nil {
 				a.rebuildPendingList()
 			}
-			if a.overlay == "threads" {
+			if a.threadListView != nil {
 				a.rebuildThreadList()
 			}
-			if a.overlay == "reaction" {
+			if a.reactionPickerView != nil {
 				a.rebuildReactionPicker()
 			}
-			if a.overlay == "merge" {
+			if a.mergeDialogOpen() {
 				a.refreshMergeSummaryIfOpen()
 			}
 		case store.EventPRLoadingChanged:
@@ -90,7 +90,7 @@ func (a *App) subscribeStore() {
 		case store.EventFilesLoadingChanged:
 			a.renderStatusBar(0)
 		case store.EventMentionableChanged:
-			if a.overlay == "editreviewers" {
+			if a.editReviewersView != nil {
 				a.rebuildEditReviewersList()
 			}
 		case store.EventMutationChanged:
@@ -98,10 +98,10 @@ func (a *App) subscribeStore() {
 			a.onSimpleMutationChanged()
 			a.onEditFormMutationChanged()
 			a.onCreateFormMutationChanged()
-			if a.overlay == "pending" {
+			if a.pendingListView != nil {
 				a.rebuildPendingList()
 			}
-			if a.overlay == "threads" {
+			if a.threadListView != nil {
 				a.rebuildThreadList()
 			}
 		case store.EventNotice:
@@ -138,11 +138,11 @@ func (a *App) subscribeStore() {
 				a.onRepositoryMetadataChangedForMerge(*ev.Repo)
 				a.applyCreateFormRepositoryInfoIfResolved(*ev.Repo)
 			}
-			if a.overlay == "editlabels" && ev.Repo != nil && *ev.Repo == a.editFormRepo {
+			if a.editLabelsView != nil && ev.Repo != nil && *ev.Repo == a.editFormRepo {
 				a.rebuildEditLabelsList()
 			}
 		case store.EventViewerRepositoriesChanged:
-			if a.overlay == "createform" && a.createFormRepoField != nil {
+			if a.createFormRepoField != nil {
 				a.createFormRepoField.Autocomplete()
 			}
 		case store.EventPullRequestCreated:

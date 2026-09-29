@@ -444,6 +444,14 @@ func (a *App) cancelEditForm() {
 // (discarding its own in-progress selection, matching what Esc/q there
 // already does) avoids leaving its page orphaned in a.root once
 // "editform" itself is removed underneath it.
+//
+// The same a.overlay independence also covers a Ctrl-C-while-mutating
+// confirm stacked on top of "editform" itself (a.overlay == "confirm")
+// when closeEditFormIfWrongPR runs while it is showing: every field below
+// is still cleared, but a.overlay and editFormReturnFocus's own SetFocus
+// are skipped so the confirm stays the visible, focused overlay —
+// showConfirm's own done func notices via overlayStillOpen("editform") and
+// falls back once it closes.
 func (a *App) closeEditForm() {
 	if a.editForm == nil {
 		return
@@ -456,7 +464,6 @@ func (a *App) closeEditForm() {
 		a.editFormBranchTimer = nil
 	}
 	a.root.RemovePage("editform")
-	a.overlay = ""
 	a.editForm = nil
 	a.editFormTitleField = nil
 	a.editFormBaseField = nil
@@ -466,9 +473,14 @@ func (a *App) closeEditForm() {
 	a.editFormBranchSuggestions = nil
 	a.editFormBranchLastQuery = ""
 	a.editFormBaseSuggesting = false
-	if a.editFormReturnFocus != nil {
-		a.app.SetFocus(a.editFormReturnFocus)
-		a.editFormReturnFocus = nil
+	returnFocus := a.editFormReturnFocus
+	a.editFormReturnFocus = nil
+	if a.overlay == "confirm" {
+		return
+	}
+	a.overlay = ""
+	if returnFocus != nil {
+		a.app.SetFocus(returnFocus)
 	} else {
 		a.focusDetail()
 	}
