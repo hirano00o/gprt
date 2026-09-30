@@ -1,10 +1,13 @@
 // editform.go implements the "E" (pr.edit) edit-PR form: title, base
 // branch (autocompleted via Store.SearchBranches, debounced), labels and
 // reviewers (each a stacked multi-select overlay — editlabels.go/
-// editreviewers.go), and Draft. Esc asks to discard changes only when the
-// live diff against the pull request (editFormComputeDiff, also used by
-// Save) is non-empty; Ctrl-s computes that same diff and enqueues only
-// what changed, in order: UpdatePullRequestMeta (title/base/labels), then
+// editreviewers.go), Draft, and the body (an "Edit body" button opening
+// the vim composer, composerKindEditPRBody, inside the form's own body
+// slot, mirroring the create-PR form). Esc asks to discard changes only
+// when the live diff against the pull request (editFormComputeDiff, also
+// used by Save) is non-empty; Ctrl-s computes that same diff and enqueues
+// only what changed, in order: UpdatePullRequestMeta (title/body/base/
+// labels), then
 // SetReviewers, then SetDraft — "nothing to save" when none of them did.
 // Each enqueued mutation is tracked (editFormSteps) for its own success/
 // failure toast; the form stays open until every step finishes, closing
@@ -21,6 +24,7 @@ import (
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 
+	"github.com/hirano00o/gprt/internal/drafts"
 	"github.com/hirano00o/gprt/internal/gh"
 	"github.com/hirano00o/gprt/internal/model"
 	"github.com/hirano00o/gprt/internal/ui/keys"
@@ -39,6 +43,7 @@ var editFormBranchDebounce = 300 * time.Millisecond
 // separate "dirty" boolean is tracked.
 type editFormSnapshot struct {
 	title       string
+	body        string
 	base        string
 	labelIDs    map[string]bool
 	reviewerIDs map[string]bool
@@ -59,7 +64,7 @@ func editFormSnapshotFrom(pr *model.PullRequest) editFormSnapshot {
 		}
 	}
 	return editFormSnapshot{
-		title: pr.Title, base: pr.BaseRefName, labelIDs: labelIDs,
+		title: pr.Title, body: pr.Body, base: pr.BaseRefName, labelIDs: labelIDs,
 		reviewerIDs: reviewerIDSet(pr.ReviewRequests), draft: pr.IsDraft,
 	}
 }
@@ -187,13 +192,22 @@ func (a *App) openEditPRForm() {
 	a.deps.Store.EnsureRepositoryMetadata(ref.Repo)
 
 	a.editFormOriginal = editFormSnapshotFrom(pr)
+	a.editFormBody = pr.Body
 	a.editFormSelectedLabelIDs = copyBoolSet(a.editFormOriginal.labelIDs)
 	a.editFormSelectedReviewers = reviewersByID(pr.ReviewRequests)
 
 	a.buildEditForm(pr)
 }
 
-// buildEditForm constructs and shows the *tview.Form itself.
+// editFormFieldsHeight is the fixed row count buildEditForm gives editForm
+// above its body slot, derived the same way as createFormFieldsHeight: 3
+// single-line items (2 rows each) plus one buttons row.
+const editFormFieldsHeight = 2*3 + 1
+
+// buildEditForm constructs and shows the form/body layout itself: a
+// bordered Flex(rows) of editForm over editFormBodySlot (editFormBodyView,
+// a read-only preview of editFormBody, until "Edit body" swaps in the vim
+// composer's own Flex, mirroring buildCreateForm's own left column).
 func (a *App) buildEditForm(pr *model.PullRequest) {
 	a.editFormReturnFocus = a.app.GetFocus()
 	a.overlay = "editform"
@@ -209,17 +223,77 @@ func (a *App) buildEditForm(pr *model.PullRequest) {
 	form.AddFormItem(draft)
 	form.AddButton(a.editFormLabelsButtonText(), a.openEditLabelsOverlay)
 	form.AddButton(a.editFormReviewersButtonText(), a.openEditReviewersOverlay)
+	form.AddButton("Edit body", a.openEditPRBodyComposer)
 	form.AddButton("Save", a.saveEditForm)
 	form.AddButton("Cancel", a.cancelEditForm)
-	form.SetBorder(true).SetTitle(fmt.Sprintf(" Edit #%d ", pr.Ref.Number))
+
+	bodyView := tview.NewTextView().SetDynamicColors(true)
+	bodyView.SetBorder(true).SetTitle(" Body ")
+	bodySlot := tview.NewFlex().SetDirection(tview.FlexRow)
+	bodySlot.AddItem(bodyView, 0, 1, false)
+
+	layout := tview.NewFlex().SetDirection(tview.FlexRow)
+	layout.AddItem(form, editFormFieldsHeight, 0, true)
+	layout.AddItem(bodySlot, 0, 1, false)
+	layout.SetBorder(true).SetTitle(fmt.Sprintf(" Edit #%d ", pr.Ref.Number))
 
 	a.editForm = form
 	a.editFormTitleField = title
 	a.editFormBaseField = base
 	a.editFormDraftBox = draft
+	a.editFormBodySlot = bodySlot
+	a.editFormBodyView = bodyView
+	setFormBodyView(bodyView, a.editFormBody)
 
-	a.root.AddPage("editform", form, true, true)
+	a.root.AddPage("editform", layout, true, true)
 	a.app.SetFocus(form)
+}
+
+// editFormBodyDraftKey returns the edit form's own body draft key: a
+// KindPRBody draft on the pull request being edited, anchored apart from
+// the "e" body composer's own ("body", prbody.go) — closeEditForm deletes
+// this one, which must never take an unrelated "e" draft with it.
+func (a *App) editFormBodyDraftKey() drafts.Key {
+	return drafts.Key{PR: a.editFormRef.Key(), Kind: drafts.KindPRBody, Anchor: "editform"}
+}
+
+// openEditPRBodyComposer implements the edit form's "Edit body" button:
+// opens the body composer (composerKindEditPRBody) inside the form's own
+// body slot, prefilled with editFormBody. composerReturnFocus is cleared
+// for the same reason openCreatePRBodyComposer clears it.
+func (a *App) openEditPRBodyComposer() {
+	if a.editForm == nil {
+		return
+	}
+	a.openComposer(composerTarget{
+		kind:     composerKindEditPRBody,
+		ref:      a.editFormRef,
+		title:    fmt.Sprintf("Edit body of #%d", a.editFormRef.Number),
+		draftKey: a.editFormBodyDraftKey(),
+	}, a.editFormBody)
+	a.composerReturnFocus = nil
+}
+
+// restoreEditFormBodySlot undoes openEditPRBodyComposer's own swap once
+// closeComposer has removed the composer's Flex, mirroring
+// restoreCreateFormBodySlot. Focus is left alone while a confirm dialog
+// is on top (the composer closed underneath it on a pull request switch),
+// so the still-visible Modal keeps it.
+func (a *App) restoreEditFormBodySlot() {
+	if a.editForm == nil {
+		return
+	}
+	setFormBodyView(a.editFormBodyView, a.editFormBody)
+	a.editFormBodySlot.AddItem(a.editFormBodyView, 0, 1, false)
+	if a.overlay != "confirm" {
+		a.app.SetFocus(a.editForm)
+	}
+}
+
+// editFormBodyComposerOpen reports whether the edit form's own body
+// composer is open.
+func (a *App) editFormBodyComposerOpen() bool {
+	return a.composerTarget != nil && a.composerTarget.kind == composerKindEditPRBody
 }
 
 // editFormLabelsButtonText/editFormReviewersButtonText render the two
@@ -300,6 +374,12 @@ func (a *App) editFormComputeDiff() editFormDiff {
 		diff.metaChanged = true
 		diff.meta.Title = &title
 	}
+	// Not trimmed, unlike Title/Base: the body is free-form Markdown whose
+	// whitespace the user may have typed on purpose.
+	if body := a.editFormBody; body != a.editFormOriginal.body {
+		diff.metaChanged = true
+		diff.meta.Body = &body
+	}
 	if base != a.editFormOriginal.base {
 		diff.metaChanged = true
 		diff.meta.BaseRefName = &base
@@ -334,7 +414,8 @@ func (a *App) editFormComputeDiff() editFormDiff {
 }
 
 // saveEditForm implements the form's "Save" button (and Ctrl-s): refused
-// with a toast while a mutation is already in flight, or if the current
+// with a toast while the form's own body composer is open (mirroring
+// submitCreateForm), while a mutation is already in flight, or if the current
 // pull request no longer matches editFormRef (a switch while the form was
 // open — closeEditFormIfWrongPR, EventPRChanged, should already have
 // closed it by then, but Save must never depend on that alone, matching
@@ -345,6 +426,10 @@ func (a *App) editFormComputeDiff() editFormDiff {
 // own doc comment for why a false return means nothing was enqueued) via
 // editFormSteps.
 func (a *App) saveEditForm() {
+	if a.editFormBodyComposerOpen() {
+		a.showToast("finish editing the body first", theme.Warning)
+		return
+	}
 	if a.deps.Store.Mutating() {
 		a.showToast("a mutation is already in progress; try again shortly", theme.Warning)
 		return
@@ -412,10 +497,15 @@ func (a *App) onEditFormMutationChanged() {
 	}
 }
 
-// cancelEditForm implements Esc/the form's "Cancel" button: closes
-// immediately when the computed diff is empty, otherwise asks to discard
-// via a confirm dialog first.
+// cancelEditForm implements Esc/the form's "Cancel" button: refused with a
+// toast while the form's own body composer is open (mirroring
+// cancelCreateForm), closes immediately when the computed diff is empty,
+// otherwise asks to discard via a confirm dialog first.
 func (a *App) cancelEditForm() {
+	if a.editFormBodyComposerOpen() {
+		a.showToast("finish editing the body first", theme.Warning)
+		return
+	}
 	if a.editFormComputeDiff().empty() {
 		a.closeEditForm()
 		return
@@ -456,6 +546,13 @@ func (a *App) closeEditForm() {
 	if a.editForm == nil {
 		return
 	}
+	// The body composer can still be open here: a pull request switch, or
+	// Save's own steps finishing after "Edit body" was reopened. Its draft
+	// is discarded below along with every other field.
+	if a.editFormBodyComposerOpen() {
+		a.closeComposer(false)
+	}
+	bodyDraftKey := a.editFormBodyDraftKey()
 	a.closeEditLabelsOverlay(false)
 	a.closeEditReviewersOverlay(false)
 
@@ -468,11 +565,15 @@ func (a *App) closeEditForm() {
 	a.editFormTitleField = nil
 	a.editFormBaseField = nil
 	a.editFormDraftBox = nil
+	a.editFormBodySlot = nil
+	a.editFormBodyView = nil
+	a.editFormBody = ""
 	a.editFormSelectedLabelIDs = nil
 	a.editFormSelectedReviewers = nil
 	a.editFormBranchSuggestions = nil
 	a.editFormBranchLastQuery = ""
 	a.editFormBaseSuggesting = false
+	a.deleteFormBodyDraft(bodyDraftKey)
 	returnFocus := a.editFormReturnFocus
 	a.editFormReturnFocus = nil
 	if a.overlay == "confirm" {

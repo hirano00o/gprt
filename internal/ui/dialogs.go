@@ -104,8 +104,14 @@ func (a *App) showConfirm(message, confirmLabel string, onConfirm func()) {
 			// The composer this dialog was opened from was closed while it
 			// showed (closeComposer deferred its own refocus): returnFocus
 			// is its detached text area, so go where the composer itself
-			// would have returned.
-			a.restoreOverlayAfterConfirm(frame.parent)
+			// would have returned. The edit form's own body composer can
+			// close together with its form (a pull request switch), so the
+			// parent overlay is checked rather than assumed.
+			if a.overlayStillOpen(frame.parent) {
+				a.restoreOverlayAfterConfirm(frame.parent)
+			} else {
+				a.overlay = ""
+			}
 			if a.composerReturnFocus != nil {
 				a.app.SetFocus(a.composerReturnFocus)
 				a.composerReturnFocus = nil

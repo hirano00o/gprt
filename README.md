@@ -121,7 +121,7 @@ All keys below except the editor's own can be remapped. The full reference, incl
 | `c` | New comment |
 | `e` / `d` | Edit / delete your own comment; `e` on the description edits it |
 | `a` | Add or remove a reaction |
-| `E` | Edit title, base branch, labels, reviewers, draft |
+| `E` | Edit title, body, base branch, labels, reviewers, draft |
 | `S` | Submit a review: Approve, Request changes, or Comment |
 | `p` | Pending review comments and saved drafts |
 | `t` | Review threads, sorted by path and line (`Enter` jumps to it in the Files tab) |

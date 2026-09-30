@@ -160,9 +160,10 @@ type App struct {
 	searchRef     model.PRRef
 
 	// composerFlex is added to its own host (composerHost, composer.go —
-	// detailColumn for every kind, or the create-PR form's own
-	// createFormBodySlot for composerKindNewPRBody; a title line over
-	// composerEditor) while a composer is open, and nil otherwise — see
+	// detailColumn for every kind, or the create/edit-PR form's own
+	// body slot for composerKindNewPRBody/composerKindEditPRBody; a title
+	// line over composerEditor) while a composer is open, and nil
+	// otherwise — see
 	// openComposer/closeComposer in composer.go. composerReturnFocus is
 	// whichever primitive had focus right before the composer opened, so
 	// closing it (or a Ctrl-w j/k toggle) can restore it.
@@ -280,6 +281,15 @@ type App struct {
 	editFormDraftBox          *tview.Checkbox
 	editFormSelectedLabelIDs  map[string]bool
 	editFormSelectedReviewers map[string]model.Reviewer // keyed by ID
+	// editFormBodySlot hosts editFormBodyView (the edit form's own
+	// read-only body preview) until "Edit body" swaps it out for the vim
+	// composer's own Flex (composerKindEditPRBody's host, composer.go's
+	// composerHost), mirroring createFormBodySlot. editFormBody is the
+	// form's own current body text, handed back by that composer and
+	// diffed against editFormOriginal.body on Save.
+	editFormBodySlot *tview.Flex
+	editFormBodyView *tview.TextView
+	editFormBody     string
 	// editFormBranchSuggestions is what editFormBaseField's own
 	// SetAutocompleteFunc callback returns synchronously on every
 	// keystroke; editFormBranchTimer debounces the actual
@@ -412,7 +422,7 @@ type App struct {
 	createFormSelectedReviewers map[string]model.Reviewer // keyed by ID
 	// createFormBody is the create-PR form's own body text, round-tripped
 	// through the vim composer (openCreatePRBodyComposer/
-	// sendNewPRBodyComposer, composerKindNewPRBody) rather than living in
+	// sendFormBodyComposer, composerKindNewPRBody) rather than living in
 	// a form field of its own.
 	createFormBody string
 	// createFormHeadSuggestions/createFormHeadLastQuery/createFormHeadTimer
