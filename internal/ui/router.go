@@ -612,8 +612,10 @@ func (a *App) routeComposerKey(ev *tcell.EventKey, normalized []keys.Key) *tcell
 	for _, k := range normalized {
 		if a.composerCtrlWPending {
 			a.composerCtrlWPending = false
-			// composerKindNewPRBody (the create-PR form's own body
-			// composer) is a no-op for every direction of this chord: even
+			// A form body composer (isFormBodyComposer — the create/edit-PR
+			// form's own body composer; the create form is described below,
+			// the edit form's own "editform" page behaves the same way) is a
+			// no-op for every direction of this chord: even
 			// though its containing "createform" root page now stays
 			// mounted while the composer is open (see createform.go's
 			// openCreatePRBodyComposer), focusPrevPane/focusNextPane are
@@ -628,7 +630,7 @@ func (a *App) routeComposerKey(ev *tcell.EventKey, normalized []keys.Key) *tcell
 			// composerReturnFocus is nil, cleared for this kind on open),
 			// but h/l call the global pane-focus functions directly, with
 			// no such guard of their own.
-			if a.composerTarget == nil || a.composerTarget.kind != composerKindNewPRBody {
+			if a.composerTarget == nil || !isFormBodyComposer(a.composerTarget.kind) {
 				switch {
 				case isPlainRune(k, 'h'):
 					a.focusPrevPane()

@@ -114,6 +114,7 @@ type fakeGitHub struct {
 	teamsCalls              []teamsCall
 	updatePullRequestCalls  []updatePullRequestCall
 	updatePullRequestErr    error
+	updatePullRequestBlock  chan struct{}
 	requestReviewersCalls   []requestReviewersCall
 	requestReviewersErr     error
 	markReadyForReviewCalls []string
@@ -1129,6 +1130,14 @@ func (f *fakeGitHub) SetUpdatePullRequestError(err error) {
 	f.updatePullRequestErr = err
 }
 
+// SetUpdatePullRequestBlock arms a gate every subsequent UpdatePullRequest
+// call waits on before returning, mirroring SetAddCommentBlock.
+func (f *fakeGitHub) SetUpdatePullRequestBlock(ch chan struct{}) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.updatePullRequestBlock = ch
+}
+
 // UpdatePullRequestCalls returns every UpdatePullRequest call so far, in
 // call order.
 func (f *fakeGitHub) UpdatePullRequestCalls() []updatePullRequestCall {
@@ -1144,12 +1153,20 @@ func (f *fakeGitHub) UpdatePullRequestCalls() []updatePullRequestCall {
 // assert on Store's own optimistic apply without needing the fake to track
 // each pull request's full, evolving state.
 func (f *fakeGitHub) UpdatePullRequest(
-	_ context.Context, id string, in gh.UpdatePullRequestInput,
+	ctx context.Context, id string, in gh.UpdatePullRequestInput,
 ) (model.PullRequest, error) {
 	f.mu.Lock()
 	f.updatePullRequestCalls = append(f.updatePullRequestCalls, updatePullRequestCall{id: id, in: in})
 	err := f.updatePullRequestErr
+	block := f.updatePullRequestBlock
 	f.mu.Unlock()
+	if block != nil {
+		select {
+		case <-block:
+		case <-ctx.Done():
+			return model.PullRequest{}, ctx.Err()
+		}
+	}
 	if err != nil {
 		return model.PullRequest{}, err
 	}

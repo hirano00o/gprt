@@ -289,7 +289,7 @@ func (a *App) onCreateFormRepoChanged(text string) {
 		// repository's draft would otherwise outlive this form: closeCreateForm
 		// only deletes the draft of whichever repository is chosen at close
 		// time, and the "p" pending list never lists KindNewPR drafts.
-		a.deleteCreateFormBodyDraft(a.createFormBodyDraftKey())
+		a.deleteFormBodyDraft(a.createFormBodyDraftKey())
 	}
 	a.createFormRepo = ref
 	a.createFormRepoChosen = true
@@ -557,12 +557,12 @@ func (a *App) createFormBodyDraftKey() drafts.Key {
 	return drafts.Key{PR: ref.Key(), Kind: drafts.KindNewPR, Anchor: "body"}
 }
 
-// deleteCreateFormBodyDraft removes the body draft stored under key, the
-// create-PR form's only cleanup path for it (the "p" pending list never
-// lists KindNewPR drafts). A missing draft — the common case: the body
+// deleteFormBodyDraft removes the body draft stored under key, the
+// create/edit-PR form's only cleanup path for it (the "p" pending list
+// never opens either one). A missing draft — the common case: the body
 // composer was never opened, or the draft was already deleted on a
 // successful creation — is not an error.
-func (a *App) deleteCreateFormBodyDraft(key drafts.Key) {
+func (a *App) deleteFormBodyDraft(key drafts.Key) {
 	if a.deps.Drafts == nil {
 		return
 	}
@@ -608,15 +608,21 @@ func (a *App) openCreatePRBodyComposer() {
 // refreshCreateFormBodyView updates the create-PR form's own read-only body
 // view (createFormBodySlot's default content, swapped out for the body
 // composer's own Flex while "Edit body" is open) from the current
-// createFormBody: a dim placeholder while it is still empty, the body text
-// itself otherwise (tview.Escape'd, since createFormBodyView has dynamic
-// colours on for the placeholder).
+// createFormBody.
 func (a *App) refreshCreateFormBodyView() {
-	if a.createFormBody == "" {
-		a.createFormBodyView.SetText(fmt.Sprintf("[%s](empty — press Edit body)[-]", styleColorTag(theme.Muted)))
+	setFormBodyView(a.createFormBodyView, a.createFormBody)
+}
+
+// setFormBodyView renders body into a create/edit-PR form's own read-only
+// body view: a dim placeholder while it is empty, the body text itself
+// otherwise (tview.Escape'd, since the view has dynamic colours on for the
+// placeholder).
+func setFormBodyView(view *tview.TextView, body string) {
+	if body == "" {
+		view.SetText(fmt.Sprintf("[%s](empty — press Edit body)[-]", styleColorTag(theme.Muted)))
 		return
 	}
-	a.createFormBodyView.SetText(tview.Escape(a.createFormBody))
+	view.SetText(tview.Escape(body))
 }
 
 // restoreCreateFormBodySlot re-adds the create-PR form's own read-only body
@@ -737,7 +743,7 @@ func (a *App) closeCreateForm() {
 	a.createFormRepoSuggesting = false
 	a.createFormHeadSuggesting = false
 	a.createFormBaseSuggesting = false
-	a.deleteCreateFormBodyDraft(bodyDraftKey)
+	a.deleteFormBodyDraft(bodyDraftKey)
 	returnFocus := a.createFormReturnFocus
 	a.createFormReturnFocus = nil
 	if a.overlay == "confirm" {

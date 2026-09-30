@@ -15,6 +15,7 @@ import (
 
 	"github.com/gdamore/tcell/v2"
 
+	"github.com/hirano00o/gprt/internal/drafts"
 	"github.com/hirano00o/gprt/internal/gh"
 	"github.com/hirano00o/gprt/internal/model"
 )
@@ -569,4 +570,211 @@ func TestMergeDialogClosesOnPullRequestSwitch(t *testing.T) {
 	if len(fake.MergePullRequestCalls()) != 0 {
 		t.Fatal("a pull request switch must not itself call the store")
 	}
+}
+
+// openEditFormBodyComposer opens pr's edit form and then its own body
+// composer, waiting for both.
+func openEditFormBodyComposer(t *testing.T, app *App, fake *fakeGitHub, pr model.PullRequest) {
+	t.Helper()
+	openDetailForComposer(t, app, fake, pr)
+	sendRune(app.app, 'E')
+	waitFor(t, app.app, func() bool { return app.editForm != nil })
+	act(app.app, func() { app.openEditPRBodyComposer() })
+	waitFor(t, app.app, func() bool { return composerOpen(app) })
+}
+
+// typeIntoComposer appends text in insert mode and returns to normal mode.
+func typeIntoComposer(app *App, text string) {
+	sendRune(app.app, 'A')
+	for _, r := range text {
+		sendRune(app.app, r)
+	}
+	sendSpecial(app.app, tcell.KeyEsc)
+}
+
+func TestEditFormBodyComposerRoundTripSavesOnlyBody(t *testing.T) {
+	app, _, fake, _ := newTestApp(t, nil)
+	ref := fixtureRef(1)
+	pr := editablePR(ref)
+	pr.Body = "old body"
+	openEditFormBodyComposer(t, app, fake, pr)
+
+	if got := query(app.app, func() bool { return flexContains(app.editFormBodySlot, app.composerFlex) }); !got {
+		t.Fatal("the body composer must be mounted inside the edit form's own body slot")
+	}
+	if got := query(app.app, func() bool { return flexContains(app.detailColumn, app.composerFlex) }); got {
+		t.Fatal("the body composer must not be mounted in the detail column")
+	}
+	if got := query(app.app, func() string { return composerText(app) }); got != "old body" {
+		t.Fatalf("composer prefill = %q, want the pull request's own body", got)
+	}
+
+	typeIntoComposer(app, " and more")
+	sendKey(app.app, tcell.NewEventKey(tcell.KeyRune, 's', tcell.ModCtrl))
+
+	waitFor(t, app.app, func() bool { return !composerOpen(app) })
+	if got := query(app.app, func() string { return app.editFormBodyView.GetText(true) }); got != "old body and more" {
+		t.Errorf("body view text = %q, want %q", got, "old body and more")
+	}
+	if got := query(app.app, func() string { return app.overlay }); got != "editform" {
+		t.Errorf("overlay = %q, want %q (the edit form must be visible again)", got, "editform")
+	}
+	if len(fake.UpdatePullRequestCalls()) != 0 {
+		t.Fatal("sending the body composer must not call the store before Save")
+	}
+
+	act(app.app, func() { app.saveEditForm() })
+
+	waitFor(t, app.app, func() bool { return len(fake.UpdatePullRequestCalls()) == 1 })
+	call := fake.UpdatePullRequestCalls()[0]
+	if call.in.Body == nil || *call.in.Body != "old body and more" {
+		t.Fatalf("UpdatePullRequest Body = %v, want \"old body and more\"", call.in.Body)
+	}
+	if call.in.Title != nil || call.in.BaseRefName != nil || call.in.LabelIDs != nil {
+		t.Fatalf("UpdatePullRequest = %+v, want every field but Body left nil (unchanged)", call.in)
+	}
+}
+
+func TestEditFormBodyComposerCloseWithoutChangesHasNothingToSave(t *testing.T) {
+	app, _, fake, _ := newTestApp(t, nil)
+	pr := editablePR(fixtureRef(1))
+	pr.Body = "line one\nline two"
+	openEditFormBodyComposer(t, app, fake, pr)
+
+	sendRune(app.app, ':')
+	sendRune(app.app, 'q')
+	sendSpecial(app.app, tcell.KeyEnter)
+	waitFor(t, app.app, func() bool { return !composerOpen(app) })
+
+	act(app.app, func() { app.saveEditForm() })
+
+	waitFor(t, app.app, func() bool { return app.statusBar.toast == "nothing to save" })
+	if len(fake.UpdatePullRequestCalls()) != 0 {
+		t.Fatal("an untouched body must not be sent")
+	}
+}
+
+func TestSaveEditFormRefusedWhileBodyComposerOpen(t *testing.T) {
+	app, _, fake, _ := newTestApp(t, nil)
+	openEditFormBodyComposer(t, app, fake, editablePR(fixtureRef(1)))
+	act(app.app, func() { app.editFormTitleField.SetText("changed") })
+
+	act(app.app, func() { app.saveEditForm() })
+
+	waitFor(t, app.app, func() bool { return containsSubstring(app.statusBar.toast, "finish editing the body") })
+	if len(fake.UpdatePullRequestCalls()) != 0 {
+		t.Fatal("Save must not fall through while the body composer is open")
+	}
+	if !composerOpen(app) || app.editForm == nil {
+		t.Fatal("Save's refusal must leave both the body composer and the form open")
+	}
+}
+
+func TestCancelEditFormRefusedWhileBodyComposerOpen(t *testing.T) {
+	app, _, fake, _ := newTestApp(t, nil)
+	openEditFormBodyComposer(t, app, fake, editablePR(fixtureRef(1)))
+
+	act(app.app, func() { app.cancelEditForm() })
+
+	waitFor(t, app.app, func() bool { return containsSubstring(app.statusBar.toast, "finish editing the body") })
+	if !composerOpen(app) || app.editForm == nil {
+		t.Fatal("Cancel's refusal must leave both the body composer and the form open")
+	}
+}
+
+func TestEditFormDiscardDeletesBodyDraft(t *testing.T) {
+	app, _, fake, _ := newTestApp(t, nil)
+	openEditFormBodyComposer(t, app, fake, editablePR(fixtureRef(1)))
+	typeIntoComposer(app, "unsaved")
+	sendRune(app.app, ':')
+	sendRune(app.app, 'q')
+	sendSpecial(app.app, tcell.KeyEnter)
+	waitFor(t, app.app, func() bool { return !composerOpen(app) })
+	key := query(app.app, func() drafts.Key { return app.editFormBodyDraftKey() })
+	if _, ok, _ := app.deps.Drafts.Load(key); !ok {
+		t.Fatal(`":q" must keep the body draft while the form is open`)
+	}
+
+	sendSpecial(app.app, tcell.KeyEsc)
+	waitFor(t, app.app, func() bool { return app.overlay == "confirm" })
+	confirmYes(app.app)
+	waitFor(t, app.app, func() bool { return app.overlay == "" })
+
+	if _, ok, _ := app.deps.Drafts.Load(key); ok {
+		t.Error("discarding the edit form must delete its own body draft")
+	}
+}
+
+func TestEditFormBodyComposerClosesWithFormOnPullRequestSwitch(t *testing.T) {
+	app, _, fake, _ := newTestApp(t, nil)
+	openEditFormBodyComposer(t, app, fake, editablePR(fixtureRef(1)))
+
+	ref2 := fixtureRef(2)
+	fake.SetPRResult(ref2, gh.DetailResult{PR: editablePR(ref2)})
+	act(app.app, func() { app.deps.Store.OpenPR(ref2) })
+
+	waitFor(t, app.app, func() bool { return app.editForm == nil })
+	if composerOpen(app) {
+		t.Fatal("the edit form's body composer must close together with the form")
+	}
+	if got := query(app.app, func() string { return app.overlay }); got != "" {
+		t.Fatalf("overlay = %q, want \"\"", got)
+	}
+}
+
+// TestEditFormBodyComposerClosesWhenSaveFinishes covers "Edit body"
+// reopened while Save's own steps are still in flight: the form closing
+// on their success must take the composer with it, not leave its Flex
+// orphaned in a slot no longer on screen.
+func TestEditFormBodyComposerClosesWhenSaveFinishes(t *testing.T) {
+	app, _, fake, _ := newTestApp(t, nil)
+	openDetailForComposer(t, app, fake, editablePR(fixtureRef(1)))
+	sendRune(app.app, 'E')
+	waitFor(t, app.app, func() bool { return app.editForm != nil })
+
+	block := make(chan struct{})
+	fake.SetUpdatePullRequestBlock(block)
+	act(app.app, func() { app.editFormTitleField.SetText("New title") })
+	act(app.app, func() { app.saveEditForm() })
+	waitFor(t, app.app, func() bool { return app.deps.Store.Mutating() })
+	act(app.app, func() { app.openEditPRBodyComposer() })
+	waitFor(t, app.app, func() bool { return composerOpen(app) })
+
+	close(block)
+
+	waitFor(t, app.app, func() bool { return app.editForm == nil })
+	if composerOpen(app) {
+		t.Fatal("the edit form's body composer must close together with the form")
+	}
+}
+
+// TestCtrlCConfirmOverEditFormBodyComposerSurvivesPullRequestSwitch covers
+// a Ctrl-C-while-mutating confirm opened from the edit form's own body
+// composer, with a pull request switch closing both the composer and the
+// form underneath it: cancelling the confirm must not resurrect the gone
+// "editform" overlay.
+func TestCtrlCConfirmOverEditFormBodyComposerSurvivesPullRequestSwitch(t *testing.T) {
+	app, _, fake, _ := newTestApp(t, nil)
+	openEditFormBodyComposer(t, app, fake, editablePR(fixtureRef(1)))
+
+	block := make(chan struct{})
+	fake.SetAddCommentBlock(block)
+	act(app.app, func() { app.deps.Store.AddComment("first") })
+	waitFor(t, app.app, func() bool { return app.deps.Store.Mutating() })
+	sendKey(app.app, tcell.NewEventKey(tcell.KeyRune, 'c', tcell.ModCtrl))
+	waitFor(t, app.app, func() bool { return app.overlay == "confirm" })
+
+	ref2 := fixtureRef(2)
+	fake.SetPRResult(ref2, gh.DetailResult{PR: editablePR(ref2)})
+	act(app.app, func() { app.deps.Store.OpenPR(ref2) })
+	waitFor(t, app.app, func() bool { return app.editForm == nil })
+
+	sendSpecial(app.app, tcell.KeyEsc)
+	waitFor(t, app.app, func() bool { return len(app.confirms) == 0 })
+
+	if got := query(app.app, func() string { return app.overlay }); got != "" {
+		t.Fatalf("overlay = %q, want \"\" (the edit form is gone)", got)
+	}
+	close(block)
+	waitFor(t, app.app, func() bool { return !app.deps.Store.Mutating() })
 }

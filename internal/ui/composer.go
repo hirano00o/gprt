@@ -61,7 +61,31 @@ const (
 	// switch, and sendComposer must never refuse it merely because some
 	// other (or no) pull request happens to be current.
 	composerKindNewPRBody
+	// composerKindEditPRBody edits the edit-PR form's own body
+	// (editform.go). Like composerKindNewPRBody, Send never calls the store
+	// — it hands the text back to the form (App.editFormBody), which sends
+	// it on Save alongside every other changed field — and the composer
+	// lives inside the form's own body slot. Unlike it, the composer is
+	// bound to the pull request being edited (composerTarget.ref), exactly
+	// as the form itself is (closeEditFormIfWrongPR).
+	composerKindEditPRBody
 )
+
+// isFormBodyComposer reports whether kind is one of the create/edit-PR
+// forms' own body composers, whose Send/":q" hand the text back to the
+// form (setFormBody) instead of calling the store.
+func isFormBodyComposer(kind composerKind) bool {
+	return kind == composerKindNewPRBody || kind == composerKindEditPRBody
+}
+
+// setFormBody hands text back to the form owning kind's body composer.
+func (a *App) setFormBody(kind composerKind, text string) {
+	if kind == composerKindEditPRBody {
+		a.editFormBody = text
+		return
+	}
+	a.createFormBody = text
+}
 
 // composerTarget identifies what the currently open composer is editing.
 type composerTarget struct {
@@ -339,14 +363,18 @@ func (a *App) openComposer(target composerTarget, prefill string) {
 	a.composerFlex = tview.NewFlex().SetDirection(tview.FlexRow)
 	a.composerFlex.AddItem(a.composerTitle, 1, 0, false)
 	a.composerFlex.AddItem(a.composerEditor, 0, 1, true)
-	if target.kind == composerKindNewPRBody {
+	switch target.kind {
+	case composerKindNewPRBody:
 		// The create-PR form's own body slot hosts this composer instead of
 		// detailColumn (composerHost below) — swap out its read-only body
 		// view in favour of the composer's own Flex, proportionally sized
 		// (composerHeight() is detailColumn-based, meaningless here).
 		a.createFormBodySlot.RemoveItem(a.createFormBodyView)
 		a.createFormBodySlot.AddItem(a.composerFlex, 0, 1, true)
-	} else {
+	case composerKindEditPRBody:
+		a.editFormBodySlot.RemoveItem(a.editFormBodyView)
+		a.editFormBodySlot.AddItem(a.composerFlex, 0, 1, true)
+	default:
 		a.detailColumn.AddItem(a.composerFlex, a.composerHeight(), 0, true)
 	}
 
@@ -354,14 +382,17 @@ func (a *App) openComposer(target composerTarget, prefill string) {
 }
 
 // composerHost returns the container that hosts the composer's own Flex
-// for kind: a.detailColumn for every kind except composerKindNewPRBody,
-// whose own host is the create-PR form's own body slot instead (see
-// composerKindNewPRBody's own doc comment for why that composer lives
-// inside the create form's dialog rather than the detail column like every
-// other one).
+// for kind: a.detailColumn for every kind except composerKindNewPRBody/
+// composerKindEditPRBody, whose own host is the create/edit-PR form's own
+// body slot instead (see composerKindNewPRBody's own doc comment for why
+// that composer lives inside the form's dialog rather than the detail
+// column like every other one).
 func (a *App) composerHost(kind composerKind) *tview.Flex {
-	if kind == composerKindNewPRBody {
+	switch kind {
+	case composerKindNewPRBody:
 		return a.createFormBodySlot
+	case composerKindEditPRBody:
+		return a.editFormBodySlot
 	}
 	return a.detailColumn
 }
@@ -471,6 +502,9 @@ func (a *App) closeComposer(keepDraft bool) {
 		// clears it for exactly this reason).
 		a.composerReturnFocus = nil
 		a.restoreCreateFormBodySlot()
+	} else if target.kind == composerKindEditPRBody {
+		a.composerReturnFocus = nil
+		a.restoreEditFormBodySlot()
 	} else if a.overlay == "confirm" {
 		// Closed underneath a confirm (closeComposerIfWrongPR on a PR
 		// switch): moving focus now would take it off the still-visible
@@ -522,11 +556,12 @@ func (a *App) onComposerChange(text string) {
 // requests (":w"/Ctrl-s, ":q", ":q!"); ModeChanged needs no extra work
 // here since Editor already renders its own mode line.
 //
-// For composerKindNewPRBody, ":q" (CloseRequested) also hands the buffer's
-// current text back to App.createFormBody before closing — unlike every
-// other composer kind, whose own draft is the only record of unsent text,
-// this one is round-tripped into a sibling form field, and only Send
-// (sendNewPRBodyComposer) did that until this was found missing in review:
+// For a form body composer (isFormBodyComposer), ":q" (CloseRequested)
+// also hands the buffer's current text back to its form before closing —
+// unlike every other composer kind, whose own draft is the only record of
+// unsent text, this one is round-tripped into a sibling form field, and
+// only Send (sendFormBodyComposer) did that until this was found missing
+// in review:
 // reopening ":q"'s own kept draft made it merely *look* saved, while
 // Create would still submit whatever createFormBody held before. ":q!"
 // (DiscardRequested) is unaffected — discarding still means discarding.
@@ -535,8 +570,8 @@ func (a *App) onComposerAction(act editor.Action) {
 	case editor.SendRequested:
 		a.sendComposer()
 	case editor.CloseRequested:
-		if a.composerTarget != nil && a.composerTarget.kind == composerKindNewPRBody {
-			a.createFormBody = a.composerEditor.Text()
+		if a.composerTarget != nil && isFormBodyComposer(a.composerTarget.kind) {
+			a.setFormBody(a.composerTarget.kind, a.composerEditor.Text())
 		}
 		a.closeComposer(true)
 	case editor.DiscardRequested:
@@ -560,10 +595,10 @@ func (a *App) sendComposer() {
 	if a.composerTarget == nil {
 		return
 	}
-	if a.composerTarget.kind == composerKindNewPRBody {
+	if isFormBodyComposer(a.composerTarget.kind) {
 		// Never touches the store or Store.CurrentRef() at all — see
 		// composerKindNewPRBody's own doc comment.
-		a.sendNewPRBodyComposer(*a.composerTarget, a.composerEditor.Text())
+		a.sendFormBodyComposer(a.composerTarget.kind, a.composerEditor.Text())
 		return
 	}
 	if ref, ok := a.deps.Store.CurrentRef(); !ok || ref != a.composerTarget.ref {
@@ -611,16 +646,16 @@ func (a *App) sendComposer() {
 	}
 }
 
-// sendNewPRBodyComposer implements Send for the create-PR form's own body
-// composer (composerKindNewPRBody): unlike every other composer target, it
-// never calls the store — it hands text back to the form (App.createFormBody)
-// and closes the composer keeping its draft (deleted only once the pull
-// request is actually created — see createform.go's onPullRequestCreated).
-// An empty body is a legitimate, intentional value (the user clearing a
-// prefilled template), so — unlike the generic case in sendComposer — this
-// is never refused for being blank.
-func (a *App) sendNewPRBodyComposer(target composerTarget, text string) {
-	a.createFormBody = text
+// sendFormBodyComposer implements Send for the create/edit-PR form's own
+// body composer (isFormBodyComposer): unlike every other composer target,
+// it never calls the store — it hands text back to the form (setFormBody)
+// and closes the composer keeping its draft (deleted only once the form
+// itself closes — see closeCreateForm/closeEditForm). An empty body is a
+// legitimate, intentional value (the user clearing a prefilled template or
+// an existing description), so — unlike the generic case in sendComposer —
+// this is never refused for being blank.
+func (a *App) sendFormBodyComposer(kind composerKind, text string) {
+	a.setFormBody(kind, text)
 	a.closeComposer(true)
 }
 
