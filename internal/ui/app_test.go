@@ -2262,6 +2262,26 @@ func TestAppHelpCommandsLineListsEveryCommand(t *testing.T) {
 	}
 }
 
+func TestAppHelpListsEveryContextsBindings(t *testing.T) {
+	app, _, _, _ := newTestApp(t, nil)
+
+	sendRune(app.app, '?')
+	waitFor(t, app.app, func() bool { return app.overlay == "help" })
+
+	text := query(app.app, func() string { return app.helpView.GetText(true) })
+	contexts := []keys.Context{
+		keys.ContextGlobal, keys.ContextList, keys.ContextDetail, keys.ContextFiles, keys.ContextDiff,
+		keys.ContextThread, keys.ContextComment, keys.ContextPR, keys.ContextComposer,
+	}
+	for _, ctx := range contexts {
+		for _, bd := range app.deps.Keymap.Bindings(ctx) {
+			if !containsSubstring(text, string(bd.Action)) {
+				t.Errorf("help text does not list %s's %s (%s)", ctx, bd.Action, bd.Sequence)
+			}
+		}
+	}
+}
+
 // TestAppHelpEscInSearchReturnsFocusToHelpView covers closeHelpSearch's own
 // doc comment: Esc while the help search has focus must return focus to
 // the help TextView (not close the overlay), and the overlay's later q/Esc
