@@ -3098,3 +3098,41 @@ func TestAppCtrlWhFromDetailReturnsToList(t *testing.T) {
 	sendRune(app.app, 'h')
 	waitFor(t, app.app, func() bool { return app.app.GetFocus() == app.listView })
 }
+
+// TestAppPRTabJScrollsLongBody guards against a PR description taller than
+// the pane being unreadable past its first screen: the description is one
+// selectable block, so j must scroll within it before moving to the next.
+func TestAppPRTabJScrollsLongBody(t *testing.T) {
+	app, _, fake, screen := newTestApp(t, nil)
+	ref := fixtureRef(1)
+	pr := fixtureDetailPR(ref)
+	var body strings.Builder
+	for i := range 40 {
+		fmt.Fprintf(&body, "para %02d\n\n", i)
+	}
+	pr.Body = body.String()
+	fake.SetPRResult(ref, gh.DetailResult{PR: pr})
+
+	sendSpecial(app.app, tcell.KeyEnter)
+	waitFor(t, app.app, func() bool { return app.isDetailFocused() })
+	waitFor(t, app.app, func() bool { return detailSelectableIndex(app.prView.Rows(), "description") >= 0 })
+	idx := query(app.app, func() int { return detailSelectableIndex(app.prView.Rows(), "description") })
+	act(app.app, func() { app.prView.SetCursor(idx) })
+
+	// onScreen runs inside waitFor/query, i.e. already on the UI goroutine.
+	onScreen := func(s string) bool {
+		return strings.Contains(strings.Join(screenLines(screen), "\n"), s)
+	}
+	waitFor(t, app.app, func() bool { return onScreen("para 00") })
+	if query(app.app, func() bool { return onScreen("para 20") }) {
+		t.Fatal("para 20 is already visible before scrolling; the fixture body is not taller than the pane")
+	}
+
+	for range 20 {
+		sendRune(app.app, 'j')
+	}
+	waitFor(t, app.app, func() bool { return onScreen("para 20") })
+	if id := query(app.app, app.prView.CurrentID); id != "description" {
+		t.Errorf("CurrentID() = %q after scrolling, want description", id)
+	}
+}

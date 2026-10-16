@@ -139,3 +139,35 @@ func TestDetailViewNilBuildFuncProducesNoLines(t *testing.T) {
 		t.Fatalf("Rows() = %#v, want one row with ID b1", got)
 	}
 }
+
+func TestDetailViewScrollsLongDescription(t *testing.T) {
+	dv := NewDetailView()
+	dv.SetRect(0, 0, 40, 4)
+	dv.SetBlocks([]Block{
+		widthReportingBlock("body", true), // 100/40 -> 3 lines; too short
+		{ID: "long", Selectable: true, Build: func(int) [][]Span {
+			return tallRow("long", 12).Lines
+		}},
+	})
+	screen := newTestScreen(t, 40, 4)
+	dv.Draw(screen)
+	dv.MoveBy(1)
+	if dv.CurrentID() != "long" {
+		t.Fatalf("CurrentID() = %q, want long", dv.CurrentID())
+	}
+	for range 3 {
+		dv.MoveBy(1)
+	}
+	dv.Draw(screen)
+	if got := cellRune(screen, 1, 0); got != '3' {
+		t.Errorf("first line after 3 scrolls = L%c, want L3", got)
+	}
+
+	// A width change rebuilds the rows; the offset must stay in range.
+	dv.SetRect(0, 0, 20, 8)
+	screen = newTestScreen(t, 20, 8)
+	dv.Draw(screen)
+	if dv.lineOff < 0 || dv.lineOff > 12-8 {
+		t.Errorf("lineOff = %d after resize, want within [0, 4]", dv.lineOff)
+	}
+}
