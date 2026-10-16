@@ -69,7 +69,9 @@ func (a *App) onRowChanged(row widget.ListRow) {
 
 // onRowSelected is ListView's selected callback, invoked by Select() in
 // response to the list.open action (Enter / l): it previews immediately,
-// with no debounce, and moves focus to the detail column.
+// with no debounce, moves focus to the detail column and collapses the
+// list column so the opened pull request gets the full width (Ctrl-w h or
+// Ctrl-w o brings the list back).
 func (a *App) onRowSelected(row widget.ListRow) {
 	if a.previewTimer != nil {
 		a.previewTimer.Stop()
@@ -77,6 +79,7 @@ func (a *App) onRowSelected(row widget.ListRow) {
 	}
 	a.showPreview(row.ID)
 	a.focusDetail()
+	a.collapseListColumn()
 }
 
 // showPreview opens the pull request identified by id via Store.OpenPR, if

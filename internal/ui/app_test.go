@@ -2774,6 +2774,21 @@ func TestAppEnterOpensPRAndShowsDetail(t *testing.T) {
 	})
 }
 
+func TestAppEnterCollapsesListAndCtrlWhBringsItBack(t *testing.T) {
+	app, _, fake, _ := newTestApp(t, nil)
+	ref := fixtureRef(1)
+	fake.SetPRResult(ref, gh.DetailResult{PR: fixtureDetailPR(ref)})
+
+	sendSpecial(app.app, tcell.KeyEnter)
+	waitFor(t, app.app, func() bool { return !app.listExpanded && app.isDetailFocused() })
+
+	sendKey(app.app, tcell.NewEventKey(tcell.KeyCtrlW, 0, tcell.ModCtrl))
+	sendRune(app.app, 'h')
+	waitFor(t, app.app, func() bool {
+		return app.listExpanded && app.app.GetFocus() == app.listView
+	})
+}
+
 func TestAppFailedDetailFetchShowsErrorInsteadOfLoadingForever(t *testing.T) {
 	app, _, fake, _ := newTestApp(t, nil)
 	ref := fixtureRef(1)
