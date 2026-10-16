@@ -65,7 +65,13 @@ type Options struct {
 // textAreaAdapter implements Text over a *tview.TextArea, the production
 // backing store for Editor's Vim (see the package doc comment for why
 // Vim itself never depends on tview directly).
-type textAreaAdapter struct{ area *tview.TextArea }
+type textAreaAdapter struct {
+	area *tview.TextArea
+	// moved records that Vim repositioned the cursor itself (SetCursor,
+	// Replace, Select) rather than through TextArea's own InputHandler, so
+	// the next Editor.Draw must scroll it into view — see followCursor.
+	moved bool
+}
 
 func (a *textAreaAdapter) Text() string { return a.area.GetText() }
 
@@ -78,9 +84,17 @@ func (a *textAreaAdapter) Cursor() int {
 	return start
 }
 
-func (a *textAreaAdapter) SetCursor(pos int)                { a.area.Select(pos, pos) }
-func (a *textAreaAdapter) Replace(start, end int, s string) { a.area.Replace(start, end, s) }
-func (a *textAreaAdapter) Select(start, end int)            { a.area.Select(start, end) }
+func (a *textAreaAdapter) SetCursor(pos int) { a.Select(pos, pos) }
+
+func (a *textAreaAdapter) Replace(start, end int, s string) {
+	a.area.Replace(start, end, s)
+	a.moved = true
+}
+
+func (a *textAreaAdapter) Select(start, end int) {
+	a.area.Select(start, end)
+	a.moved = true
+}
 
 // Editor is gprt's vim-style comment/PR-body editor primitive: a
 // *tview.TextArea plus a one-line mode/hint status row, wrapped in a
@@ -406,6 +420,11 @@ func (e *Editor) renderStatus() {
 func (e *Editor) Draw(screen tcell.Screen) {
 	e.lastScreen = screen
 	e.Flex.Draw(screen)
+	if e.adapter.moved {
+		e.adapter.moved = false
+		e.followCursor(screen)
+		e.Flex.Draw(screen)
+	}
 	if e.area.HasFocus() {
 		style := tcell.CursorStyleSteadyBlock
 		if e.vim.Mode() == ModeInsert {
@@ -418,6 +437,52 @@ func (e *Editor) Draw(screen tcell.Screen) {
 		e.popup.SetRect(x, y, w, h)
 		e.popup.Draw(screen)
 	}
+}
+
+// followCursor scrolls the TextArea so its cursor row is visible after a
+// Vim-driven move. TextArea only clamps its scroll offset for moves made
+// through its own InputHandler; Select and Replace keep the offset as is.
+// Select also lays out only rows already drawn, and it reports a wrong
+// row for a cursor below them. So the whole text is laid out first: Draw
+// does that for every row up to the offset and returns before painting
+// when the offset is past the text. activeRow then selects again, and its
+// row is now correct. A text of n bytes has at most n+1 rows.
+// It runs after Flex.Draw, which is what sizes the TextArea; that early
+// Draw blanks the TextArea, so the caller must paint again.
+func (e *Editor) followCursor(screen tcell.Screen) {
+	_, _, _, height := e.area.GetInnerRect()
+	if height <= 0 {
+		return
+	}
+	offRow, offColumn := e.area.GetOffset()
+	e.area.SetOffset(e.area.GetTextLength()+1, offColumn)
+	e.area.Draw(screen)
+
+	row := e.activeRow()
+	switch {
+	case row < offRow:
+		offRow = row
+	case row >= offRow+height:
+		offRow = row - height + 1
+	}
+	e.area.SetOffset(offRow, offColumn)
+}
+
+// activeRow returns the TextArea row of Vim's cursor and leaves the
+// selection as it was. It moves the cursor there briefly and does not read
+// the selection's ends. A visual selection's later end sits after the
+// newline of a whole line, so it is a row below Vim's cursor. And in visual
+// mode Vim's active end may be the earlier one.
+func (e *Editor) activeRow() int {
+	_, start, end := e.area.GetSelection()
+	pos := start
+	if mode := e.vim.Mode(); mode == ModeVisual || mode == ModeVisualLine {
+		pos = e.vim.visualCursor
+	}
+	e.area.Select(pos, pos)
+	_, _, row, _ := e.area.GetCursor()
+	e.area.Select(start, end)
+	return row
 }
 
 // resetCursorStyle restores the terminal's default cursor style,

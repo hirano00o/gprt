@@ -364,3 +364,115 @@ func TestEditorMentionPopupClosesOnCursorMovement(t *testing.T) {
 		t.Fatalf("popup still open after the cursor moved away via Left")
 	}
 }
+
+// assertCursorVisible fails unless Vim's cursor is on wantRow
+// and that row lies inside its current viewport (rows [offset,
+// offset+height)).
+func assertCursorVisible(t *testing.T, e *Editor, step string, wantRow int) {
+	t.Helper()
+	_, _, _, height := e.area.GetInnerRect()
+	row := e.activeRow()
+	off, _ := e.area.GetOffset()
+	if row != wantRow {
+		t.Fatalf("after %s: cursor row = %d, want %d", step, row, wantRow)
+	}
+	if row < off || row >= off+height {
+		t.Fatalf("after %s: cursor row %d outside viewport [%d, %d)", step, row, off, off+height)
+	}
+}
+
+func TestEditorViewportFollowsVimMotions(t *testing.T) {
+	lines := make([]string, 30)
+	for i := range lines {
+		lines[i] = "line"
+	}
+	e, screen := newTestEditor(t, Options{})
+	e.SetText(strings.Join(lines, "\n"))
+	e.Draw(screen)
+
+	sendEditorRune(e, screen, 'G')
+	assertCursorVisible(t, e, "G", 29)
+
+	for range 20 {
+		sendEditorRune(e, screen, 'k')
+	}
+	assertCursorVisible(t, e, "20k", 9)
+
+	typeEditorText(e, screen, "gg")
+	assertCursorVisible(t, e, "gg", 0)
+
+	typeEditorText(e, screen, "25G")
+	typeEditorText(e, screen, "dd")
+	typeEditorText(e, screen, "gg")
+	sendEditorRune(e, screen, 'u')
+	assertCursorVisible(t, e, "u after gg", 24)
+}
+
+func TestEditorViewportFollowsVisualActiveEnd(t *testing.T) {
+	lines := make([]string, 30)
+	for i := range lines {
+		lines[i] = "line"
+	}
+	e, screen := newTestEditor(t, Options{})
+	e.SetText(strings.Join(lines, "\n"))
+	e.Draw(screen)
+
+	sendEditorRune(e, screen, 'G')
+	sendEditorRune(e, screen, 'v')
+	typeEditorText(e, screen, "gg")
+	assertCursorVisible(t, e, "v then gg", 0)
+}
+
+func TestEditorVisualLineDownScrollsOnlyPastBottomRow(t *testing.T) {
+	lines := make([]string, 30)
+	for i := range lines {
+		lines[i] = "line"
+	}
+	e, screen := newTestEditor(t, Options{})
+	e.SetText(strings.Join(lines, "\n"))
+	e.Draw(screen)
+
+	sendEditorRune(e, screen, 'V')
+	for range 8 {
+		sendEditorRune(e, screen, 'j')
+	}
+	assertCursorVisible(t, e, "V then 8j", 8)
+	if off, _ := e.area.GetOffset(); off != 0 {
+		t.Fatalf("offset after V then 8j = %d, want 0 (row 8 is the last visible row)", off)
+	}
+}
+
+func TestEditorViewportFollowsMoveBeforeFirstDraw(t *testing.T) {
+	lines := make([]string, 30)
+	for i := range lines {
+		lines[i] = "line"
+	}
+	screen := tcell.NewSimulationScreen("")
+	if err := screen.Init(); err != nil {
+		t.Fatalf("screen.Init: %v", err)
+	}
+	screen.SetSize(60, 10)
+	e := New(Options{})
+	e.SetRect(0, 0, 60, 10)
+	e.SetText(strings.Join(lines, "\n"))
+	e.Handle(tcell.NewEventKey(tcell.KeyRune, 'G', tcell.ModNone))
+	e.Draw(screen)
+	assertCursorVisible(t, e, "G before first draw", 29)
+}
+
+func TestEditorVimMotionKeepsTextPainted(t *testing.T) {
+	e, screen := newTestEditor(t, Options{})
+	e.SetText("first\nsecond")
+	e.Draw(screen)
+
+	sendEditorRune(e, screen, 'j')
+	screen.Show()
+	cells, width, _ := screen.GetContents()
+	var row strings.Builder
+	for x := range width {
+		row.WriteString(string(cells[x].Runes))
+	}
+	if got := strings.TrimSpace(row.String()); got != "first" {
+		t.Fatalf("top row after j = %q, want %q", got, "first")
+	}
+}
