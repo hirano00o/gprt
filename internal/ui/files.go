@@ -400,7 +400,7 @@ func (a *App) refreshCurrentFile() {
 			HasPatch:      entry.File.HasPatch,
 			Hunks:         entry.Hunks,
 			Tokens:        entry.Tokens,
-			Threads:       threadsForPath(a.deps.Store.CurrentPR(), entry.File.Path),
+			Threads:       a.threadsForFile(entry.File.Path),
 			Err:           entry.ParseErr,
 			DraftLines:    a.draftLinesForFile(entry.Hunks, entry.File.Path),
 			DraftMarker:   a.deps.Icons.DraftMarker,
@@ -502,6 +502,32 @@ func threadsForPath(pr *model.PullRequest, path string) []model.ReviewThread {
 	return out
 }
 
+// threadsForFile returns the review threads to render in path's diff:
+// threadsForPath's, except that an outdated RIGHT-side thread GitHub left
+// without a line is placed where it sits in the current file, as GitHub
+// itself shows it, whenever Store.OutdatedAnchor can relocate it (it is
+// copied, not mutated: the store's own thread keeps Line 0). A thread that
+// cannot be relocated, and every outdated LEFT-side thread (its base side
+// may itself have moved), stays line-less and falls into the diff view's
+// "Outdated threads" block. StartLine is cleared for a relocated thread: a
+// range cannot be mapped faithfully, so it collapses onto its last line.
+//
+// threadsForPath stays the source for counting and existence checks, which
+// must not depend on whether a compare has arrived yet.
+func (a *App) threadsForFile(path string) []model.ReviewThread {
+	threads := threadsForPath(a.deps.Store.CurrentPR(), path)
+	for i, t := range threads {
+		if !t.IsOutdated || t.Line != 0 || t.Side != model.DiffSideRight || t.SubjectType == model.ThreadSubjectFile {
+			continue
+		}
+		if line, ok := a.deps.Store.OutdatedAnchor(t); ok {
+			threads[i].Line = line
+			threads[i].StartLine = 0
+		}
+	}
+	return threads
+}
+
 // onPRChangedForFiles resets the Files tab's own state (currentFilePath,
 // wantedFilePath, lastFallbackNode, the tree) when EventPRChanged reports
 // a *different* pull request than the one the Files tab was last built
@@ -525,6 +551,7 @@ func (a *App) onPRChangedForFiles() {
 	}
 	if a.currentTab == "files" {
 		a.deps.Store.LoadFiles(false)
+		a.deps.Store.LoadOutdatedAnchors()
 	}
 	a.rebuildFileTree()
 	a.refreshCurrentFile()

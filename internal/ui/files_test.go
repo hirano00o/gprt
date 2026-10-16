@@ -1702,3 +1702,85 @@ func TestFilesTabExpandGapErrorToasts(t *testing.T) {
 		return containsSubstring(app.statusBar.toast, "no file content registered")
 	})
 }
+
+// relocatedThreadPR is fixtureFilesPR reduced to one outdated, line-less
+// thread (GitHub's null line) on pkg/example.go's original line 2 of
+// commit "orig1", the shape LoadOutdatedAnchors relocates. Reducing it
+// keeps "Outdated threads" absent from the diff unless this very thread
+// lands there.
+func relocatedThreadPR(ref model.PRRef) model.PullRequest {
+	pr := fixtureFilesPR(ref)
+	pr.HeadOID = "head1"
+	pr.ReviewThreads = []model.ReviewThread{{
+		ID: "thread-relocate", Path: "pkg/example.go", OriginalLine: 2, OriginalCommit: "orig1",
+		Side: model.DiffSideRight, SubjectType: model.ThreadSubjectLine, IsOutdated: true,
+		Comments: []model.ReviewComment{{Author: model.User{Login: "erin"}, Body: "relocated note", CreatedAt: time.Now()}},
+	}}
+	return pr
+}
+
+// openFilesTabForPR is openFilesTabForFixture for a caller-supplied pull
+// request, after configuring the fake GitHub through setup.
+func openFilesTabForPR(
+	t *testing.T, pr func(model.PRRef) model.PullRequest, setup func(*fakeGitHub),
+) (*App, *fakeGitHub, tcell.SimulationScreen) {
+	t.Helper()
+	app, _, fake, screen := newTestApp(t, nil)
+	ref := fixtureRef(1)
+	fake.SetPRResult(ref, gh.DetailResult{PR: pr(ref)})
+	fake.SetFilesPages(ref, fixtureFilesPages())
+	setup(fake)
+
+	sendSpecial(app.app, tcell.KeyEnter)
+	waitFor(t, app.app, func() bool { return app.deps.Store.CurrentPR() != nil })
+	sendRune(app.app, 'g')
+	sendRune(app.app, 't')
+	waitFor(t, app.app, func() bool { return app.currentTab == "files" })
+	waitFor(t, app.app, func() bool {
+		_, ok := app.deps.Store.FileByPath("pkg/example.go")
+		return ok
+	})
+	return app, fake, screen
+}
+
+// TestFilesTabOutdatedThreadRelocatedInline covers the whole path: the
+// line-less outdated thread starts in the "Outdated threads" block, then
+// once the compare of its original commit against head arrives it is drawn
+// inline (the compare maps original line 2, "func Example() {", to head
+// line 3), leaving the block empty.
+func TestFilesTabOutdatedThreadRelocatedInline(t *testing.T) {
+	const addedLinePatch = "@@ -1,2 +1,3 @@\n package example\n+// added\n func Example() {"
+	app, fake, screen := openFilesTabForPR(t, relocatedThreadPR, func(f *fakeGitHub) {
+		f.SetCompareResult(gh.CompareResult{
+			Status: "ahead",
+			Files: []model.ChangedFile{{
+				Path: "pkg/example.go", Status: model.FileStatusModified, HasPatch: true, Patch: addedLinePatch,
+			}},
+		})
+	})
+
+	waitFor(t, app.app, func() bool {
+		text := diffText(app, screen)
+		return containsSubstring(text, "relocated note") && !containsSubstring(text, "Outdated threads")
+	})
+	calls := fake.CompareCalls()
+	if len(calls) != 1 || calls[0].base != "orig1" || calls[0].head != "head1" {
+		t.Errorf("CompareFiles calls = %+v, want exactly orig1...head1", calls)
+	}
+}
+
+// TestFilesTabOutdatedThreadStaysInBlockWhenCompareFails covers the
+// fallback: a failed compare leaves the thread where it always was.
+func TestFilesTabOutdatedThreadStaysInBlockWhenCompareFails(t *testing.T) {
+	app, fake, screen := openFilesTabForPR(t, relocatedThreadPR, func(f *fakeGitHub) {
+		f.SetCompareError(errors.New("boom"))
+	})
+
+	waitFor(t, app.app, func() bool { return len(fake.CompareCalls()) == 1 })
+	// Let the (failed) result be applied and the view refreshed.
+	query(app.app, func() struct{} { return struct{}{} })
+	text := diffTextSync(app, screen)
+	if !containsSubstring(text, "Outdated threads") || !containsSubstring(text, "relocated note") {
+		t.Errorf("diff after a failed compare = %q, want the thread still under Outdated threads", text)
+	}
+}

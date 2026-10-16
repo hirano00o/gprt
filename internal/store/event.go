@@ -74,6 +74,10 @@ const (
 	// pr_create.go's own doc comment) - the pull request itself was still
 	// created, and its ref must not be lost.
 	EventPullRequestCreated
+	// EventOutdatedAnchorsChanged fires whenever OutdatedAnchor would
+	// return different data: a compare for some original commit finished
+	// (successfully or not) for the current pull request (see outdated.go).
+	EventOutdatedAnchorsChanged
 )
 
 // Event is published synchronously, on the UI goroutine, by Subscribe

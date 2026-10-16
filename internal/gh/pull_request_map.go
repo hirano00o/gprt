@@ -194,10 +194,18 @@ func mapReviewThread(t reviewThreadNode) model.ReviewThread {
 	for _, c := range t.Comments.Nodes {
 		comments = append(comments, mapReviewComment(c))
 	}
+	// The thread's original commit is its first comment's: replies are
+	// anchored to the same diff position as the comment that opened it.
+	var originalCommit string
+	if len(t.Comments.Nodes) > 0 && t.Comments.Nodes[0].OriginalCommit != nil {
+		originalCommit = t.Comments.Nodes[0].OriginalCommit.OID
+	}
 	return model.ReviewThread{
 		ID:                 t.ID,
 		Path:               t.Path,
 		Line:               t.Line,
+		OriginalLine:       t.OriginalLine,
+		OriginalCommit:     originalCommit,
 		StartLine:          t.StartLine,
 		Side:               model.DiffSide(t.DiffSide),
 		StartSide:          model.DiffSide(t.StartDiffSide),

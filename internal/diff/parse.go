@@ -300,14 +300,69 @@ func RangeAnchor(lines []Line) (Range, error) {
 // LocateThread finds the (hunk index, line index) of the diff line a review
 // thread is anchored to, so the UI can render it inline. It returns
 // ok == false for a file-level thread (SubjectType FILE, rendered at the
-// file header instead), an outdated thread (IsOutdated, whose anchor no
-// longer corresponds to a line in the current diff), or a thread whose line
+// file header instead), a thread with no current line (Line <= 0: GitHub
+// reports null for an outdated thread, which the caller may have relocated
+// by filling Line in beforehand, see MapOldLine), or a thread whose line
 // cannot be found in hunks at all.
+//
+// IsOutdated is deliberately not consulted: an outdated thread that still
+// carries a line (GitHub keeps it for some outdated threads, and the UI
+// supplies a relocated one for the rest) renders inline exactly like a
+// current one, as on GitHub itself.
 func LocateThread(hunks []Hunk, t model.ReviewThread) (hunk, line int, ok bool) {
-	if t.IsOutdated || t.SubjectType == model.ThreadSubjectFile {
+	if t.SubjectType == model.ThreadSubjectFile || t.Line <= 0 {
 		return 0, 0, false
 	}
 	return LocateLine(hunks, t.Side, t.Line)
+}
+
+// MapOldLine maps oldLine, a line number on the old side of the patch hunks
+// describe, to the corresponding new-side line number. It relocates a
+// thread anchored on an earlier version of a file (the old side of a
+// compare between that version and the current head) into the current
+// file.
+//
+// A line before a hunk shifts by the running delta (NewLines-OldLines) of
+// the hunks preceding it, and a line after every hunk likewise. Inside a
+// hunk, a Context line maps to its own new line; a deleted line has no
+// counterpart, so it maps to the new line at the point it was removed: the
+// next Add/Context line (for an edited line, its replacement), the hunk's
+// last new line when the deletion ends the hunk, or, for a hunk with no new
+// lines at all (a pure deletion), the line it followed (NewStart). ok is
+// false only when no such line exists (a deletion at the very top of the
+// file).
+func MapOldLine(hunks []Hunk, oldLine int) (newLine int, ok bool) {
+	delta := 0
+	for _, h := range hunks {
+		first, last := oldRange(h)
+		if oldLine < first {
+			break
+		}
+		if oldLine > last {
+			delta += h.NewLines - h.OldLines
+			continue
+		}
+		for i, l := range h.Lines {
+			if l.OldNo != oldLine {
+				continue
+			}
+			if l.Kind == Context {
+				return l.NewNo, true
+			}
+			if h.NewLines == 0 {
+				return h.NewStart, h.NewStart > 0
+			}
+			for _, next := range h.Lines[i+1:] {
+				if next.Kind != Del {
+					return next.NewNo, true
+				}
+			}
+			_, lastNew := NewRange(h)
+			return lastNew, true
+		}
+		return 0, false
+	}
+	return oldLine + delta, true
 }
 
 // NewRange returns the inclusive [first, last] range of new-side (head-file)
@@ -530,8 +585,8 @@ func expandTrailing(hunks []Hunk, headLines []string) []Hunk {
 // name (LocateThread delegates here), and what a saved line/range-comment
 // draft's anchor (see internal/ui's draft anchor helpers) parses back into.
 // LEFT matches a Del/Context line by OldNo; RIGHT matches an Add/Context
-// line by NewNo. ok is false when no line matches (for example an outdated
-// anchor whose line no longer exists in the current diff).
+// line by NewNo. ok is false when no line matches (for example an anchor
+// whose line is not within any hunk of the current diff).
 func LocateLine(hunks []Hunk, side model.DiffSide, lineNo int) (hunk, line int, ok bool) {
 	for hi, h := range hunks {
 		for li, l := range h.Lines {

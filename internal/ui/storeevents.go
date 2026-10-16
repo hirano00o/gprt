@@ -76,6 +76,13 @@ func (a *App) subscribeStore() {
 				// coordinate — drop it until the next n/N sets a new one.
 				a.diffView.ClearSearchCurrent()
 			}
+		case store.EventOutdatedAnchorsChanged:
+			// A compare resolved: threads it relocates move from the
+			// "Outdated threads" block to their own line. Further commits'
+			// compares may be waiting on the per-call fetch cap, so
+			// continue loading them.
+			a.refreshCurrentFile()
+			a.deps.Store.LoadOutdatedAnchors()
 		case store.EventFileHighlighted:
 			// FilesState().Highlighting (the status bar's "highlighting N"
 			// segment) decrements on every hunk highlight job's

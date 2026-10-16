@@ -319,6 +319,7 @@ func (a *App) switchTab(name string, index int) {
 	a.tabBar.SetActive(index)
 	if name == "files" {
 		a.deps.Store.LoadFiles(false)
+		a.deps.Store.LoadOutdatedAnchors()
 		a.rebuildFileTree()
 		a.refreshCurrentFile()
 	}

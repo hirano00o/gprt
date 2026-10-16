@@ -213,6 +213,7 @@ type reviewThreadNode struct {
 	IsOutdated         bool   `json:"isOutdated"`
 	Path               string `json:"path"`
 	Line               int    `json:"line"`
+	OriginalLine       int    `json:"originalLine"`
 	StartLine          int    `json:"startLine"`
 	DiffSide           string `json:"diffSide"`
 	StartDiffSide      string `json:"startDiffSide"`
@@ -232,10 +233,13 @@ type reviewCommentNode struct {
 	Author struct {
 		Login string `json:"login"`
 	} `json:"author"`
-	Body              string                  `json:"body"`
-	CreatedAt         time.Time               `json:"createdAt"`
-	State             string                  `json:"state"`
-	URL               string                  `json:"url"`
+	Body           string    `json:"body"`
+	CreatedAt      time.Time `json:"createdAt"`
+	State          string    `json:"state"`
+	URL            string    `json:"url"`
+	OriginalCommit *struct {
+		OID string `json:"oid"`
+	} `json:"originalCommit"`
 	ReactionGroups    []reactionGroupFragment `json:"reactionGroups"`
 	ViewerCanUpdate   bool                    `json:"viewerCanUpdate"`
 	ViewerCanDelete   bool                    `json:"viewerCanDelete"`

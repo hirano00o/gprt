@@ -145,3 +145,14 @@ func TestThreadListRebuildsOnPRChanged(t *testing.T) {
 
 	waitFor(t, app.app, func() bool { return len(app.threadListEntries) == before+1 })
 }
+
+// TestThreadListEntryTextShowsOriginalLineForLinelessOutdatedThread covers
+// GitHub's null line for an outdated thread: the entry falls back to the
+// line the thread was originally written against rather than ":0".
+func TestThreadListEntryTextShowsOriginalLineForLinelessOutdatedThread(t *testing.T) {
+	th := model.ReviewThread{Path: "a.go", IsOutdated: true, OriginalLine: 7}
+	got := threadListEntryText(th)
+	if !containsSubstring(got, "a.go:7") || containsSubstring(got, "a.go:0") {
+		t.Errorf("threadListEntryText() = %q, want it to mention a.go:7", got)
+	}
+}

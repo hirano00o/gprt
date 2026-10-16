@@ -14,6 +14,7 @@ import (
 // binary file).
 func TestCompareFiles_SuccessWithSlashBranchAndFileWithoutPatch(t *testing.T) {
 	fixture := map[string]any{
+		"status": "ahead",
 		"files": []map[string]any{
 			{
 				"filename":  "src/a.go",
@@ -49,6 +50,9 @@ func TestCompareFiles_SuccessWithSlashBranchAndFileWithoutPatch(t *testing.T) {
 	res, err := c.CompareFiles(t.Context(), testRepo(), "feature/foo", "main")
 	if err != nil {
 		t.Fatalf("CompareFiles() error = %v", err)
+	}
+	if res.Status != "ahead" {
+		t.Errorf("Status = %q, want %q", res.Status, "ahead")
 	}
 	if res.Truncated {
 		t.Error("Truncated = true, want false for a 2-file response")
