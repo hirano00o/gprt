@@ -36,6 +36,13 @@ type ListView struct {
 	// (the scroll position), kept so the cursor's row always stays fully
 	// visible.
 	offset int
+	// lineOff is how many leading display lines of the cursor's row are
+	// scrolled off above the view. It is only ever nonzero when the cursor
+	// row is the first drawn row (offset == cursorRow) and taller than the
+	// inner height: rows are otherwise scrolled whole, but a single row
+	// taller than the view (a long PR description is one block) would never
+	// have its tail reachable without it.
+	lineOff int
 
 	changed  func(row ListRow)
 	selected func(row ListRow)
@@ -68,13 +75,21 @@ func (lv *ListView) SetRows(rows []ListRow) {
 	}
 
 	lv.cursor = clamp(oldCursor, 0, len(lv.selectable)-1)
+	keptRow := false
 	if hadSelection {
 		for i, rowIdx := range lv.selectable {
 			if rows[rowIdx].ID == keepID {
 				lv.cursor = i
+				keptRow = true
 				break
 			}
 		}
+	}
+	// A refresh or width-change rebuild of the same row keeps the reading
+	// position (ensureVisible clamps it if the row shrank); landing on a
+	// different row starts that row from its top.
+	if !keptRow {
+		lv.lineOff = 0
 	}
 
 	lv.ensureVisible()
@@ -104,6 +119,7 @@ func (lv *ListView) SetCursor(i int) {
 		return
 	}
 	lv.cursor = next
+	lv.lineOff = 0
 	lv.ensureVisible()
 	lv.notifyChanged()
 }
@@ -118,19 +134,75 @@ func (lv *ListView) CurrentID() string {
 	return row.ID
 }
 
-// MoveBy moves the cursor by n selectable rows (negative moves up).
+// MoveBy moves the cursor by n selectable rows (negative moves up). While
+// the cursor row is taller than the view and not yet scrolled to its end in
+// that direction, it scrolls the row by n display lines instead.
 func (lv *ListView) MoveBy(n int) {
-	lv.SetCursor(lv.cursor + n)
+	if lv.scrollWithinRow(n) {
+		return
+	}
+	lv.moveRows(n)
 }
 
-// MoveTop moves the cursor to the first selectable row.
+// moveRows moves the cursor by n selectable rows. Moving up onto a tall row
+// shows its end, since that is the edge the reader arrives at.
+func (lv *ListView) moveRows(n int) {
+	before := lv.cursor
+	lv.SetCursor(lv.cursor + n)
+	if n < 0 && lv.cursor != before {
+		lv.showRowEnd()
+	}
+}
+
+// rowHeights returns the cursor row's display line count and the view's
+// inner height; ok is false when there is no cursor row or the row fits in
+// the view (height <= 0, before the first layout, counts as fitting).
+func (lv *ListView) rowHeights() (rowLines, height int, ok bool) {
+	if len(lv.selectable) == 0 {
+		return 0, 0, false
+	}
+	_, _, _, height = lv.GetInnerRect()
+	rowLines = len(lv.rows[lv.selectable[lv.cursor]].Lines)
+	return rowLines, height, height > 0 && rowLines > height
+}
+
+// scrollWithinRow scrolls the cursor row by up to n display lines (negative
+// scrolls up) when the row is taller than the view, and reports whether it
+// moved. A partial scroll consumes the whole count: the leftover is not
+// carried into row movement, so one keypress never both scrolls and jumps.
+func (lv *ListView) scrollWithinRow(n int) bool {
+	lv.ensureVisible() // the view may have been resized since the last move
+	rowLines, height, tall := lv.rowHeights()
+	if !tall {
+		return false
+	}
+	next := clamp(lv.lineOff+n, 0, rowLines-height)
+	if next == lv.lineOff {
+		return false
+	}
+	lv.lineOff = next
+	return true
+}
+
+// showRowEnd scrolls a tall cursor row so its last line is the view's last
+// line; rows that fit are left alone.
+func (lv *ListView) showRowEnd() {
+	if rowLines, height, tall := lv.rowHeights(); tall {
+		lv.lineOff = rowLines - height
+	}
+}
+
+// MoveTop moves the cursor to the first selectable row and shows its top
+// even when the cursor was already there.
 func (lv *ListView) MoveTop() {
 	lv.SetCursor(0)
+	lv.lineOff = 0
 }
 
-// MoveBottom moves the cursor to the last selectable row.
+// MoveBottom moves the cursor to the last selectable row and shows its end.
 func (lv *ListView) MoveBottom() {
 	lv.SetCursor(len(lv.selectable) - 1)
+	lv.showRowEnd()
 }
 
 // MoveHalfPage moves the cursor by however many selectable rows together
@@ -154,13 +226,21 @@ func (lv *ListView) MovePage(dir int) {
 // moveByDisplayLines is MoveHalfPage/MovePage's shared walk: it moves the
 // cursor by however many selectable rows together span roughly target
 // display lines. dir < 0 moves up, dir > 0 moves down; always moves at
-// least one selectable row when one exists in that direction.
+// least one selectable row when one exists in that direction. A tall cursor
+// row is scrolled by target lines first, like MoveBy.
 func (lv *ListView) moveByDisplayLines(dir, target int) {
 	if len(lv.selectable) == 0 {
 		return
 	}
 	if target < 1 {
 		target = 1
+	}
+	if dir < 0 {
+		if lv.scrollWithinRow(-target) {
+			return
+		}
+	} else if lv.scrollWithinRow(target) {
+		return
 	}
 
 	startRow := lv.selectable[lv.cursor]
@@ -186,7 +266,7 @@ func (lv *ListView) moveByDisplayLines(dir, target int) {
 	if dir < 0 {
 		steps = -steps
 	}
-	lv.MoveBy(steps)
+	lv.moveRows(steps)
 }
 
 // SetChangedFunc sets the function invoked whenever the cursor lands on a
@@ -231,31 +311,36 @@ func (lv *ListView) notifyChanged() {
 }
 
 // ensureVisible adjusts offset so the cursor's row is fully within the
-// view's current height, scrolling the minimum amount necessary.
+// view's current height, scrolling the minimum amount necessary, then
+// normalizes lineOff: it survives only for a tall cursor row that is the
+// first drawn row, clamped so the view never scrolls past the row's end.
 func (lv *ListView) ensureVisible() {
 	if len(lv.selectable) == 0 {
 		lv.offset = 0
+		lv.lineOff = 0
 		return
 	}
 	cursorRow := lv.selectable[lv.cursor]
 	if cursorRow < lv.offset {
 		lv.offset = cursorRow
-		return
+	} else if _, _, _, height := lv.GetInnerRect(); height > 0 {
+		for lv.offset < cursorRow {
+			lines := 0
+			for i := lv.offset; i <= cursorRow; i++ {
+				lines += len(lv.rows[i].Lines)
+			}
+			if lines <= height {
+				break
+			}
+			lv.offset++
+		}
 	}
 
-	_, _, _, height := lv.GetInnerRect()
-	if height <= 0 {
-		return
-	}
-	for lv.offset < cursorRow {
-		lines := 0
-		for i := lv.offset; i <= cursorRow; i++ {
-			lines += len(lv.rows[i].Lines)
-		}
-		if lines <= height {
-			return
-		}
-		lv.offset++
+	rowLines, height, tall := lv.rowHeights()
+	if tall && lv.offset == cursorRow {
+		lv.lineOff = clamp(lv.lineOff, 0, rowLines-height)
+	} else {
+		lv.lineOff = 0
 	}
 }
 
@@ -280,7 +365,11 @@ func (lv *ListView) Draw(screen tcell.Screen) {
 	for i := lv.offset; i < len(lv.rows) && line < y+height; i++ {
 		row := lv.rows[i]
 		onCursor := i == cursorRow
-		for _, spans := range row.Lines {
+		lines := row.Lines
+		if onCursor && i == lv.offset {
+			lines = lines[min(lv.lineOff, len(lines)):]
+		}
+		for _, spans := range lines {
 			if line >= y+height {
 				break
 			}

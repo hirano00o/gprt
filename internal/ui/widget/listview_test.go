@@ -341,3 +341,159 @@ func TestListViewCursorRowUsesCursorStyle(t *testing.T) {
 		t.Errorf("cursor row style has no explicit background; want the cursor highlight background")
 	}
 }
+
+// tallRow is a selectable row of n single-cell-prefixed lines "L0".."L<n-1>",
+// taller than any view the scroll tests use.
+func tallRow(id string, n int) ListRow {
+	lines := make([][]Span, n)
+	for i := range lines {
+		lines[i] = []Span{{Text: fmt.Sprintf("L%d", i)}}
+	}
+	return ListRow{ID: id, Selectable: true, Lines: lines}
+}
+
+// firstLine returns the text drawn on the first screen line of lv.
+func firstLine(t *testing.T, lv *ListView) string {
+	t.Helper()
+	x, y, w, h := lv.GetInnerRect()
+	screen := newTestScreen(t, x+w, y+h)
+	lv.Draw(screen)
+	return string([]rune{cellRune(screen, x, y), cellRune(screen, x+1, y)})
+}
+
+func TestListViewScrollsWithinTallRow(t *testing.T) {
+	lv := NewListView()
+	lv.SetRect(0, 0, 40, 4)
+	lv.SetRows([]ListRow{tallRow("tall", 10), itemRow("next", "n1", "n2")})
+
+	changes := 0
+	lv.SetChangedFunc(func(ListRow) { changes++ })
+
+	for want := 1; want <= 6; want++ {
+		lv.MoveBy(1)
+		if got := lv.CurrentID(); got != "tall" {
+			t.Fatalf("MoveBy #%d: CurrentID() = %q, want tall", want, got)
+		}
+		if got, w := firstLine(t, lv), fmt.Sprintf("L%d", want); got != w {
+			t.Fatalf("MoveBy #%d: first line = %q, want %q", want, got, w)
+		}
+	}
+	if changes != 0 {
+		t.Errorf("changed fired %d times while scrolling inside a row, want 0", changes)
+	}
+
+	lv.MoveBy(1) // end of the row reached: now it moves on
+	if got := lv.CurrentID(); got != "next" {
+		t.Errorf("after the row's end, CurrentID() = %q, want next", got)
+	}
+}
+
+func TestListViewMoveUpIntoTallRowShowsItsEnd(t *testing.T) {
+	lv := NewListView()
+	lv.SetRect(0, 0, 40, 4)
+	lv.SetRows([]ListRow{tallRow("tall", 10), itemRow("next", "n1", "n2")})
+	lv.MoveBy(1) // scroll to L1
+	lv.MoveBy(1) // L2 ... keep going until onto "next"
+	for lv.CurrentID() != "next" {
+		lv.MoveBy(1)
+	}
+
+	lv.MoveBy(-1)
+
+	if got := lv.CurrentID(); got != "tall" {
+		t.Fatalf("CurrentID() = %q, want tall", got)
+	}
+	if got := firstLine(t, lv); got != "L6" {
+		t.Errorf("first line = %q, want L6 (the last 4 lines L6..L9)", got)
+	}
+	lv.MoveBy(-1)
+	if got := firstLine(t, lv); got != "L5" {
+		t.Errorf("after k inside the row, first line = %q, want L5", got)
+	}
+}
+
+func TestListViewHalfPageAndPageScrollTallRowByLines(t *testing.T) {
+	lv := NewListView()
+	lv.SetRect(0, 0, 40, 4)
+	lv.SetRows([]ListRow{tallRow("tall", 20), itemRow("next", "n1", "n2")})
+
+	lv.MoveHalfPage(1)
+	if got := firstLine(t, lv); got != "L2" {
+		t.Errorf("after half page down, first line = %q, want L2", got)
+	}
+	lv.MovePage(1)
+	if got := firstLine(t, lv); got != "L6" {
+		t.Errorf("after page down, first line = %q, want L6", got)
+	}
+	lv.MoveHalfPage(-1)
+	if got := firstLine(t, lv); got != "L4" {
+		t.Errorf("after half page up, first line = %q, want L4", got)
+	}
+	lv.MovePage(-1)
+	if got := firstLine(t, lv); got != "L0" {
+		t.Errorf("after page up past the start, first line = %q, want L0", got)
+	}
+	if got := lv.CurrentID(); got != "tall" {
+		t.Errorf("CurrentID() = %q, want tall", got)
+	}
+}
+
+func TestListViewMoveTopResetsLineOffset(t *testing.T) {
+	lv := NewListView()
+	lv.SetRect(0, 0, 40, 4)
+	lv.SetRows([]ListRow{tallRow("tall", 10)})
+	lv.MoveBy(1)
+	lv.MoveBy(1)
+
+	lv.MoveTop()
+
+	if got := firstLine(t, lv); got != "L0" {
+		t.Errorf("first line after MoveTop = %q, want L0", got)
+	}
+}
+
+func TestListViewMoveBottomShowsEndOfTallLastRow(t *testing.T) {
+	lv := NewListView()
+	lv.SetRect(0, 0, 40, 4)
+	lv.SetRows([]ListRow{itemRow("a", "a1", "a2"), tallRow("tall", 10)})
+
+	lv.MoveBottom()
+	if got := firstLine(t, lv); got != "L6" {
+		t.Errorf("first line after MoveBottom = %q, want L6", got)
+	}
+
+	lv.MoveBottom() // cursor unchanged: still the end
+	if got := firstLine(t, lv); got != "L6" {
+		t.Errorf("first line after repeated MoveBottom = %q, want L6", got)
+	}
+}
+
+func TestListViewSetRowsClampsLineOffsetWhenRowShrinks(t *testing.T) {
+	lv := NewListView()
+	lv.SetRect(0, 0, 40, 4)
+	lv.SetRows([]ListRow{tallRow("tall", 10)})
+	lv.MoveBottom() // lineOff 6
+
+	lv.SetRows([]ListRow{tallRow("tall", 6)})
+	if got := firstLine(t, lv); got != "L2" {
+		t.Errorf("first line after shrink to 6 lines = %q, want L2", got)
+	}
+
+	lv.SetRows([]ListRow{tallRow("tall", 3)})
+	if got := firstLine(t, lv); got != "L0" {
+		t.Errorf("first line after shrink below the view height = %q, want L0", got)
+	}
+}
+
+func TestListViewSetRowsResetsLineOffsetWhenCursorRowChanges(t *testing.T) {
+	lv := NewListView()
+	lv.SetRect(0, 0, 40, 4)
+	lv.SetRows([]ListRow{tallRow("old", 10)})
+	lv.MoveBottom()
+
+	lv.SetRows([]ListRow{tallRow("new", 10)})
+
+	if got := firstLine(t, lv); got != "L0" {
+		t.Errorf("first line for a different row = %q, want L0", got)
+	}
+}
