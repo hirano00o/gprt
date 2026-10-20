@@ -53,7 +53,7 @@ go build ./cmd/gprt
 gprt
 ```
 
-The list on the left shows your pull requests. Move with `j`/`k`, open one with `Enter`, and switch between the **PR** tab and the **Files** tab with `gt`/`gT`. Press `?` at any time for the key reference, `:` for commands, and `q` to quit.
+The list on the left shows your pull requests. Move with `j`/`k`, open one with `Enter` (the list hides to give it the full width; `Ctrl-w h` brings it back), and switch between the **PR** tab and the **Files** tab with `gt`/`gT`. Press `?` at any time for the key reference, `:` for commands, and `q` to quit.
 
 | Flag | Effect |
 |------|--------|
@@ -110,7 +110,7 @@ All keys below except the editor's own can be remapped. The full reference, incl
 
 | Key | Action |
 |-----|--------|
-| `Enter`, `l` | Open the pull request |
+| `Enter`, `l` | Open the pull request and hide the list (`Ctrl-w h` or `Ctrl-w o` shows it again) |
 | `/` | Filter the list (`Esc` clears) |
 | `n` | Create a pull request |
 
