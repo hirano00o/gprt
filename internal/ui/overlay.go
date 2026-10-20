@@ -169,9 +169,7 @@ func (a *App) closeOverlay() {
 }
 
 // helpContexts are the (label, Context) pairs the help overlay lists, in
-// display order. Only the contexts the router actually resolves keys
-// against today are shown; the rest (thread, comment, pr, composer) arrive
-// with the milestones that give them a pane.
+// display order: every Context the keymap has.
 var helpContexts = []struct {
 	label string
 	ctx   keys.Context
@@ -179,8 +177,12 @@ var helpContexts = []struct {
 	{"Global", keys.ContextGlobal},
 	{"List", keys.ContextList},
 	{"Detail", keys.ContextDetail},
+	{"PR tab", keys.ContextPR},
 	{"Files (tree)", keys.ContextFiles},
 	{"Diff", keys.ContextDiff},
+	{"Thread (diff)", keys.ContextThread},
+	{"Comment", keys.ContextComment},
+	{"Composer", keys.ContextComposer},
 }
 
 // helpCommandsLine lists every ":" command submitCommand recognizes; kept
