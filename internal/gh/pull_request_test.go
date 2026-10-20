@@ -146,9 +146,10 @@ func TestClient_PullRequest_FullMappingWithPagination(t *testing.T) {
 		t.Errorf("RollupState = %q, want %q", pr.RollupState, model.StatusStateFailure)
 	}
 
-	// Review threads: RT_1 (page 1, LINE, 2 comments) + RT_2 (page 2, FILE, 1 comment).
-	if len(pr.ReviewThreads) != 2 {
-		t.Fatalf("ReviewThreads = %+v, want 2 entries", pr.ReviewThreads)
+	// Review threads: RT_1 (page 1, LINE, 2 comments) + RT_2 (page 2, FILE, 1 comment) + RT_3
+	// (page 2, outdated LINE with a null line).
+	if len(pr.ReviewThreads) != 3 {
+		t.Fatalf("ReviewThreads = %+v, want 3 entries", pr.ReviewThreads)
 	}
 	rt0 := pr.ReviewThreads[0]
 	if rt0.ID != "RT_1" || rt0.SubjectType != model.ThreadSubjectLine || rt0.Line != 10 || len(rt0.Comments) != 2 {
@@ -163,6 +164,13 @@ func TestClient_PullRequest_FullMappingWithPagination(t *testing.T) {
 	rt1 := pr.ReviewThreads[1]
 	if rt1.ID != "RT_2" || rt1.SubjectType != model.ThreadSubjectFile || !rt1.IsResolved || !rt1.IsOutdated {
 		t.Errorf("ReviewThreads[1] = %+v", rt1)
+	}
+	rt2 := pr.ReviewThreads[2]
+	if rt2.ID != "RT_3" || !rt2.IsOutdated || rt2.Line != 0 || rt2.OriginalLine != 7 || rt2.OriginalCommit != "orig123" {
+		t.Errorf("ReviewThreads[2] (outdated, null line) = %+v", rt2)
+	}
+	if rt0.OriginalLine != 0 || rt0.OriginalCommit != "" {
+		t.Errorf("ReviewThreads[0] original anchor = (%d, %q), want zero values", rt0.OriginalLine, rt0.OriginalCommit)
 	}
 
 	// Timeline: 16 items from page 1 + 1 from page 2.

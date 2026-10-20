@@ -23,9 +23,17 @@ const (
 // ReviewThread is a conversation anchored to a location in a pull request's
 // diff: a single line, a line range, or a whole file.
 type ReviewThread struct {
-	ID                 string
-	Path               string
-	Line               int
+	ID   string
+	Path string
+	Line int
+	// OriginalLine is the line number the thread was first anchored to, on
+	// the diff of OriginalCommit. GitHub reports Line as null (0 here) once
+	// the thread is outdated, but keeps OriginalLine, which is the only
+	// handle left for relocating the thread in the current diff.
+	OriginalLine int
+	// OriginalCommit is the OID of the commit OriginalLine refers to (the
+	// first comment's original commit); empty when unknown.
+	OriginalCommit     string
 	StartLine          int
 	Side               DiffSide
 	StartSide          DiffSide

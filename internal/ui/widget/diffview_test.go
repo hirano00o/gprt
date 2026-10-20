@@ -1377,3 +1377,43 @@ func TestDiffViewCursorGapIdentitySurvivesExpandingADifferentGap(t *testing.T) {
 		t.Fatalf("cursor after expanding a different gap = gapStart=%d ok=%v, want still (11, true)", gapStart, ok)
 	}
 }
+
+// TestDiffViewOutdatedThreadWithLineRendersInlineWithOutdatedStatus covers
+// bucketThreads no longer sending every outdated thread to the "Outdated
+// threads" block: one that carries a (possibly relocated) valid line is
+// rendered at that line, still flagged "outdated".
+func TestDiffViewOutdatedThreadWithLineRendersInlineWithOutdatedStatus(t *testing.T) {
+	f := twoHunkFile(t)
+	f.Threads = []model.ReviewThread{
+		{
+			ID: "relocated", Path: f.Path, Line: 1, Side: model.DiffSideRight, IsOutdated: true,
+			Comments: []model.ReviewComment{{Body: "relocated body"}},
+		},
+	}
+	dv := NewDiffView()
+	dv.SetFile(f)
+	drawn(t, dv, 80, 40)
+
+	var sawHeader, sawStatus, sawBody bool
+	for _, r := range dv.rows {
+		switch r.kind {
+		case rowKindOutdatedHeader:
+			sawHeader = true
+		case rowKindThreadHeader:
+			sawStatus = sawStatus || containsAll(rowText(r, 0), "outdated")
+		case rowKindThreadComment:
+			for li := range r.lines {
+				sawBody = sawBody || containsAll(rowText(r, li), "relocated body")
+			}
+		}
+	}
+	if sawHeader {
+		t.Error("an outdated thread with a valid line went to the Outdated threads block, want inline")
+	}
+	if !sawStatus {
+		t.Error("inline outdated thread's header lacks the \"outdated\" status")
+	}
+	if !sawBody {
+		t.Error("inline outdated thread's comment body was not rendered")
+	}
+}

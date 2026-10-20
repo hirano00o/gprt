@@ -463,6 +463,12 @@ type Store struct {
 	// teamSearchGen above.
 	compareGen int
 
+	// outdatedAnchors and outdatedInFlight are LoadOutdatedAnchors' cache
+	// and in-flight set (see outdated.go); both are dropped whenever the
+	// current pull request is replaced, closed or reloaded.
+	outdatedAnchors  map[outdatedKey]outdatedResult
+	outdatedInFlight map[outdatedKey]bool
+
 	subscribers []func(Event)
 }
 

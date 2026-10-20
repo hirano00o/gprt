@@ -347,12 +347,21 @@ func TestLocateThread_RightMatchesAddOrContextByNewNo(t *testing.T) {
 	}
 }
 
-func TestLocateThread_OutdatedNeverLocates(t *testing.T) {
+func TestLocateThread_OutdatedWithLineLocates(t *testing.T) {
+	hunk, line, ok := LocateThread(testHunks(), model.ReviewThread{
+		Line: 3, Side: model.DiffSideRight, SubjectType: model.ThreadSubjectLine, IsOutdated: true,
+	})
+	if !ok || hunk != 0 || line != 3 {
+		t.Errorf("LocateThread() outdated with Line 3 = (%d,%d,%v), want (0,3,true)", hunk, line, ok)
+	}
+}
+
+func TestLocateThread_ZeroLineNeverLocates(t *testing.T) {
 	_, _, ok := LocateThread(testHunks(), model.ReviewThread{
-		Line: 2, Side: model.DiffSideLeft, SubjectType: model.ThreadSubjectLine, IsOutdated: true,
+		Line: 0, Side: model.DiffSideRight, SubjectType: model.ThreadSubjectLine, IsOutdated: true,
 	})
 	if ok {
-		t.Error("LocateThread() with IsOutdated = true, want false")
+		t.Error("LocateThread() with Line 0, want false")
 	}
 }
 
@@ -793,4 +802,55 @@ func TestExpandGap_DoesNotMutateInput(t *testing.T) {
 		t.Fatalf("ExpandGap() error = %v", err)
 	}
 	assertHunksEqual(t, hunks, want)
+}
+
+func TestMapOldLine(t *testing.T) {
+	// Hunk 1: old 3-5, new 3-6 (edit of old line 4, delta +1 afterwards).
+	// Hunk 2: old 20-21, new 21 (trailing deletion of old line 21).
+	edits := mustParse(t, "@@ -3,3 +3,4 @@\n c3\n-old4\n+new4a\n+new4b\n c5\n"+
+		"@@ -20,2 +21,1 @@\n c20\n-del21")
+	pureDeletion := mustParse(t, "@@ -5,2 +4,0 @@\n-a\n-b")
+	insertion := mustParse(t, "@@ -5,0 +6,2 @@\n+x\n+y")
+
+	tests := []struct {
+		name     string
+		hunks    []Hunk
+		oldLine  int
+		wantLine int
+		wantOK   bool
+	}{
+		{"before first hunk", edits, 1, 1, true},
+		{"context in hunk", edits, 3, 3, true},
+		{"edited line maps to replacement", edits, 4, 4, true},
+		{"context after an edit", edits, 5, 6, true},
+		{"between hunks shifts by delta", edits, 10, 11, true},
+		{"second hunk context", edits, 20, 21, true},
+		{"trailing deletion clamps to last new line", edits, 21, 21, true},
+		{"after all hunks", edits, 30, 30, true},
+		{"no hunks", nil, 5, 5, true},
+		{"deletion at the top of the file has no line", mustParse(t, "@@ -1,1 +0,0 @@\n-a"), 1, 0, false},
+		{"pure deletion maps to the line it followed", pureDeletion, 5, 4, true},
+		{"before pure deletion hunk", pureDeletion, 4, 4, true},
+		{"after pure deletion hunk", pureDeletion, 7, 5, true},
+		{"before insertion hunk", insertion, 5, 5, true},
+		{"after insertion hunk", insertion, 6, 8, true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			gotLine, gotOK := MapOldLine(tc.hunks, tc.oldLine)
+			if gotOK != tc.wantOK || (gotOK && gotLine != tc.wantLine) {
+				t.Errorf("MapOldLine(%d) = (%d,%v), want (%d,%v)",
+					tc.oldLine, gotLine, gotOK, tc.wantLine, tc.wantOK)
+			}
+		})
+	}
+}
+
+func mustParse(t *testing.T, patch string) []Hunk {
+	t.Helper()
+	hunks, err := Parse(patch)
+	if err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+	return hunks
 }

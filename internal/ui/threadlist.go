@@ -86,8 +86,8 @@ func (a *App) rebuildThreadList() {
 		if entries[i].Path != entries[j].Path {
 			return entries[i].Path < entries[j].Path
 		}
-		if entries[i].Line != entries[j].Line {
-			return entries[i].Line < entries[j].Line
+		if li, lj := threadListLine(entries[i]), threadListLine(entries[j]); li != lj {
+			return li < lj
 		}
 		return entries[i].ID < entries[j].ID
 	})
@@ -113,6 +113,17 @@ func (a *App) rebuildThreadList() {
 	}
 }
 
+// threadListLine is the line a thread is listed under: its own, or - for
+// an outdated thread GitHub left without one - the line it was originally
+// written against, the only location still known (0 for a file-level
+// thread, which has neither).
+func threadListLine(t model.ReviewThread) int {
+	if t.Line == 0 {
+		return t.OriginalLine
+	}
+	return t.Line
+}
+
 // threadListEntryText renders one entry's display line: "<path>:<line>
 // <flags>@<author>: <first line of the first comment>" for a line/range
 // thread, or "<path> (file)  <flags>@<author>: <first line>" for a
@@ -120,7 +131,7 @@ func (a *App) rebuildThreadList() {
 // "[outdated] ", each omitted when false; " PENDING" is appended when any
 // of the thread's own comments is not yet published.
 func threadListEntryText(t model.ReviewThread) string {
-	loc := fmt.Sprintf("%s:%d", t.Path, t.Line)
+	loc := fmt.Sprintf("%s:%d", t.Path, threadListLine(t))
 	if t.SubjectType == model.ThreadSubjectFile {
 		loc = t.Path + " (file)"
 	}

@@ -23,6 +23,11 @@ const compareFilesMax = 300
 // REST "compare two commits" endpoint.
 type CompareResult struct {
 	Files []model.ChangedFile
+	// Status is the endpoint's top-level relation of head to base: "ahead",
+	// "behind", "diverged" or "identical". Callers that need the files to
+	// describe a pure base-to-head history (outdated-thread relocation)
+	// must reject anything but "ahead"/"identical".
+	Status string
 	// Truncated is set when the response held compareFilesMax files: the
 	// endpoint has no pagination, so that count means the actual diff may
 	// hold more files than were returned, indistinguishable from a diff
@@ -34,16 +39,18 @@ type CompareResult struct {
 // compareResponse is the decoded shape of the REST "compare two commits"
 // endpoint's JSON response, as far as CompareFiles needs it.
 type compareResponse struct {
-	Files []restFile `json:"files"`
+	Status string     `json:"status"`
+	Files  []restFile `json:"files"`
 }
 
 // CompareFiles fetches the changed files between base and head in repo, via
 // the REST "compare two commits" endpoint (GET
 // {restBase}/repos/{owner}/{name}/compare/{base}...{head}). This is gprt's
-// second (and last) use of REST rather than GraphQL: compare has no
-// GraphQL equivalent that returns unified-diff patches, the same reason
-// ChangedFiles (files.go) uses REST for "list pull request files" (see
-// docs/DESIGN.md's decision on GraphQL-as-primary).
+// second use of REST rather than GraphQL (it has two consumers: the
+// create-PR form's diff preview and the relocation of outdated review
+// threads): compare has no GraphQL equivalent that returns unified-diff
+// patches, the same reason ChangedFiles (files.go) uses REST for "list
+// pull request files" (see docs/DESIGN.md's decision on GraphQL-as-primary).
 //
 // It is built directly against the raw *http.Client in Client.rest, like
 // ChangedFiles, rather than through api.RESTClient.
@@ -80,6 +87,7 @@ func (c *Client) CompareFiles(ctx context.Context, repo model.RepoRef, base, hea
 
 	return CompareResult{
 		Files:     files,
+		Status:    body.Status,
 		Truncated: len(files) >= compareFilesMax,
 		RateLimit: rateLimit,
 	}, nil

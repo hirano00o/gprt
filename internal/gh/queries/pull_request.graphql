@@ -149,6 +149,7 @@ query PullRequestDetail(
           isOutdated
           path
           line
+          originalLine
           startLine
           diffSide
           startDiffSide
@@ -166,6 +167,9 @@ query PullRequestDetail(
               createdAt
               state
               url
+              originalCommit {
+                oid
+              }
               reactionGroups {
                 content
                 viewerHasReacted

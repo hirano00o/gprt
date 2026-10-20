@@ -89,6 +89,38 @@
                   }
                 ]
               }
+            },
+            {
+              "id": "RT_3",
+              "isResolved": false,
+              "isOutdated": true,
+              "path": "main.go",
+              "line": null,
+              "originalLine": 7,
+              "startLine": null,
+              "diffSide": "RIGHT",
+              "startDiffSide": null,
+              "subjectType": "LINE",
+              "viewerCanReply": true,
+              "viewerCanResolve": true,
+              "viewerCanUnresolve": false,
+              "comments": {
+                "nodes": [
+                  {
+                    "id": "RC_4",
+                    "author": { "login": "reviewer1" },
+                    "body": "Outdated line comment",
+                    "createdAt": "2026-09-07T01:00:00Z",
+                    "state": "SUBMITTED",
+                    "url": "https://example.com/rc/4",
+                    "originalCommit": { "oid": "orig123" },
+                    "reactionGroups": [],
+                    "viewerCanUpdate": false,
+                    "viewerCanDelete": false,
+                    "pullRequestReview": { "id": "PRR_1" }
+                  }
+                ]
+              }
             }
           ]
         },

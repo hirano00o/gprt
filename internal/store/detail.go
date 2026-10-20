@@ -97,6 +97,7 @@ func (s *Store) OpenPR(ref model.PRRef) {
 	// lazy, left to the UI slice for when the Files tab is actually
 	// opened), but any previous PR's file list/highlight pool is reset.
 	s.resetFiles()
+	s.resetOutdatedAnchors()
 	// Recomputed immediately, not left to whenever the next fetch
 	// resolves: without this, LastError() would keep reporting the
 	// *previous* pull request's standing error for however long the new
@@ -157,6 +158,7 @@ func (s *Store) ReloadPR() {
 		}
 	}
 	s.detailStale = true
+	s.resetOutdatedAnchors()
 	s.emit(Event{Kind: EventPRChanged})
 	s.startDetailFetch(false)
 	s.startMentionableUsersFetch(s.current.Repo, true)
@@ -196,6 +198,7 @@ func (s *Store) ClosePR() {
 	s.detailWarnings = nil
 	s.detailFetchedAt = time.Time{}
 	s.resetFiles()
+	s.resetOutdatedAnchors()
 	s.recomputeLastErr()
 
 	s.emit(Event{Kind: EventPRChanged})
