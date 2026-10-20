@@ -185,6 +185,11 @@ var helpContexts = []struct {
 	{"Composer", keys.ContextComposer},
 }
 
+// helpActionWidth is the width of the action-ID column in the help overlay:
+// len("thread.toggle_resolved"), the longest action ID, so every description
+// starts in the same column.
+const helpActionWidth = 22
+
 // helpCommandsLine lists every ":" command submitCommand recognizes; kept
 // in sync with its switch by hand (a mismatch only ever makes the help
 // text wrong, never the command itself unusable, so a generated list is
@@ -198,6 +203,11 @@ const helpCommandsLine = ": commands: q, quit, help, messages, reload, close, re
 // (SetDynamicColors(true), for the style tag below), which would
 // otherwise misparse a literal "[" in a binding sequence like "[c"/"]f" as
 // the start of a colour tag.
+//
+// Each binding row is "sequence action description": the action ID is padded
+// to helpActionWidth so descriptions line up, and an action without a
+// description (keys.Action.Description() == "") falls back to just
+// "sequence action".
 //
 // re == nil renders plain text with no match marked (n, line and endCol
 // are all 0). re != nil counts every regexp match across the whole text (n) and
@@ -227,7 +237,11 @@ func (a *App) buildHelpText(re *regexp.Regexp, current int) (text string, n, lin
 		}
 		raw = append(raw, hc.label+":")
 		for _, bd := range bindings {
-			raw = append(raw, fmt.Sprintf("  %-10s %s", bd.Sequence, bd.Action))
+			if desc := bd.Action.Description(); desc != "" {
+				raw = append(raw, fmt.Sprintf("  %-10s %-*s %s", bd.Sequence, helpActionWidth, bd.Action, desc))
+			} else {
+				raw = append(raw, fmt.Sprintf("  %-10s %s", bd.Sequence, bd.Action))
+			}
 		}
 		raw = append(raw, "")
 	}

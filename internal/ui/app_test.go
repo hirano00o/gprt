@@ -2096,6 +2096,25 @@ func TestAppHelpAlsoClosesOnQuestionMark(t *testing.T) {
 	waitFor(t, app.app, func() bool { return app.overlay == "" })
 }
 
+// TestAppHelpShowsActionDescriptions checks each help row pairs the action
+// ID with its short description, so users need not guess what an ID like
+// comment.react does.
+func TestAppHelpShowsActionDescriptions(t *testing.T) {
+	app, _, _, _ := newTestApp(t, nil)
+
+	text, _, _, _ := app.buildHelpText(nil, 0)
+
+	for _, line := range strings.Split(text, "\n") {
+		if strings.Contains(line, "comment.react") {
+			if !strings.Contains(line, "Add or remove a reaction") {
+				t.Errorf("comment.react row = %q, want its description", line)
+			}
+			return
+		}
+	}
+	t.Error("no help row for comment.react")
+}
+
 // TestAppHelpSearchFillsViewportOnFirstDraw guards against a tview
 // TextView pitfall previously hit by the region/Highlight()-based
 // approach: calling Highlight() directly (outside Draw) lazily builds the
