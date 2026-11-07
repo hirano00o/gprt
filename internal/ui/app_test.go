@@ -1825,6 +1825,41 @@ func TestAppInitialRenderShowsSectionsAndRows(t *testing.T) {
 	}
 }
 
+func TestAppBuildRowsSeparatesSectionsWithOneBlankRow(t *testing.T) {
+	app, _, _, _ := newTestApp(t, nil)
+
+	rows := query(app.app, app.buildRows)
+	var headers int
+	for i, r := range rows {
+		isSpacer := strings.HasPrefix(r.ID, "spacer:")
+		isHeader := strings.HasPrefix(r.ID, "section:")
+		if isSpacer {
+			if r.Selectable {
+				t.Errorf("rows[%d] (%s) is selectable, want a non-selectable spacer", i, r.ID)
+			}
+			if len(r.Lines) != 1 || widget.SpanWidth(r.Lines[0]) != 0 {
+				t.Errorf("rows[%d] (%s) = %+v, want exactly one blank line", i, r.ID, r.Lines)
+			}
+			if i+1 >= len(rows) || !strings.HasPrefix(rows[i+1].ID, "section:") {
+				t.Errorf("rows[%d] (%s) is not followed by a section header", i, r.ID)
+			}
+		}
+		if isHeader {
+			headers++
+			prevIsSpacer := i > 0 && strings.HasPrefix(rows[i-1].ID, "spacer:")
+			if headers == 1 && prevIsSpacer {
+				t.Errorf("first header %s is preceded by a spacer, want none above the first section", r.ID)
+			}
+			if headers > 1 && !prevIsSpacer {
+				t.Errorf("header %s is not preceded by a spacer row", r.ID)
+			}
+		}
+	}
+	if headers < 2 {
+		t.Fatalf("fixture rendered %d section headers, want at least 2 to exercise the spacer", headers)
+	}
+}
+
 func containsSubstring(s, substr string) bool {
 	for i := 0; i+len(substr) <= len(s); i++ {
 		if s[i:i+len(substr)] == substr {
