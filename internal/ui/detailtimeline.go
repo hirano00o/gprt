@@ -55,7 +55,7 @@ func unavailableBlock(id string) widget.Block {
 }
 
 // issueCommentBlock renders "@author commented <relative>" followed by the
-// wrapped comment body and, when present, a reaction summary line.
+// comment body rendered as Markdown and, when present, a reaction summary line.
 func issueCommentBlock(id string, c *model.IssueComment) widget.Block {
 	return widget.Block{
 		ID:         id,
@@ -63,9 +63,7 @@ func issueCommentBlock(id string, c *model.IssueComment) widget.Block {
 		URL:        c.URL,
 		Build: func(width int) [][]widget.Span {
 			lines := [][]widget.Span{{{Text: withRelativeTime("@"+c.Author.Login+" commented", c.CreatedAt), Style: theme.Base}}}
-			if strings.TrimSpace(c.Body) != "" {
-				lines = append(lines, wrapPlain(c.Body, width, theme.Base)...)
-			}
+			lines = append(lines, widget.RenderMarkdown(c.Body, width)...)
 			if reaction := reactionLine(c.ReactionGroups); reaction != nil {
 				lines = append(lines, reaction)
 			}
@@ -100,9 +98,7 @@ func reviewBlock(id string, r *model.Review) widget.Block {
 		URL:        r.URL,
 		Build: func(width int) [][]widget.Span {
 			lines := [][]widget.Span{{{Text: withRelativeTime("@"+r.Author.Login+" "+reviewVerb(r.State), r.SubmittedAt), Style: theme.Base}}}
-			if strings.TrimSpace(r.Body) != "" {
-				lines = append(lines, wrapPlain(r.Body, width, theme.Base)...)
-			}
+			lines = append(lines, widget.RenderMarkdown(r.Body, width)...)
 			if reaction := reactionLine(r.ReactionGroups); reaction != nil {
 				lines = append(lines, reaction)
 			}

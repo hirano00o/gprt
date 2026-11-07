@@ -10,8 +10,6 @@ import (
 	"fmt"
 	"log/slog"
 
-	"github.com/gdamore/tcell/v2"
-
 	"github.com/hirano00o/gprt/internal/model"
 	"github.com/hirano00o/gprt/internal/store"
 	"github.com/hirano00o/gprt/internal/ui/theme"
@@ -180,45 +178,6 @@ func statsLine(pr *model.PullRequest) []widget.Span {
 		text += fmt.Sprintf(" · %d threads (%d unresolved)", n, unresolved)
 	}
 	return []widget.Span{{Text: text, Style: theme.Muted}}
-}
-
-// wrapPlain word-wraps text to width using widget.WrapText (which treats
-// every character literally, unlike tview.WordWrap — see its doc comment
-// — and existing newlines as hard breaks), rendering every resulting line
-// in a single style.
-func wrapPlain(text string, width int, style tcell.Style) [][]widget.Span {
-	if width <= 0 {
-		width = 1
-	}
-	wrapped := widget.WrapText(text, width)
-	lines := make([][]widget.Span, len(wrapped))
-	for i, l := range wrapped {
-		lines[i] = []widget.Span{{Text: l, Style: style}}
-	}
-	return lines
-}
-
-// chopChars splits text into fixed-width chunks of width runes each,
-// without any word-boundary search — used for fenced code blocks, where
-// word-wrapping would reflow content in a way that misrepresents the
-// original source.
-func chopChars(text string, width int) [][]widget.Span {
-	if width <= 0 {
-		width = 1
-	}
-	runes := []rune(text)
-	if len(runes) == 0 {
-		return [][]widget.Span{{{Text: "", Style: theme.Muted}}}
-	}
-	var lines [][]widget.Span
-	for i := 0; i < len(runes); i += width {
-		end := i + width
-		if end > len(runes) {
-			end = len(runes)
-		}
-		lines = append(lines, []widget.Span{{Text: string(runes[i:end]), Style: theme.Muted}})
-	}
-	return lines
 }
 
 // reactionLine renders a single line summarising groups (for example "👍 2

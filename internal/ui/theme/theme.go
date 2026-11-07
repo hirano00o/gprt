@@ -45,6 +45,13 @@ var (
 	// a review-comment send silently coerced to "add to review"): distinct
 	// from Warning/Error, which both signal a problem.
 	Info = tcell.StyleDefault.Foreground(colorInfo).Background(colorBg)
+	// Code styles inline code spans in rendered Markdown. Foreground only (no
+	// background tint): list/diff rows overwrite span backgrounds with the
+	// cursor's own via withBackground.
+	Code = tcell.StyleDefault.Foreground(colorWarning).Background(colorBg)
+	// Link styles Markdown link text and bare URLs: Accent plus an underline
+	// so a link reads as one even without colour.
+	Link = tcell.StyleDefault.Foreground(colorAccent).Background(colorBg).Underline(true)
 	// SearchMatch highlights a "/" search hit in the diff. Reverse, not a
 	// Background colour: widget.DiffView.drawLineRow overwrites every span's
 	// background with the row's own background via withBackground (cursor/
