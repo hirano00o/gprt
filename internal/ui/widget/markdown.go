@@ -44,6 +44,8 @@ var (
 
 	htmlCommentRe = regexp.MustCompile(`(?s)<!--.*?(?:-->|\z)`)
 	htmlTagRe     = regexp.MustCompile(`(?s)</?[A-Za-z][^>]*>`)
+	htmlImgRe     = regexp.MustCompile(`(?is)<img\b[^>]*>`)
+	htmlAltRe     = regexp.MustCompile(`(?is)\balt\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))`)
 	// htmlRawTextRe matches the opening of a CommonMark type-1 HTML block.
 	htmlRawTextRe = regexp.MustCompile(`(?i)^\s*<(script|style|pre|textarea)\b`)
 )
@@ -316,14 +318,56 @@ func (r *mdRenderer) htmlBlock(n *ast.HTMLBlock, width int) [][]Span {
 	}
 
 	var out [][]Span
-	for line := range strings.SplitSeq(htmlTagRe.ReplaceAllString(content, ""), "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
+	for line := range strings.SplitSeq(content, "\n") {
+		if spans := htmlLineSpans(strings.TrimSpace(line)); len(spans) > 0 {
+			out = append(out, WrapSpans(spans, width)...)
 		}
-		out = append(out, WrapSpans([]Span{{Text: resolveEntities([]byte(line)), Style: theme.Base}}, width)...)
 	}
 	return out
+}
+
+// htmlLineSpans reduces one line of an HTML block to its text, with every
+// <img> shown as an image placeholder rather than dropped like other tags,
+// so an image pasted into a PR body (GitHub inserts uploads as <img>) still
+// leaves a trace. It returns nil for a line with nothing visible.
+func htmlLineSpans(line string) []Span {
+	var spans []Span
+	text := func(s string) {
+		if t := resolveEntities([]byte(htmlTagRe.ReplaceAllString(s, ""))); t != "" {
+			spans = append(spans, Span{Text: t, Style: theme.Base})
+		}
+	}
+	last := 0
+	for _, m := range htmlImgRe.FindAllStringIndex(line, -1) {
+		text(line[last:m[0]])
+		spans = append(spans, Span{Text: imagePlaceholder(htmlImgAlt(line[m[0]:m[1]])), Style: theme.Muted})
+		last = m[1]
+	}
+	text(line[last:])
+	if strings.TrimSpace(spansText(spans)) == "" {
+		return nil
+	}
+	spans[0].Text = strings.TrimLeft(spans[0].Text, " \t")
+	spans[len(spans)-1].Text = strings.TrimRight(spans[len(spans)-1].Text, " \t")
+	return spans
+}
+
+// htmlImgAlt returns the (entity-decoded) alt attribute of an <img> tag, or
+// "" when it has none.
+func htmlImgAlt(tag string) string {
+	m := htmlAltRe.FindStringSubmatch(tag)
+	if m == nil {
+		return ""
+	}
+	return resolveEntities([]byte(m[1] + m[2] + m[3]))
+}
+
+// imagePlaceholder is the muted text standing in for an image.
+func imagePlaceholder(alt string) string {
+	if alt == "" {
+		return "[image]"
+	}
+	return "[image: " + alt + "]"
 }
 
 // spansText concatenates the text of spans.

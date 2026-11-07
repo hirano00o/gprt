@@ -69,6 +69,11 @@ func TestRenderMarkdown_BlockText(t *testing.T) {
 		{"inline br", "a<br>b", 40, []string{"a", "b"}},
 		{"inline html comment is dropped", "a<!-- c -->b", 40, []string{"ab"}},
 		{"image shows alt", "![logo](u.png)", 40, []string{"[image: logo]"}},
+		{"html img block shows alt", "<img width=\"800\" alt=\"shot\" src=\"https://e.com/a.png\" />", 40, []string{"[image: shot]"}},
+		{"html img block without alt", "<img src='https://e.com/a.png'>", 40, []string{"[image]"}},
+		{"html img inside other html keeps surrounding text", "<p align=\"center\">logo <img alt=logo src=x.png> here</p>", 40, []string{"logo [image: logo] here"}},
+		{"text left by stripped tags is trimmed", "<div><b> bold </b></div>", 40, []string{"bold"}},
+		{"inline html img shows alt", "see <img alt=\"diagram\" src=\"d.png\"> above", 40, []string{"see [image: diagram] above"}},
 		{"link shows its url", "[docs](https://e.com)", 40, []string{"docs (https://e.com)"}},
 		{"link with text equal to url has no suffix", "[https://e.com](https://e.com)", 40, []string{"https://e.com"}},
 		{"autolink shows only the url", "<https://e.com>", 40, []string{"https://e.com"}},
@@ -132,6 +137,9 @@ func TestRenderMarkdown_InlineStyles(t *testing.T) {
 	}
 	if got := styleOf(t, lines, " (http://x)"); got != theme.Muted {
 		t.Errorf("link url suffix style = %v, want theme.Muted", got)
+	}
+	if got := styleOf(t, RenderMarkdown("<img alt=\"b\" src=\"b.png\">", 40), "[image: b]"); got != theme.Muted {
+		t.Errorf("html img style = %v, want theme.Muted", got)
 	}
 	if got := styleOf(t, lines, "[image: a]"); got != theme.Muted {
 		t.Errorf("image style = %v, want theme.Muted", got)

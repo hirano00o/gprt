@@ -67,19 +67,19 @@ func (r *mdRenderer) inlineNode(n ast.Node, style tcell.Style) []Span {
 	case *ast.AutoLink:
 		return []Span{{Text: string(n.Label(r.src)), Style: overlay(style, theme.Link)}}
 	case *ast.Image:
-		label := "[image]"
-		if alt := r.plain(n); alt != "" {
-			label = "[image: " + alt + "]"
-		}
-		return []Span{{Text: label, Style: theme.Muted}}
+		return []Span{{Text: imagePlaceholder(r.plain(n)), Style: theme.Muted}}
 	case *ast.RawHTML:
 		var b strings.Builder
 		for i := range n.Segments.Len() {
 			seg := n.Segments.At(i)
 			b.Write(seg.Value(r.src))
 		}
-		if htmlBreakRe.MatchString(b.String()) {
+		raw := b.String()
+		if htmlBreakRe.MatchString(raw) {
 			return []Span{{Text: "\n", Style: style}}
+		}
+		if htmlImgRe.MatchString(raw) {
+			return []Span{{Text: imagePlaceholder(htmlImgAlt(raw)), Style: theme.Muted}}
 		}
 		return nil
 	case *extast.TaskCheckBox:
