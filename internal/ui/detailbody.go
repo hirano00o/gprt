@@ -11,13 +11,13 @@ import (
 // placeholder when the body is blank or renders to nothing (only an HTML
 // comment, only fence markers): a selectable block must never have zero
 // lines. It is selectable, with the PR's own URL.
-func descriptionBlock(pr *model.PullRequest) widget.Block {
+func descriptionBlock(pr *model.PullRequest, images imageSources) widget.Block {
 	return widget.Block{
 		ID:         "description",
 		Selectable: true,
 		URL:        pr.URL,
 		Build: func(width int) [][]widget.Span {
-			lines := widget.RenderMarkdown(pr.Body, width)
+			lines := widget.RenderMarkdown(pr.Body, width, images.of(pr.ID))
 			if len(lines) == 0 {
 				lines = [][]widget.Span{{{Text: "(no description)", Style: theme.Muted}}}
 			}

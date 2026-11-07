@@ -12,6 +12,7 @@ import (
 
 	"github.com/hirano00o/gprt/internal/diff"
 	"github.com/hirano00o/gprt/internal/highlight"
+	"github.com/hirano00o/gprt/internal/kitty"
 	"github.com/hirano00o/gprt/internal/model"
 	"github.com/hirano00o/gprt/internal/ui/theme"
 )
@@ -1427,7 +1428,7 @@ func TestCommentLinesRenderMarkdownBodyInsideBorder(t *testing.T) {
 		Body:   "# Plan\n- first step is rather long indeed\n- `code`",
 		State:  model.ReviewCommentStateSubmitted,
 	}
-	lines := commentLines(c, 24)
+	lines := commentLines(c, 24, nil)
 
 	var text []string
 	for _, line := range lines {
@@ -1444,5 +1445,45 @@ func TestCommentLinesRenderMarkdownBodyInsideBorder(t *testing.T) {
 	}
 	if strings.Contains(joined, "# Plan") {
 		t.Errorf("comment lines =\n%s\nwant the heading marker removed", joined)
+	}
+}
+
+// TestDiffViewCommentImagesComeFromTheCommentsOwnSource covers
+// SetImageSource: a standalone image in a review comment's body is drawn
+// from the source the factory returns for that comment's node ID.
+func TestDiffViewCommentImagesComeFromTheCommentsOwnSource(t *testing.T) {
+	f := twoHunkFile(t)
+	f.Threads = []model.ReviewThread{{
+		ID: "t1", Path: f.Path, Line: 1, Side: model.DiffSideRight,
+		Comments: []model.ReviewComment{
+			{ID: "RC_1", Author: model.User{Login: "alice"}, Body: "![shot](https://e.com/a.png)", CreatedAt: time.Now()},
+		},
+	}}
+	dv := NewDiffView()
+	dv.SetFile(f)
+	drawn(t, dv, 60, 30)
+	if !hasCommentRow(dv, "[image: shot]") {
+		t.Fatal("without an image source the image must stay a text placeholder")
+	}
+
+	var asked []string
+	fake := &fakeImages{result: readyImage}
+	dv.SetImageSource(func(id string) ImageSource {
+		asked = append(asked, id)
+		return fake
+	})
+	drawn(t, dv, 60, 30)
+
+	if len(asked) != 1 || asked[0] != "RC_1" {
+		t.Errorf("factory asked for subjects %v, want [RC_1]", asked)
+	}
+	if len(fake.calls) != 1 || fake.calls[0].src != "https://e.com/a.png" || fake.calls[0].maxCols != 58 {
+		t.Errorf("source calls = %+v, want the comment's image with the border subtracted from the width", fake.calls)
+	}
+	if !hasCommentRow(dv, kitty.Rows(3, 2)[1]) {
+		t.Error("the comment's rows do not contain the image placeholder cells")
+	}
+	if hasCommentRow(dv, "[image: shot]") {
+		t.Error("the text placeholder is still shown beside a ready image")
 	}
 }

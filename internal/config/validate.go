@@ -17,8 +17,11 @@ const minRefreshInterval = 30 * time.Second
 // validIcons and validListStates are the accepted enum values for the
 // corresponding config keys.
 var (
-	validIcons      = map[string]bool{"unicode": true, "nerd": true}
-	validListStates = map[string]bool{"open": true, "closed": true, "merged": true, "all": true}
+	validIcons = map[string]bool{"unicode": true, "nerd": true}
+	// validImageProtocols also accepts "" (see Validate): a config built
+	// without Default() has no reason to spell out the default.
+	validImageProtocols = map[string]bool{"": true, "auto": true, "kitty": true, "none": true}
+	validListStates     = map[string]bool{"open": true, "closed": true, "merged": true, "all": true}
 )
 
 // Validate checks the configuration for internal consistency: enum values,
@@ -46,6 +49,9 @@ func (c Config) Validate() error {
 
 	if !validIcons[c.Icons] {
 		errs = append(errs, fmt.Errorf("icons: must be \"unicode\" or \"nerd\", got %q", c.Icons))
+	}
+	if !validImageProtocols[c.ImageProtocol] {
+		errs = append(errs, fmt.Errorf("image_protocol: must be \"auto\", \"kitty\", or \"none\", got %q", c.ImageProtocol))
 	}
 	if !validListStates[c.List.State] {
 		errs = append(errs, fmt.Errorf("list.state: must be one of \"open\", \"closed\", \"merged\", \"all\", got %q", c.List.State))

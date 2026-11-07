@@ -19,7 +19,7 @@ import (
 // Error level via logger, consistent with rows.go's policy for an orphan
 // list row; a nil logger discards it (tests that do not care can pass
 // one).
-func conversationBlocks(pr *model.PullRequest, logger *slog.Logger) []widget.Block {
+func conversationBlocks(pr *model.PullRequest, logger *slog.Logger, images imageSources) []widget.Block {
 	if logger == nil {
 		logger = slog.New(slog.DiscardHandler)
 	}
@@ -28,9 +28,9 @@ func conversationBlocks(pr *model.PullRequest, logger *slog.Logger) []widget.Blo
 		id := fmt.Sprintf("timeline:%d", i)
 		switch {
 		case item.Kind == model.TimelineKindIssueComment && item.IssueComment != nil:
-			blocks = append(blocks, issueCommentBlock(id, item.IssueComment))
+			blocks = append(blocks, issueCommentBlock(id, item.IssueComment, images))
 		case item.Kind == model.TimelineKindReview && item.Review != nil:
-			blocks = append(blocks, reviewBlock(id, item.Review))
+			blocks = append(blocks, reviewBlock(id, item.Review, images))
 		case item.Kind == model.TimelineKindCommit && item.Commit != nil:
 			blocks = append(blocks, commitBlock(id, item.Commit))
 		case item.Kind == model.TimelineKindEvent && item.Event != nil:
@@ -56,14 +56,14 @@ func unavailableBlock(id string) widget.Block {
 
 // issueCommentBlock renders "@author commented <relative>" followed by the
 // comment body rendered as Markdown and, when present, a reaction summary line.
-func issueCommentBlock(id string, c *model.IssueComment) widget.Block {
+func issueCommentBlock(id string, c *model.IssueComment, images imageSources) widget.Block {
 	return widget.Block{
 		ID:         id,
 		Selectable: true,
 		URL:        c.URL,
 		Build: func(width int) [][]widget.Span {
 			lines := [][]widget.Span{{{Text: withRelativeTime("@"+c.Author.Login+" commented", c.CreatedAt), Style: theme.Base}}}
-			lines = append(lines, widget.RenderMarkdown(c.Body, width)...)
+			lines = append(lines, widget.RenderMarkdown(c.Body, width, images.of(c.ID))...)
 			if reaction := reactionLine(c.ReactionGroups); reaction != nil {
 				lines = append(lines, reaction)
 			}
@@ -91,14 +91,14 @@ func reviewVerb(state model.ReviewState) string {
 
 // reviewBlock renders "@author <verb> <relative>" followed by the review's
 // body, if any, and a reaction summary line when present.
-func reviewBlock(id string, r *model.Review) widget.Block {
+func reviewBlock(id string, r *model.Review, images imageSources) widget.Block {
 	return widget.Block{
 		ID:         id,
 		Selectable: true,
 		URL:        r.URL,
 		Build: func(width int) [][]widget.Span {
 			lines := [][]widget.Span{{{Text: withRelativeTime("@"+r.Author.Login+" "+reviewVerb(r.State), r.SubmittedAt), Style: theme.Base}}}
-			lines = append(lines, widget.RenderMarkdown(r.Body, width)...)
+			lines = append(lines, widget.RenderMarkdown(r.Body, width, images.of(r.ID))...)
 			if reaction := reactionLine(r.ReactionGroups); reaction != nil {
 				lines = append(lines, reaction)
 			}

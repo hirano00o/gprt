@@ -105,6 +105,8 @@ type fakeGitHub struct {
 	addReactionFunc           func(ctx context.Context, subjectID string, content model.ReactionContent) ([]model.ReactionGroup, error)
 	removeReactionFunc        func(ctx context.Context, subjectID string, content model.ReactionContent) ([]model.ReactionGroup, error)
 	mentionableUsersFunc      func(ctx context.Context, repo model.RepoRef, query string, first int) ([]model.User, model.RateLimit, error)
+	bodyHTMLFunc              func(ctx context.Context, ids []string) (map[string]string, model.RateLimit, error)
+	bodyHTMLCalls             [][]string
 
 	// M5 repository metadata / branch / team / edit-merge-create reads and
 	// mutations (see repository.go, viewer_repositories.go, search.go,

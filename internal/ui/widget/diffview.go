@@ -202,6 +202,8 @@ type DiffView struct {
 
 	file   DiffFile
 	folded map[string]bool
+	// images supplies each review comment's ImageSource; see SetImageSource.
+	images func(subjectID string) ImageSource
 
 	rows       []diffRow
 	selectable []int
@@ -414,6 +416,26 @@ func (dv *DiffView) SetFile(f DiffFile) {
 		}
 	}
 	dv.lastWidth = -1
+}
+
+// SetImageSource installs the factory that supplies, for the review comment
+// with the given node ID, the ImageSource its body's images are drawn from
+// (nil for no images: they stay text placeholders). It takes a factory
+// rather than a source because the images belong to the comment, which only
+// internal/ui and internal/store know how to address; DiffView imports
+// neither. The next Draw rebuilds the rows.
+func (dv *DiffView) SetImageSource(factory func(subjectID string) ImageSource) {
+	dv.images = factory
+	dv.lastWidth = -1
+}
+
+// imageSourceFor returns the ImageSource for the comment with the given
+// ID, or nil when no factory is installed.
+func (dv *DiffView) imageSourceFor(id string) ImageSource {
+	if dv.images == nil {
+		return nil
+	}
+	return dv.images(id)
 }
 
 // SetThreadFolded sets id's folded state directly (used by the Files tab
@@ -1219,7 +1241,7 @@ func (b *diffBuilder) appendThread(t model.ReviewThread) {
 		return
 	}
 	for _, c := range t.Comments {
-		b.rows = append(b.rows, diffRow{kind: rowKindThreadComment, lines: commentLines(c, b.width)})
+		b.rows = append(b.rows, diffRow{kind: rowKindThreadComment, lines: commentLines(c, b.width, b.dv.imageSourceFor(c.ID))})
 	}
 }
 
@@ -1266,7 +1288,7 @@ const commentBorder = "│ "
 // its body rendered as Markdown to width (minus the border's own width), and
 // a reactions summary line when it has any — all indented with
 // commentBorder.
-func commentLines(c model.ReviewComment, width int) [][]Span {
+func commentLines(c model.ReviewComment, width int, images ImageSource) [][]Span {
 	borderWidth := SpanWidth([]Span{{Text: commentBorder}})
 	bodyWidth := width - borderWidth
 	if bodyWidth < 1 {
@@ -1287,7 +1309,7 @@ func commentLines(c model.ReviewComment, width int) [][]Span {
 	}
 	lines := [][]Span{headerLine}
 
-	for _, l := range RenderMarkdown(c.Body, bodyWidth) {
+	for _, l := range RenderMarkdown(c.Body, bodyWidth, images) {
 		lines = append(lines, append([]Span{{Text: commentBorder, Style: theme.Muted}}, l...))
 	}
 

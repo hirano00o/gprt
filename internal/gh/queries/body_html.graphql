@@ -1,0 +1,24 @@
+query BodyHTML($ids: [ID!]!) {
+  nodes(ids: $ids) {
+    ... on PullRequest {
+      id
+      bodyHTML
+    }
+    ... on IssueComment {
+      id
+      bodyHTML
+    }
+    ... on PullRequestReview {
+      id
+      bodyHTML
+    }
+    ... on PullRequestReviewComment {
+      id
+      bodyHTML
+    }
+  }
+  rateLimit {
+    remaining
+    resetAt
+  }
+}

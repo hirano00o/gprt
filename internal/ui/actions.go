@@ -167,6 +167,7 @@ func (a *App) renderPRTab() {
 		a.deps.Store.Viewer().Login,
 		a.deps.Icons,
 		a.deps.Logger,
+		a.images.sources(),
 	))
 }
 
@@ -409,6 +410,9 @@ func (a *App) restoreFocus() {
 // quit stops the application; Run returns as soon as tview's event loop
 // notices.
 func (a *App) quit() {
+	// Stop finalises the screen, after which the terminal can no longer be
+	// written to; the images must be deleted first.
+	a.images.cleanup()
 	a.app.Stop()
 }
 

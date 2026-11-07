@@ -16,6 +16,7 @@ import (
 	"github.com/hirano00o/gprt/internal/config"
 	"github.com/hirano00o/gprt/internal/drafts"
 	"github.com/hirano00o/gprt/internal/gh"
+	"github.com/hirano00o/gprt/internal/inlineimg"
 	"github.com/hirano00o/gprt/internal/logging"
 	"github.com/hirano00o/gprt/internal/store"
 	"github.com/hirano00o/gprt/internal/ui"
@@ -114,6 +115,7 @@ func run() error {
 		Logger:   logger,
 		Config:   cfg,
 		Host:     ghClient.Host(),
+		Images:   inlineimg.NewFetcher(),
 	})
 
 	app = ui.New(ui.Deps{

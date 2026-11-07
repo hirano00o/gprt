@@ -13,6 +13,7 @@ require (
 	github.com/rivo/tview v0.42.0
 	github.com/sahilm/fuzzy v0.1.3
 	github.com/yuin/goldmark v1.8.7
+	golang.org/x/image v0.47.0
 	mvdan.cc/sh/v3 v3.14.1
 )
 
@@ -28,8 +29,8 @@ require (
 	github.com/muesli/termenv v0.16.0 // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/thlib/go-timezone-local v0.0.8 // indirect
-	golang.org/x/sys v0.47.0 // indirect
+	golang.org/x/sys v0.49.0 // indirect
 	golang.org/x/term v0.45.0 // indirect
-	golang.org/x/text v0.41.0 // indirect
+	golang.org/x/text v0.43.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )

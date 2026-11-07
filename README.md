@@ -8,6 +8,7 @@ A terminal UI for GitHub pull requests. Browse, review, comment, and merge witho
 
 - **One list for all your pull requests** across repositories: review requests (yours and your teams'), your own PRs, PRs you are involved in, and any custom search you add. Filter with `/`, switch between open, closed, and merged.
 - **PR view** with the description, labels, reviewers, CI checks, and the full conversation timeline. Descriptions and comments are rendered as GitHub Flavored Markdown (headings, lists, tables, highlighted code blocks, links).
+- **Inline images**: an image that stands alone on its line in a description or comment is drawn in the terminal with the kitty graphics protocol (kitty, Ghostty). Anywhere else, and in other terminals, it stays a `[image: alt]` placeholder.
 - **Files view** with a file tree and a syntax-highlighted diff. Review threads appear inline and can be folded.
 - **Reviewing**: comment on a line, a range, or a whole file; reply; resolve threads; post a comment right away or build up a pending review and submit it as Approve, Request changes, or Comment.
 - **Reactions** and `@`-mention completion with the repository's users.
@@ -72,6 +73,7 @@ icons: unicode            # unicode | nerd (Nerd Font glyphs)
 editor: ""                # command for :e; defaults to $EDITOR, then vim
 browser: ""               # command for o; defaults to $BROWSER, then the OS default
 highlight_style: github-dark  # any chroma style name
+image_protocol: auto      # auto | kitty | none; draw images with the kitty graphics protocol
 tab_width: 4
 list:
   state: open             # open | closed | merged | all
@@ -83,6 +85,8 @@ keys:                     # remap any action (vim notation); see docs/KEYBINDING
   diff.comment: "c"
   pr.submit: "S"
 ```
+
+With `image_protocol: auto`, images are drawn when the environment indicates kitty or Ghostty (`KITTY_WINDOW_ID`, `GHOSTTY_RESOURCES_DIR`, `TERM`, or `TERM_PROGRAM`); `none` always leaves the text placeholder. Inside tmux, add `set -g allow-passthrough on` to your `tmux.conf`, or the images never reach the terminal. The terminal type must also offer 256 colours (`TERM=tmux-256color`, `xterm-256color`, or kitty's and Ghostty's own), and `NO_COLOR` turns images off, since an image's id is carried by a colour. Images are downloaded without your GitHub token.
 
 `editor` and `browser` are split with shell quoting; `$VAR` and `~` are expanded, globs are not. `GPRT_BROWSER` takes precedence over the `browser` setting.
 

@@ -13,7 +13,7 @@ import (
 
 // mdText renders body and returns each line's concatenated text.
 func mdText(body string, width int) []string {
-	return linesText(RenderMarkdown(body, width))
+	return linesText(RenderMarkdown(body, width, nil))
 }
 
 // styleOf returns the style of the first span of lines whose text is
@@ -108,14 +108,14 @@ func TestRenderMarkdown_BlockText(t *testing.T) {
 
 func TestRenderMarkdown_EmptyResults(t *testing.T) {
 	for _, body := range []string{"", "  \n\t\n", "<!-- only a comment -->", "<script>x</script>", "<style>\n</style>", "```\n```", "```go\n\n```", "<br>"} {
-		if got := RenderMarkdown(body, 40); len(got) != 0 {
+		if got := RenderMarkdown(body, 40, nil); len(got) != 0 {
 			t.Errorf("RenderMarkdown(%q) = %q, want no lines", body, linesText(got))
 		}
 	}
 }
 
 func TestRenderMarkdown_InlineStyles(t *testing.T) {
-	lines := RenderMarkdown("*i* **b** ***bi*** ~~s~~ `c` [t](http://x) ![a](u)", 80)
+	lines := RenderMarkdown("*i* **b** ***bi*** ~~s~~ `c` [t](http://x) ![a](u)", 80, nil)
 
 	if got := styleOf(t, lines, "i"); !hasAttr(got, tcell.AttrItalic) || hasAttr(got, tcell.AttrBold) {
 		t.Errorf("emphasis style = %v, want italic only", got)
@@ -138,7 +138,7 @@ func TestRenderMarkdown_InlineStyles(t *testing.T) {
 	if got := styleOf(t, lines, " (http://x)"); got != theme.Muted {
 		t.Errorf("link url suffix style = %v, want theme.Muted", got)
 	}
-	if got := styleOf(t, RenderMarkdown("<img alt=\"b\" src=\"b.png\">", 40), "[image: b]"); got != theme.Muted {
+	if got := styleOf(t, RenderMarkdown("<img alt=\"b\" src=\"b.png\">", 40, nil), "[image: b]"); got != theme.Muted {
 		t.Errorf("html img style = %v, want theme.Muted", got)
 	}
 	if got := styleOf(t, lines, "[image: a]"); got != theme.Muted {
@@ -148,7 +148,7 @@ func TestRenderMarkdown_InlineStyles(t *testing.T) {
 
 func TestRenderMarkdown_LinkifiedAndAutolinksUseLinkStyle(t *testing.T) {
 	for _, body := range []string{"see https://e.com now", "<https://e.com>"} {
-		lines := RenderMarkdown(body, 80)
+		lines := RenderMarkdown(body, 80, nil)
 		got := styleOf(t, lines, "https://e.com")
 		if got.GetUnderlineStyle() == tcell.UnderlineStyleNone {
 			t.Errorf("RenderMarkdown(%q): url style = %v, want link style with an underline style", body, got)
@@ -157,26 +157,26 @@ func TestRenderMarkdown_LinkifiedAndAutolinksUseLinkStyle(t *testing.T) {
 }
 
 func TestRenderMarkdown_HeadingAndTaskStyles(t *testing.T) {
-	if got := styleOf(t, RenderMarkdown("# Title", 40), "Title"); got != theme.Header {
+	if got := styleOf(t, RenderMarkdown("# Title", 40, nil), "Title"); got != theme.Header {
 		t.Errorf("heading style = %v, want theme.Header", got)
 	}
-	lines := RenderMarkdown("- [x] done\n- [ ] todo", 40)
+	lines := RenderMarkdown("- [x] done\n- [ ] todo", 40, nil)
 	if got := styleOf(t, lines, "[x]"); got != theme.Success {
 		t.Errorf("checked box style = %v, want theme.Success", got)
 	}
 }
 
 func TestRenderMarkdown_CodeStyles(t *testing.T) {
-	plain := RenderMarkdown("```\nx := 1\n```", 40)
+	plain := RenderMarkdown("```\nx := 1\n```", 40, nil)
 	if got := styleOf(t, plain, "x := 1"); got != theme.Muted {
 		t.Errorf("unlabelled code style = %v, want theme.Muted", got)
 	}
-	unknown := RenderMarkdown("```nosuchlang\nx := 1\n```", 40)
+	unknown := RenderMarkdown("```nosuchlang\nx := 1\n```", 40, nil)
 	if got := styleOf(t, unknown, "x := 1"); got != theme.Muted {
 		t.Errorf("unknown-language code style = %v, want theme.Muted", got)
 	}
 
-	highlighted := RenderMarkdown("```go\nfunc main() {}\n```", 40)
+	highlighted := RenderMarkdown("```go\nfunc main() {}\n```", 40, nil)
 	if len(highlighted) != 1 || len(highlighted[0]) < 2 {
 		t.Fatalf("highlighted go code = %+v, want one line of several token spans", highlighted)
 	}
@@ -186,11 +186,11 @@ func TestRenderMarkdown_CodeStyles(t *testing.T) {
 }
 
 func TestRenderMarkdown_BlockquoteAndRulePrefixStyle(t *testing.T) {
-	quote := RenderMarkdown("> q", 40)
+	quote := RenderMarkdown("> q", 40, nil)
 	if got := styleOf(t, quote, "│ "); got != theme.Muted {
 		t.Errorf("quote prefix style = %v, want theme.Muted", got)
 	}
-	rule := RenderMarkdown("---", 4)
+	rule := RenderMarkdown("---", 4, nil)
 	if got := styleOf(t, rule, "────"); got != theme.Muted {
 		t.Errorf("rule style = %v, want theme.Muted", got)
 	}
@@ -199,7 +199,7 @@ func TestRenderMarkdown_BlockquoteAndRulePrefixStyle(t *testing.T) {
 func TestRenderMarkdown_Table(t *testing.T) {
 	body := "| a | bb |\n|---|---|\n| 1 | 22 |"
 	want := []string{"a │ bb", "──┼───", "1 │ 22"}
-	lines := RenderMarkdown(body, 40)
+	lines := RenderMarkdown(body, 40, nil)
 	if got := linesText(lines); !reflect.DeepEqual(got, want) {
 		t.Fatalf("table = %q, want %q", got, want)
 	}
@@ -232,7 +232,7 @@ func TestRenderMarkdown_TableShrinksToWidth(t *testing.T) {
 		"| short | a rather long description of the thing | more words here |\n" +
 		"| x | y | z |"
 	for _, width := range []int{12, 20, 30, 80} {
-		for i, line := range RenderMarkdown(body, width) {
+		for i, line := range RenderMarkdown(body, width, nil) {
 			if w := SpanWidth(line); w > width {
 				t.Errorf("width %d: table line %d %q has width %d", width, i, spansText(line), w)
 			}
@@ -270,7 +270,7 @@ const mixedFixture = "# Heading with `code` and a [link](https://example.com/a/v
 
 func TestRenderMarkdown_EveryLineFitsWidth(t *testing.T) {
 	for _, width := range []int{10, 20, 40, 80} {
-		lines := RenderMarkdown(mixedFixture, width)
+		lines := RenderMarkdown(mixedFixture, width, nil)
 		if len(lines) == 0 {
 			t.Fatalf("width %d: no lines", width)
 		}
@@ -293,7 +293,7 @@ func TestRenderMarkdown_MalformedInputStaysWithinWidth(t *testing.T) {
 	}
 	for _, in := range inputs {
 		for _, width := range []int{6, 7, 12, 40} {
-			for i, line := range RenderMarkdown(in, width) {
+			for i, line := range RenderMarkdown(in, width, nil) {
 				if w := SpanWidth(line); w > width {
 					t.Errorf("RenderMarkdown(%q, %d) line %d %q has width %d", in, width, i, spansText(line), w)
 				}
@@ -303,7 +303,7 @@ func TestRenderMarkdown_MalformedInputStaysWithinWidth(t *testing.T) {
 
 	for _, in := range []string{"- - - a", "> - > 1. x"} {
 		for _, width := range []int{12, 40} {
-			for i, line := range RenderMarkdown(in, width) {
+			for i, line := range RenderMarkdown(in, width, nil) {
 				if w := SpanWidth(line); w > width {
 					t.Errorf("RenderMarkdown(%q, %d) line %d %q has width %d", in, width, i, spansText(line), w)
 				}
@@ -313,7 +313,7 @@ func TestRenderMarkdown_MalformedInputStaysWithinWidth(t *testing.T) {
 }
 
 func TestRenderMarkdown_PreStyleIsMuted(t *testing.T) {
-	lines := RenderMarkdown("<pre>\nraw text\n</pre>", 40)
+	lines := RenderMarkdown("<pre>\nraw text\n</pre>", 40, nil)
 	if got := styleOf(t, lines, "raw text"); got != theme.Muted {
 		t.Errorf("pre content style = %v, want theme.Muted", got)
 	}
@@ -326,14 +326,14 @@ func TestRenderMarkdown_TinyWidthsDoNotPanic(t *testing.T) {
 	bodies := []string{"日本語 👍🏽 emoji", "```\n日本語👍\n```", "- 日本語\n> 👍", "| 日本 |\n|---|\n| 👍 |", "# 日本語"}
 	for _, body := range bodies {
 		for _, width := range []int{-1, 0, 1} {
-			if lines := RenderMarkdown(body, width); len(lines) == 0 {
+			if lines := RenderMarkdown(body, width, nil); len(lines) == 0 {
 				t.Errorf("RenderMarkdown(%q, %d) returned no lines", body, width)
 			}
 		}
 	}
 
 	var text strings.Builder
-	for _, line := range RenderMarkdown("日本語 👍🏽 emoji", 1) {
+	for _, line := range RenderMarkdown("日本語 👍🏽 emoji", 1, nil) {
 		text.WriteString(spansText(line))
 	}
 	if got := text.String(); got != "日本語👍🏽emoji" {
