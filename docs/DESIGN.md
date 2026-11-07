@@ -5,7 +5,7 @@ Condensed architecture reference for `gprt`. See `docs/REQUIREMENTS.md` for feat
 ## Module layout and dependency rules
 
 ```
-go.mod                         module github.com/hirano00o/gprt (go 1.26)
+go.mod                         module github.com/hirano00o/gprt (go 1.27)
 cmd/gprt/main.go               flags (--debug, --config), config load, wiring, app.Run(); returns immediately after Run
 internal/config/               YAML config (strict), defaults, gh-style dir resolution
 internal/logging/              slog file logger, ring buffer of recent errors (shown by :messages)
@@ -321,7 +321,7 @@ Versions as verified against the module proxy on 2026-09-10.
 | Purpose | Choice | Notes |
 |---------|--------|-------|
 | TUI | `rivo/tview v0.42.0`, `gdamore/tcell/v2 v2.13.10` | Pin tcell explicitly; never `tcell/v3`. tcell ≥ v2.10 changed control-key constants (`KeyCtrlH (72) != KeyBackspace (8)`), so one key-normalisation layer unifies legacy vs. CSI-u terminal reporting. |
-| GitHub | `cli/go-gh/v2 v2.16.0` | Provides auth token resolution, a GraphQL client, and a raw HTTP client for REST + custom ETag handling. |
+| GitHub | `cli/go-gh/v2 v2.17.0` | Provides auth token resolution, a GraphQL client, and a raw HTTP client for REST + custom ETag handling. |
 | Highlight | `alecthomas/chroma/v2 v2.27.0` | Not the v3 alpha. `lexers.Match` can return nil; rather than falling back to `lexers.Fallback` (which would highlight every unrecognised file as plain, undifferentiated text tokens), `internal/highlight` treats nil as "render unhighlighted" (`nil, nil`) — `lexers.Analyse`, content-based sniffing, is deliberately never used, since it is too slow to run on every hunk. Lexer cached per file extension (or per base name for an extensionless file); `chroma.Coalesce`; tokenise a whole hunk then `chroma.SplitTokensIntoLines` (never per line). A resolved `*chroma.RegexLexer` is safe for concurrent `Tokenise` calls once its rules have compiled (verified against chroma's and `dlclark/regexp2/v2`'s own source — see `internal/highlight`'s doc comments), so one lexer per extension is shared across the store's highlight worker pool rather than one per worker. Building the style with a cleared, `NoInherit` background entry and using foreground colour only remains a later milestone's concern (`internal/ui/theme` mapping `chroma.TokenType` to `tcell.Style`). |
 | Diff parsing | own parser (`internal/diff`, ~80 lines) | GitHub's patches are header-less `@@` hunks; `go-gitdiff` rejects them; `go-git` only encodes diffs, it does not parse GitHub's format; `sourcegraph/go-diff`'s `ParseHunks` is the fallback if edge cases pile up. |
 | YAML | `goccy/go-yaml v1.19.2` | `gopkg.in/yaml.v3` was archived 2025-04. Uses `yaml.NewDecoder(r, yaml.Strict()).Decode(&cfg)` (not `yaml.UnmarshalWithOptions`, which cannot distinguish an empty document from a genuinely empty config) and `yaml.FormatError` for readable error messages. |

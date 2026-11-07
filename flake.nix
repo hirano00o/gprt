@@ -18,11 +18,12 @@
     in
     {
       packages = forAllSystems (pkgs: {
-        default = pkgs.buildGoModule {
+        # Not buildGoModule: nixpkgs' default go still lags behind go.mod.
+        default = pkgs.buildGo127Module {
           pname = "gprt";
           inherit version;
           src = self;
-          vendorHash = "sha256-rKqLyYfYZakmokd/JnUejuNrA8ZraETlBamIctERTOg=";
+          vendorHash = "sha256-wkf3CSXEJR9h9bsUmajQ94y+NzIioJMwJA2hEEhbm5A=";
           # Not ./...: the darwin build sandbox forbids the loopback listeners
           # internal/gh's httptest servers need. CI runs the full suite.
           subPackages = [ "cmd/gprt" ];
