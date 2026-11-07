@@ -454,7 +454,7 @@ func TestOpenCreateReviewersOverlayRequiresRepositoryChosen(t *testing.T) {
 // exercises the edit-PR form's reviewers overlay reused by the create-PR
 // form end to end (editreviewers.go's owner-aware generalisation): Space
 // then Enter writes the selection back to App.createFormSelectedReviewers
-// and updates the "Reviewers (N selected)" button text.
+// and updates the "Reviewers (N)" button text.
 func TestCreateFormReviewersOverlaySelectUserWritesBackAndUpdatesButton(t *testing.T) {
 	app, _, fake, _ := newTestApp(t, nil)
 	repo := model.RepoRef{Host: "github.com", Owner: "acme", Name: "widgets"}
@@ -479,8 +479,8 @@ func TestCreateFormReviewersOverlaySelectUserWritesBackAndUpdatesButton(t *testi
 	if ok := query(app.app, func() bool { _, ok := app.createFormSelectedReviewers["U_bob"]; return ok }); !ok {
 		t.Fatalf("createFormSelectedReviewers = %+v, want bob selected", app.createFormSelectedReviewers)
 	}
-	if got := query(app.app, func() string { return app.createForm.GetButton(createFormReviewersButtonIndex).GetLabel() }); got != "Reviewers (1 selected)" {
-		t.Errorf("Reviewers button label = %q, want %q", got, "Reviewers (1 selected)")
+	if got := query(app.app, func() string { return app.createForm.GetButton(createFormReviewersButtonIndex).GetLabel() }); got != "Reviewers (1)" {
+		t.Errorf("Reviewers button label = %q, want %q", got, "Reviewers (1)")
 	}
 }
 
@@ -967,8 +967,8 @@ func TestCreateFormSwitchingRepositoryClearsReviewersHeadBaseAndAutocompleteCach
 	if got := query(app.app, func() int { return len(app.createFormBaseSuggestions) }); got != 0 {
 		t.Errorf("createFormBaseSuggestions after switching repository has %d entries, want cleared", got)
 	}
-	if got := query(app.app, func() string { return app.createForm.GetButton(createFormReviewersButtonIndex).GetLabel() }); got != "Reviewers (0 selected)" {
-		t.Errorf("Reviewers button label after switching repository = %q, want %q", got, "Reviewers (0 selected)")
+	if got := query(app.app, func() string { return app.createForm.GetButton(createFormReviewersButtonIndex).GetLabel() }); got != "Reviewers (0)" {
+		t.Errorf("Reviewers button label after switching repository = %q, want %q", got, "Reviewers (0)")
 	}
 }
 
@@ -1422,5 +1422,21 @@ func TestCreateFormEscOnPreviewReturnsFocusInsteadOfCancelling(t *testing.T) {
 	}
 	if app.createForm == nil {
 		t.Fatal("Esc on the preview must not close the create-PR form")
+	}
+}
+
+// TestCreateFormShowsButtonsWithFirstField covers the create form's
+// whole buttons row being on screen together with its first field on an
+// 80x24 terminal: its fixed height must count the form's own border
+// padding, and the four buttons must fit its left column.
+func TestCreateFormShowsButtonsWithFirstField(t *testing.T) {
+	app, _, fake, screen := newTestApp(t, nil)
+	fake.SetViewerRepositories(nil)
+	sendRune(app.app, 'n')
+	waitFor(t, app.app, func() bool { return app.createForm != nil })
+
+	act(app.app, func() { screen.SetSize(80, 24) })
+	for _, want := range []string{"Repository", "Edit body", "Reviewers (0)", "Create", "Cancel"} {
+		waitFor(t, app.app, func() bool { return screenContains(screen, want) })
 	}
 }

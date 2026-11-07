@@ -372,8 +372,12 @@ func (a *App) openComposer(target composerTarget, prefill string) {
 		a.createFormBodySlot.RemoveItem(a.createFormBodyView)
 		a.createFormBodySlot.AddItem(a.composerFlex, 0, 1, true)
 	case composerKindEditPRBody:
+		// Unlike the create form, whose diff preview stays useful beside
+		// it, the edit form hides its fields and buttons so the composer
+		// fills the whole page; restoreEditFormBodySlot gives them back.
 		a.editFormBodySlot.RemoveItem(a.editFormBodyView)
 		a.editFormBodySlot.AddItem(a.composerFlex, 0, 1, true)
+		a.editFormLayout.ResizeItem(a.editForm, 0, 0)
 	default:
 		a.detailColumn.AddItem(a.composerFlex, a.composerHeight(), 0, true)
 	}

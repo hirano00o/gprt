@@ -84,13 +84,22 @@ func (a *App) openCreatePRForm() {
 // itemPadding 1, advanced once per item — the form's own default,
 // vertical, non-horizontal layout) plus one single-line buttons row drawn
 // immediately after the last item with no extra blank line (itemPadding !=
-// 0): 5*2 items rows + 1 buttons row. This assumes the buttons row itself
-// never wraps, which buildCreateForm's own 2:1 left:right column split is
-// sized wide enough for at any reasonably sized terminal — tview.Form's own
-// vertical layout does not wrap an overflowing buttons row to a second
-// line at all, it simply stops drawing whatever no longer fits, so this
-// would otherwise silently hide "Cancel" rather than merely misalign it.
-const createFormFieldsHeight = 2*5 + 1
+// 0), all inside the formBorderPadding buildCreateForm sets explicitly:
+// padding + 5*2 items rows + 1 buttons row + padding. This assumes the
+// buttons row itself never wraps, which buildCreateForm's own 3:1
+// left:right column split is sized wide enough for down to an 80-column
+// terminal — tview.Form's own vertical layout does not wrap an
+// overflowing buttons row to a second line at all, it simply stops
+// drawing whatever no longer fits, so this would otherwise silently hide
+// "Cancel" rather than merely misalign it.
+const createFormFieldsHeight = 2*formBorderPadding + 2*5 + 1
+
+// formBorderPadding is the border padding the create and edit forms set
+// on their own tview.Form, on every side. It equals tview.NewForm's own
+// default, but is set explicitly because both forms' fixed heights
+// (createFormFieldsHeight, editFormFieldsHeight) must count it: leaving
+// it implicit is what once clipped both forms' buttons rows.
+const formBorderPadding = 1
 
 // createFormPreviewIncompleteHint/createFormPreviewLoadingHint are
 // createFormPreview's own placeholder text while there is nothing to
@@ -126,12 +135,13 @@ func (a *App) buildCreateForm() {
 	draft := tview.NewCheckbox().SetLabel("Draft")
 
 	form := tview.NewForm()
+	form.SetBorderPadding(formBorderPadding, formBorderPadding, formBorderPadding, formBorderPadding)
 	form.AddFormItem(repoField)
 	form.AddFormItem(head)
 	form.AddFormItem(base)
 	form.AddFormItem(title)
 	form.AddFormItem(draft)
-	// "Edit body" (index 0) and "Reviewers (N selected)" (index 1,
+	// "Edit body" (index 0) and "Reviewers (N)" (index 1,
 	// createFormReviewersButtonIndex) must stay first, in this order:
 	// closeEditReviewersOverlay (editreviewers.go) updates the latter by
 	// that fixed index.
@@ -154,7 +164,7 @@ func (a *App) buildCreateForm() {
 	preview.SetText(createFormPreviewIncompleteHint)
 
 	layout := tview.NewFlex().SetDirection(tview.FlexColumn)
-	layout.AddItem(left, 0, 2, true)
+	layout.AddItem(left, 0, 3, true)
 	layout.AddItem(preview, 0, 1, false)
 	layout.SetBorder(true).SetTitle(" Create pull request ")
 
@@ -177,9 +187,9 @@ func (a *App) buildCreateForm() {
 }
 
 // createFormReviewersButtonText renders the "Reviewers" button's own
-// "(N selected)" label, mirroring editFormReviewersButtonText.
+// "(N)" label, mirroring editFormReviewersButtonText.
 func (a *App) createFormReviewersButtonText() string {
-	return fmt.Sprintf("Reviewers (%d selected)", len(a.createFormSelectedReviewers))
+	return fmt.Sprintf("Reviewers (%d)", len(a.createFormSelectedReviewers))
 }
 
 // createFormRepoAutocomplete is createFormRepoField's own SetAutocompleteFunc

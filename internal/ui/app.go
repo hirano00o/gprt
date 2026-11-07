@@ -297,7 +297,11 @@ type App struct {
 	// diffed against editFormOriginal.body on Save.
 	editFormBodySlot *tview.Flex
 	editFormBodyView *tview.TextView
-	editFormBody     string
+	// editFormLayout is the form page's own root Flex: "Edit body" shrinks
+	// editForm's row in it to zero so the composer fills the page, and
+	// restoreEditFormBodySlot gives the row back.
+	editFormLayout *tview.Flex
+	editFormBody   string
 	// editFormBranchSuggestions is what editFormBaseField's own
 	// SetAutocompleteFunc callback returns synchronously on every
 	// keystroke; editFormBranchTimer debounces the actual

@@ -778,3 +778,39 @@ func TestCtrlCConfirmOverEditFormBodyComposerSurvivesPullRequestSwitch(t *testin
 	close(block)
 	waitFor(t, app.app, func() bool { return !app.deps.Store.Mutating() })
 }
+
+// TestEditFormShowsEveryButtonOn80x24 covers the form's buttons row being
+// on screen together with its first field on a standard 80x24 terminal:
+// tview.Form's own 1-cell border padding must be part of the form's fixed
+// height, and the five buttons must fit 80 columns.
+func TestEditFormShowsEveryButtonOn80x24(t *testing.T) {
+	app, _, fake, screen := newTestApp(t, nil)
+	act(app.app, func() { screen.SetSize(80, 24) })
+	openDetailForComposer(t, app, fake, editablePR(fixtureRef(1)))
+	sendRune(app.app, 'E')
+	waitFor(t, app.app, func() bool { return app.editForm != nil })
+
+	for _, want := range []string{"Title", "Labels (2)", "Reviewers (1)", "Edit body", "Save", "Cancel"} {
+		waitFor(t, app.app, func() bool { return screenContains(screen, want) })
+	}
+}
+
+// TestEditFormBodyComposerFillsThePage covers "Edit body" hiding the
+// form's fields and buttons so the composer gets the whole page, and
+// closing the composer bringing them back.
+func TestEditFormBodyComposerFillsThePage(t *testing.T) {
+	app, _, fake, screen := newTestApp(t, nil)
+	openEditFormBodyComposer(t, app, fake, editablePR(fixtureRef(1)))
+
+	waitFor(t, app.app, func() bool { return !screenContains(screen, "Base branch") })
+	_, _, _, formH := query4(app.app, func() (int, int, int, int) { return app.editForm.GetRect() })
+	if formH != 0 {
+		t.Fatalf("form height while editing the body = %d, want 0", formH)
+	}
+
+	act(app.app, func() { app.closeComposer(true) })
+
+	waitFor(t, app.app, func() bool {
+		return screenContains(screen, "Base branch") && screenContains(screen, "Cancel")
+	})
+}

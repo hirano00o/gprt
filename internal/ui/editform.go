@@ -200,9 +200,10 @@ func (a *App) openEditPRForm() {
 }
 
 // editFormFieldsHeight is the fixed row count buildEditForm gives editForm
-// above its body slot, derived the same way as createFormFieldsHeight: 3
-// single-line items (2 rows each) plus one buttons row.
-const editFormFieldsHeight = 2*3 + 1
+// above its body slot, derived the same way as createFormFieldsHeight: the
+// form's own formBorderPadding rows above and below 3 single-line items
+// (2 rows each) plus one buttons row.
+const editFormFieldsHeight = 2*formBorderPadding + 2*3 + 1
 
 // buildEditForm constructs and shows the form/body layout itself: a
 // bordered Flex(rows) of editForm over editFormBodySlot (editFormBodyView,
@@ -218,6 +219,7 @@ func (a *App) buildEditForm(pr *model.PullRequest) {
 	draft := tview.NewCheckbox().SetLabel("Draft").SetChecked(pr.IsDraft)
 
 	form := tview.NewForm()
+	form.SetBorderPadding(formBorderPadding, formBorderPadding, formBorderPadding, formBorderPadding)
 	form.AddFormItem(title)
 	form.AddFormItem(base)
 	form.AddFormItem(draft)
@@ -243,6 +245,7 @@ func (a *App) buildEditForm(pr *model.PullRequest) {
 	a.editFormDraftBox = draft
 	a.editFormBodySlot = bodySlot
 	a.editFormBodyView = bodyView
+	a.editFormLayout = layout
 	setFormBodyView(bodyView, a.editFormBody)
 
 	a.root.AddPage("editform", layout, true, true)
@@ -259,8 +262,9 @@ func (a *App) editFormBodyDraftKey() drafts.Key {
 
 // openEditPRBodyComposer implements the edit form's "Edit body" button:
 // opens the body composer (composerKindEditPRBody) inside the form's own
-// body slot, prefilled with editFormBody. composerReturnFocus is cleared
-// for the same reason openCreatePRBodyComposer clears it.
+// body slot, prefilled with editFormBody, and hides the form's own fields
+// and buttons so the composer fills the whole page. composerReturnFocus
+// is cleared for the same reason openCreatePRBodyComposer clears it.
 func (a *App) openEditPRBodyComposer() {
 	if a.editForm == nil {
 		return
@@ -276,15 +280,17 @@ func (a *App) openEditPRBodyComposer() {
 
 // restoreEditFormBodySlot undoes openEditPRBodyComposer's own swap once
 // closeComposer has removed the composer's Flex, mirroring
-// restoreCreateFormBodySlot. Focus is left alone while a confirm dialog
-// is on top (the composer closed underneath it on a pull request switch),
-// so the still-visible Modal keeps it.
+// restoreCreateFormBodySlot, and gives the form its fields row back.
+// Focus is left alone while a confirm dialog is on top (the composer
+// closed underneath it on a pull request switch), so the still-visible
+// Modal keeps it.
 func (a *App) restoreEditFormBodySlot() {
 	if a.editForm == nil {
 		return
 	}
 	setFormBodyView(a.editFormBodyView, a.editFormBody)
 	a.editFormBodySlot.AddItem(a.editFormBodyView, 0, 1, false)
+	a.editFormLayout.ResizeItem(a.editForm, editFormFieldsHeight, 0)
 	if a.overlay != "confirm" {
 		a.app.SetFocus(a.editForm)
 	}
@@ -297,16 +303,19 @@ func (a *App) editFormBodyComposerOpen() bool {
 }
 
 // editFormLabelsButtonText/editFormReviewersButtonText render the two
-// buttons' own "(N selected)" labels from the form's current selection —
+// buttons' own "(N)" labels from the form's current selection —
 // recomputed by editlabels.go/editreviewers.go on confirm, via
 // a.editForm.GetButton(0)/GetButton(1) (fixed indices: these two buttons
-// are always added first, in this order, in buildEditForm).
+// are always added first, in this order, in buildEditForm). The count is
+// bare, not "(N selected)": all five buttons must fit one row on an
+// 80-column terminal, since a vertical tview.Form never wraps its buttons
+// row and silently drops whatever overflows it.
 func (a *App) editFormLabelsButtonText() string {
-	return fmt.Sprintf("Labels (%d selected)", len(a.editFormSelectedLabelIDs))
+	return fmt.Sprintf("Labels (%d)", len(a.editFormSelectedLabelIDs))
 }
 
 func (a *App) editFormReviewersButtonText() string {
-	return fmt.Sprintf("Reviewers (%d selected)", len(a.editFormSelectedReviewers))
+	return fmt.Sprintf("Reviewers (%d)", len(a.editFormSelectedReviewers))
 }
 
 // editFormBranchAutocomplete is editFormBaseField's own SetAutocompleteFunc
@@ -567,6 +576,7 @@ func (a *App) closeEditForm() {
 	a.editFormDraftBox = nil
 	a.editFormBodySlot = nil
 	a.editFormBodyView = nil
+	a.editFormLayout = nil
 	a.editFormBody = ""
 	a.editFormSelectedLabelIDs = nil
 	a.editFormSelectedReviewers = nil
