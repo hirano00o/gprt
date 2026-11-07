@@ -194,7 +194,7 @@ const helpActionWidth = 22
 // in sync with its switch by hand (a mismatch only ever makes the help
 // text wrong, never the command itself unusable, so a generated list is
 // not worth the extra indirection for one line).
-const helpCommandsLine = ": commands: q, quit, help, messages, reload, close, reopen, merge"
+const helpCommandsLine = ": commands: q, quit, help, messages, reload, close, reopen, ready, merge"
 
 // buildHelpText renders the help overlay's full text: gprt's version, then
 // every effective binding (defaults merged with the user's config) for
@@ -329,7 +329,7 @@ func (a *App) buildMessagesView() *tview.TextView {
 
 // submitCommand runs whatever was typed into the command line, then closes
 // it. Recognized commands: q/quit, help, messages, reload, close, reopen,
-// merge (see prcommands.go/mergedialog.go); anything else shows an error
+// ready, merge (see prcommands.go/mergedialog.go); anything else shows an error
 // toast instead of doing nothing silently.
 func (a *App) submitCommand() {
 	text := strings.TrimSpace(a.cmdLine.GetText())
@@ -354,6 +354,8 @@ func (a *App) submitCommand() {
 		a.cmdClose()
 	case "reopen":
 		a.cmdReopen()
+	case "ready":
+		a.cmdReady()
 	case "merge":
 		a.cmdMerge()
 	default:

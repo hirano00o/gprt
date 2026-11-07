@@ -70,8 +70,8 @@ type confirmFrame struct {
 // destructive/executing choice — so a bare Enter right after the dialog
 // appears, with no navigation at all, would immediately run onConfirm. A
 // confirmation dialog whose own default action is "confirm" defeats the
-// point of asking; every caller (delete/discard, :merge/:close/:reopen,
-// Ctrl-C-while-mutating) relies on this shared default, not its own.
+// point of asking; every caller (delete/discard, :merge/:close/:reopen/
+// :ready, Ctrl-C-while-mutating) relies on this shared default, not its own.
 func (a *App) showConfirm(message, confirmLabel string, onConfirm func()) {
 	if n := len(a.confirms); n > 0 && a.confirms[n-1].message == message {
 		return

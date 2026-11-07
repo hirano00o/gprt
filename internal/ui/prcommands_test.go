@@ -1,11 +1,12 @@
-// prcommands_test.go covers the ":close" and ":reopen" command-line
-// commands: an open, loaded pull request is required; each refuses locally
-// (a toast, no store call) when the viewer lacks the matching viewer-can-*
-// flag or the pull request's state does not fit; otherwise a confirm
-// dialog ("Close #N?"/"Reopen #N?", followed by the repository, title and
-// author) gates the actual Store.Close/Reopen call, whose outcome
-// (Store.MutationError()) surfaces as a "closed"/"reopened" success toast
-// or a failure one.
+// prcommands_test.go covers the ":close", ":reopen" and ":ready"
+// command-line commands: an open, loaded pull request is required; each
+// refuses locally (a toast, no store call) when the viewer lacks the
+// matching viewer-can-* flag or the pull request's state does not fit;
+// otherwise a confirm dialog ("Close #N?"/"Reopen #N?"/"Mark ready #N?",
+// followed by the repository, title and author) gates the actual
+// Store.Close/Reopen/SetDraft call, whose outcome (Store.MutationError())
+// surfaces as a "closed"/"reopened"/"marked ready for review" success
+// toast or a failure one.
 package ui
 
 import (
@@ -216,6 +217,118 @@ func TestCmdCloseRefusesWhenTargetPRChangedBeforeConfirm(t *testing.T) {
 
 	waitFor(t, app.app, func() bool { return containsSubstring(app.statusBar.toast, "different pull request") })
 	if len(fake.ClosePullRequestIDs()) != 0 {
+		t.Fatal("confirming after the target pull request changed must not call the store")
+	}
+}
+
+// readyablePR returns fixtureDetailPR(ref) as an OPEN draft the viewer can
+// update, so ":ready" is available on it.
+func readyablePR(ref model.PRRef) model.PullRequest {
+	pr := fixtureDetailPR(ref)
+	pr.ViewerCanUpdate = true
+	pr.State = model.PRStateOpen
+	pr.IsDraft = true
+	return pr
+}
+
+func TestCmdReadyConfirmsThenMarksReadyForReview(t *testing.T) {
+	app, _, fake, screen := newTestApp(t, nil)
+	ref := fixtureRef(1)
+	openDetailForComposer(t, app, fake, readyablePR(ref))
+
+	sendCommand(app, "ready")
+	waitFor(t, app.app, func() bool { return app.overlay == "confirm" })
+	got := confirmText(app, screen)
+	for _, want := range []string{"Mark ready #1?", "acme/widgets #1", "by @alice"} {
+		if !containsSubstring(got, want) {
+			t.Fatalf("confirm dialog text = %q, want it to contain %q", got, want)
+		}
+	}
+
+	confirmYes(app.app) // "Cancel" is the Modal's default button; Tab then Enter reaches "Mark ready"
+
+	waitFor(t, app.app, func() bool { return len(fake.MarkReadyForReviewCalls()) == 1 })
+	waitFor(t, app.app, func() bool { return app.statusBar.toast == "marked ready for review" })
+	if n := len(fake.ConvertToDraftCalls()); n != 0 {
+		t.Fatalf("ConvertToDraft called %d times, want 0", n)
+	}
+}
+
+func TestCmdReadyRefused(t *testing.T) {
+	tests := []struct {
+		name   string
+		modify func(pr *model.PullRequest)
+		toast  string
+	}{
+		{"viewer cannot update", func(pr *model.PullRequest) { pr.ViewerCanUpdate = false }, "cannot mark this pull request ready"},
+		{"not a draft", func(pr *model.PullRequest) { pr.IsDraft = false }, "not an open draft"},
+		{"closed draft", func(pr *model.PullRequest) { pr.State = model.PRStateClosed }, "not an open draft"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			app, _, fake, _ := newTestApp(t, nil)
+			ref := fixtureRef(1)
+			pr := readyablePR(ref)
+			tt.modify(&pr)
+			openDetailForComposer(t, app, fake, pr)
+
+			sendCommand(app, "ready")
+
+			waitFor(t, app.app, func() bool { return containsSubstring(app.statusBar.toast, tt.toast) })
+			if app.overlay == "confirm" {
+				t.Fatal("a refused :ready must not show a confirm dialog")
+			}
+			if len(fake.MarkReadyForReviewCalls()) != 0 {
+				t.Fatal("a refused :ready must not call the store")
+			}
+		})
+	}
+}
+
+func TestCmdReadyRefusedWithNoPullRequestOpen(t *testing.T) {
+	app, _, _, _ := newTestApp(t, nil)
+
+	sendCommand(app, "ready")
+
+	waitFor(t, app.app, func() bool { return containsSubstring(app.statusBar.toast, "no pull request open") })
+}
+
+func TestCmdReadyFailureToastsError(t *testing.T) {
+	app, _, fake, _ := newTestApp(t, nil)
+	ref := fixtureRef(1)
+	openDetailForComposer(t, app, fake, readyablePR(ref))
+	fake.SetMarkReadyForReviewError(errors.New("boom"))
+
+	sendCommand(app, "ready")
+	waitFor(t, app.app, func() bool { return app.overlay == "confirm" })
+	confirmYes(app.app)
+
+	waitFor(t, app.app, func() bool { return containsSubstring(app.statusBar.toast, "boom") })
+}
+
+// TestCmdReadyRefusesWhenTargetPRChangedBeforeConfirm mirrors the
+// ":close" test of the same shape: confirming after another pull request
+// became current must not take that unrelated one out of draft.
+func TestCmdReadyRefusesWhenTargetPRChangedBeforeConfirm(t *testing.T) {
+	app, _, fake, _ := newTestApp(t, nil)
+	ref1 := fixtureRef(1)
+	openDetailForComposer(t, app, fake, readyablePR(ref1))
+
+	sendCommand(app, "ready")
+	waitFor(t, app.app, func() bool { return app.overlay == "confirm" })
+
+	ref2 := fixtureRef(2)
+	fake.SetPRResult(ref2, gh.DetailResult{PR: readyablePR(ref2)})
+	act(app.app, func() { app.deps.Store.OpenPR(ref2) })
+	waitFor(t, app.app, func() bool {
+		cur, ok := app.deps.Store.CurrentRef()
+		return ok && cur == ref2
+	})
+
+	confirmYes(app.app)
+
+	waitFor(t, app.app, func() bool { return containsSubstring(app.statusBar.toast, "different pull request") })
+	if len(fake.MarkReadyForReviewCalls()) != 0 {
 		t.Fatal("confirming after the target pull request changed must not call the store")
 	}
 }
