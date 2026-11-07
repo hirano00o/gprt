@@ -65,10 +65,12 @@ func (dv *DetailView) CurrentURL() string {
 	return ""
 }
 
-// Draw rebuilds every block's lines, via SetRows, when the inner width has
-// changed since the last rebuild, then renders like a plain ListView.
+// Draw rebuilds every block's lines, via SetRows, when the inner width
+// (less the cursor frame's two reserved columns) has changed since the
+// last rebuild, then renders like a plain ListView.
 func (dv *DetailView) Draw(screen tcell.Screen) {
 	_, _, width, _ := dv.GetInnerRect()
+	_, width = frameInset(0, width)
 	if width != dv.lastWidth {
 		dv.rebuild(width)
 		dv.lastWidth = width

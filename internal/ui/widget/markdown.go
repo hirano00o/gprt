@@ -58,7 +58,7 @@ var (
 // Unlike CommonMark, a single newline in a paragraph is a line break, as in
 // GitHub's own PR and comment bodies. HTML comments are hidden and other
 // HTML is reduced to its text. Only foreground colours and attributes are
-// used, so a row's cursor background shows through.
+// used, so a row's own background shows through.
 //
 // An image standing alone on its line (a Markdown image, or an HTML-block
 // line whose only visible content is one <img>) is asked of images and drawn

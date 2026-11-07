@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/gdamore/tcell/v2"
+	"github.com/hirano00o/gprt/internal/ui/theme"
 )
 
 func headerRow(id, text string) ListRow {
@@ -58,11 +58,11 @@ func TestListViewRendersRows(t *testing.T) {
 
 	lv.Draw(screen)
 
-	if r := cellRune(screen, 0, 0); r != 'S' { // "Section A" header on the first line
-		t.Errorf("cell (0,0) = %q, want 'S' (header text)", r)
+	if r := cellRune(screen, 1, 0); r != 'S' { // "Section A" header on the first line
+		t.Errorf("cell (1,0) = %q, want 'S' (header text)", r)
 	}
-	if r := cellRune(screen, 0, 1); r != '#' { // "#1 First" on the second line
-		t.Errorf("cell (0,1) = %q, want '#' (first item)", r)
+	if r := cellRune(screen, 1, 1); r != '#' { // "#1 First" on the second line
+		t.Errorf("cell (1,1) = %q, want '#' (first item)", r)
 	}
 }
 
@@ -245,7 +245,7 @@ func TestListViewScrollKeepsCursorVisible(t *testing.T) {
 	// pr5's first line ("#5") must be visible somewhere on screen.
 	found := false
 	for y := 0; y < 4; y++ {
-		if cellRune(screen, 0, y) == '#' && cellRune(screen, 1, y) == '5' {
+		if cellRune(screen, 1, y) == '#' && cellRune(screen, 2, y) == '5' {
 			found = true
 		}
 	}
@@ -328,7 +328,7 @@ func TestListViewMovePageByDisplayLines(t *testing.T) {
 	}
 }
 
-func TestListViewCursorRowUsesCursorStyle(t *testing.T) {
+func TestListViewCursorRowIsFramed(t *testing.T) {
 	screen := newTestScreen(t, 40, 10)
 	lv := NewListView()
 	lv.SetRect(0, 0, 40, 10)
@@ -336,9 +336,43 @@ func TestListViewCursorRowUsesCursorStyle(t *testing.T) {
 
 	lv.Draw(screen)
 
-	style := cellStyle(screen, 0, 1) // pr1's first line, the cursor row
-	if _, bg, _ := style.Decompose(); bg == tcell.ColorDefault {
-		t.Errorf("cursor row style has no explicit background; want the cursor highlight background")
+	// Layout: y0 header, y1-2 pr1 (the 2-line cursor row), y3-4 pr2.
+	for _, tc := range []struct {
+		name   string
+		y      int
+		framed bool
+	}{
+		{"header", 0, false},
+		{"cursor row first line", 1, true},
+		{"cursor row second line", 2, true},
+		{"next row first line", 3, false},
+		{"next row second line", 4, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, x := range []int{0, 39} {
+				want := ' '
+				if tc.framed {
+					want = '┃'
+				}
+				if got := cellRune(screen, x, tc.y); got != want {
+					t.Errorf("cell (%d,%d) = %q, want %q", x, tc.y, got, want)
+				}
+			}
+			if tc.framed {
+				fg, _, _ := cellStyle(screen, 0, tc.y).Decompose()
+				wantFg, _, _ := theme.Accent.Decompose()
+				if fg != wantFg {
+					t.Errorf("frame foreground = %v, want accent %v", fg, wantFg)
+				}
+			}
+		})
+	}
+
+	accentFG, _, _ := theme.Accent.Decompose()
+	for _, x := range []int{1, 2, 20} {
+		if _, bg, _ := cellStyle(screen, x, 1).Decompose(); bg == accentFG {
+			t.Errorf("cursor row cell (%d,1) background = %v, want no accent fill", x, bg)
+		}
 	}
 }
 
@@ -358,7 +392,7 @@ func firstLine(t *testing.T, lv *ListView) string {
 	x, y, w, h := lv.GetInnerRect()
 	screen := newTestScreen(t, x+w, y+h)
 	lv.Draw(screen)
-	return string([]rune{cellRune(screen, x, y), cellRune(screen, x+1, y)})
+	return string([]rune{cellRune(screen, x+1, y), cellRune(screen, x+2, y)})
 }
 
 func TestListViewScrollsWithinTallRow(t *testing.T) {
@@ -495,5 +529,26 @@ func TestListViewSetRowsResetsLineOffsetWhenCursorRowChanges(t *testing.T) {
 
 	if got := firstLine(t, lv); got != "L0" {
 		t.Errorf("first line for a different row = %q, want L0", got)
+	}
+}
+
+// TestListViewCursorRowMarkedWhenTooNarrowForFrame covers a pane too
+// narrow to reserve frame columns: the bars overwrite content instead, so
+// the cursor row stays the only row marked.
+func TestListViewCursorRowMarkedWhenTooNarrowForFrame(t *testing.T) {
+	for _, width := range []int{1, 2} {
+		screen := newTestScreen(t, width, 10)
+		lv := NewListView()
+		lv.SetRect(0, 0, width, 10)
+		lv.SetRows(fixtureRows())
+
+		lv.Draw(screen)
+
+		// Layout: y0 header, y1-2 pr1 (the cursor row), y3-4 pr2.
+		for y, want := range map[int]bool{0: false, 1: true, 2: true, 3: false} {
+			if got := cellRune(screen, 0, y) == '┃'; got != want {
+				t.Errorf("width %d: cell (0,%d) is a frame bar = %v, want %v", width, y, got, want)
+			}
+		}
 	}
 }

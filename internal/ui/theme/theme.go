@@ -27,13 +27,11 @@ var (
 )
 
 // Named styles every gprt widget draws with. Base is the default row style;
-// the others layer a semantic meaning (Header for section headings, Cursor
-// for the selected row's background, Stale for cache-shown-not-yet-verified
-// data, and so on) on top of it.
+// the others layer a semantic meaning (Header for section headings, Stale
+// for cache-shown-not-yet-verified data, and so on) on top of it.
 var (
 	Base    = tcell.StyleDefault.Foreground(colorFg).Background(colorBg)
 	Header  = tcell.StyleDefault.Foreground(colorAccent).Background(colorBg).Bold(true)
-	Cursor  = tcell.StyleDefault.Foreground(colorBg).Background(colorAccent)
 	Stale   = tcell.StyleDefault.Foreground(colorMuted).Background(colorBg).Italic(true)
 	Muted   = tcell.StyleDefault.Foreground(colorMuted).Background(colorBg)
 	Accent  = tcell.StyleDefault.Foreground(colorAccent).Background(colorBg)
@@ -46,18 +44,18 @@ var (
 	// from Warning/Error, which both signal a problem.
 	Info = tcell.StyleDefault.Foreground(colorInfo).Background(colorBg)
 	// Code styles inline code spans in rendered Markdown. Foreground only (no
-	// background tint): list/diff rows overwrite span backgrounds with the
-	// cursor's own via withBackground.
+	// background tint): diff rows overwrite span backgrounds with the
+	// row's own via withBackground.
 	Code = tcell.StyleDefault.Foreground(colorWarning).Background(colorBg)
 	// Link styles Markdown link text and bare URLs: Accent plus an underline
 	// so a link reads as one even without colour.
 	Link = tcell.StyleDefault.Foreground(colorAccent).Background(colorBg).Underline(true)
 	// SearchMatch highlights a "/" search hit in the diff. Reverse, not a
 	// Background colour: widget.DiffView.drawLineRow overwrites every span's
-	// background with the row's own background via withBackground (cursor/
+	// background with the row's own background via withBackground (add/del/
 	// selection tinting), which would erase a background colour set here;
-	// Reverse survives Style.Background() and still reads clearly even on
-	// the cursor row.
+	// Reverse survives Style.Background() and still reads clearly on any
+	// tinted row.
 	SearchMatch = tcell.StyleDefault.Foreground(colorWarning).Background(colorBg).Reverse(true)
 	// SearchCurrent highlights the *current* "/" search match (the one
 	// searchIdx points to) distinctly from every other match, which

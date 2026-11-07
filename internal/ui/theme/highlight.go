@@ -70,7 +70,7 @@ func buildHighlightStyle(name string) *chroma.Style {
 // drawn with: the configured chroma style's foreground colour (theme.Base's
 // foreground when the style has none for t) plus bold/italic, with the
 // background always theme.Base's — never chroma's own — so a diff row's
-// background (added/removed/cursor/selection) always shows through
+// background (added/removed/selection) always shows through
 // unaffected by syntax colouring. Results are cached per token type.
 func TokenStyle(t chroma.TokenType) tcell.Style {
 	highlightMu.Lock()
