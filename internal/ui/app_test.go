@@ -1779,6 +1779,13 @@ func screenLines(screen tcell.SimulationScreen) []string {
 	return lines
 }
 
+// screenContains reports whether screen's rendered text contains want
+// (possibly across rows). Call it from a waitFor/query function, which
+// already runs on the UI goroutine.
+func screenContains(screen tcell.SimulationScreen, want string) bool {
+	return strings.Contains(strings.Join(screenLines(screen), "\n"), want)
+}
+
 // reverseVideoSpans returns the maximal runs of screen row y that were
 // drawn with tcell's reverse-video attribute (gprt's own way of marking the
 // help search's current match — see buildHelpText's doc comment), in
@@ -3211,9 +3218,7 @@ func TestAppPRTabJScrollsLongBody(t *testing.T) {
 	act(app.app, func() { app.prView.SetCursor(idx) })
 
 	// onScreen runs inside waitFor/query, i.e. already on the UI goroutine.
-	onScreen := func(s string) bool {
-		return strings.Contains(strings.Join(screenLines(screen), "\n"), s)
-	}
+	onScreen := func(s string) bool { return screenContains(screen, s) }
 	waitFor(t, app.app, func() bool { return onScreen("para 00") })
 	if query(app.app, func() bool { return onScreen("para 20") }) {
 		t.Fatal("para 20 is already visible before scrolling; the fixture body is not taller than the pane")

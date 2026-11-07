@@ -221,7 +221,8 @@ func (a *App) toggleCurrentEditReviewer() {
 // to whichever form opened it (App.reviewersOwner). apply writes
 // editReviewersWorking back to that form's own selected-reviewers field
 // (App.editFormSelectedReviewers or App.createFormSelectedReviewers) and
-// refreshes its "Reviewers (N selected)" button text (Enter); false
+// refreshes its "Reviewers (N)" button text
+// (Enter); false
 // discards it (Esc/q).
 //
 // The guard is a.editReviewersView == nil, not a.overlay != "editreviewers",

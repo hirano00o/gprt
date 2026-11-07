@@ -85,7 +85,7 @@ func (a *App) toggleCurrentEditLabel() {
 
 // closeEditLabelsOverlay closes the "editlabels" overlay. apply writes
 // editLabelsWorking back to App.editFormSelectedLabelIDs and refreshes the
-// edit form's own "Labels (N selected)" button text (Enter); false
+// edit form's own "Labels (N)" button text (Enter); false
 // discards it (Esc/q).
 //
 // The guard is a.editLabelsView == nil, not a.overlay != "editlabels",
