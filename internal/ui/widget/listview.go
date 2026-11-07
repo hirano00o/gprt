@@ -344,22 +344,23 @@ func (lv *ListView) ensureVisible() {
 	}
 }
 
-// Draw renders the visible rows, painting the cursor row's background with
-// theme.Cursor before drawing its spans (with each span's own background
-// overridden to match, so per-span foreground colours remain visible on
-// the highlighted bar).
+// Draw renders the visible rows inset by one column on each side. Every
+// display line of the cursor row gets a frame bar in those reserved columns
+// (see drawCursorFrame); the row's background is never filled, so per-span
+// styling stays as authored.
 func (lv *ListView) Draw(screen tcell.Screen) {
 	lv.DrawForSubclass(screen, lv)
 	x, y, width, height := lv.GetInnerRect()
 	if width <= 0 || height <= 0 {
 		return
 	}
+	cx, cw := frameInset(x, width)
+	_, baseBG, _ := theme.Base.Decompose()
 
 	cursorRow := -1
 	if len(lv.selectable) > 0 {
 		cursorRow = lv.selectable[lv.cursor]
 	}
-	_, cursorBG, _ := theme.Cursor.Decompose()
 
 	line := y
 	for i := lv.offset; i < len(lv.rows) && line < y+height; i++ {
@@ -373,24 +374,13 @@ func (lv *ListView) Draw(screen tcell.Screen) {
 			if line >= y+height {
 				break
 			}
+			DrawSpans(screen, cx, line, cw, spans)
 			if onCursor {
-				for cx := x; cx < x+width; cx++ {
-					screen.SetContent(cx, line, ' ', nil, theme.Cursor)
-				}
-				spans = withBackground(spans, cursorBG)
+				drawCursorFrame(screen, x, line, width, baseBG)
 			}
-			DrawSpans(screen, x, line, width, spans)
 			line++
 		}
 	}
-}
-
-func withBackground(spans []Span, bg tcell.Color) []Span {
-	out := make([]Span, len(spans))
-	for i, s := range spans {
-		out[i] = Span{Text: s.Text, Style: s.Style.Background(bg)}
-	}
-	return out
 }
 
 func clamp(v, lo, hi int) int {

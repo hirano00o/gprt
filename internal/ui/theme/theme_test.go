@@ -11,7 +11,6 @@ func TestNamedStylesAreDistinct(t *testing.T) {
 	named := map[string]tcell.Style{
 		"Base":    Base,
 		"Header":  Header,
-		"Cursor":  Cursor,
 		"Stale":   Stale,
 		"Muted":   Muted,
 		"Accent":  Accent,

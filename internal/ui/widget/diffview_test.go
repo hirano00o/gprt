@@ -313,8 +313,8 @@ func TestDiffViewVisualSelectionAppliesSelectedBackgroundOnScreen(t *testing.T) 
 	// Row layout: y+0 file header, y+1 the gap row before the hunk (it
 	// starts at old/new line 10, not 1), y+2 hunk header, y+3 is hunk
 	// index 0 (the anchor: selected, but not the cursor).
-	_, gotBG, _ := cellStyle(screen, x, y+3).Decompose()
-	_, wantBG, _ := theme.DiffLineStyle(diff.Context, false, true).Decompose()
+	_, gotBG, _ := cellStyle(screen, x+1, y+3).Decompose()
+	_, wantBG, _ := theme.DiffLineStyle(diff.Context, true).Decompose()
 	if gotBG != wantBG {
 		t.Errorf("anchor row (hunk index 0, old line 10) background = %v, want the selected tint %v", gotBG, wantBG)
 	}
@@ -1069,22 +1069,22 @@ func TestDiffViewSearchHighlightsMatchedCellsOnly(t *testing.T) {
 
 	x, y, _, _ := dv.GetRect()
 	for i := range 4 { // "new2" is 4 runes wide
-		_, _, attr := cellStyle(screen, x+gw+i, y+4).Decompose()
+		_, _, attr := cellStyle(screen, x+1+gw+i, y+4).Decompose()
 		if attr&tcell.AttrReverse == 0 {
 			t.Errorf("match cell %d not drawn Reverse", i)
 		}
 	}
-	if _, _, attr := cellStyle(screen, x+gw+4, y+4).Decompose(); attr&tcell.AttrReverse != 0 {
+	if _, _, attr := cellStyle(screen, x+1+gw+4, y+4).Decompose(); attr&tcell.AttrReverse != 0 {
 		t.Error("cell right after the match must not be drawn Reverse")
 	}
-	if _, _, attr := cellStyle(screen, x+gw, y+2).Decompose(); attr&tcell.AttrReverse != 0 {
+	if _, _, attr := cellStyle(screen, x+1+gw, y+2).Decompose(); attr&tcell.AttrReverse != 0 {
 		t.Error("a neighbouring, non-matching line must not be drawn Reverse")
 	}
 
 	dv.ClearSearch()
 	dv.Draw(screen)
 	for i := range 4 {
-		if _, _, attr := cellStyle(screen, x+gw+i, y+4).Decompose(); attr&tcell.AttrReverse != 0 {
+		if _, _, attr := cellStyle(screen, x+1+gw+i, y+4).Decompose(); attr&tcell.AttrReverse != 0 {
 			t.Errorf("match cell %d still Reverse after ClearSearch", i)
 		}
 	}
@@ -1132,7 +1132,7 @@ func TestDiffViewSearchCurrentHighlightsOnlyTheCurrentMatch(t *testing.T) {
 	currentFg, _, _ := theme.SearchCurrent.Decompose()
 
 	for i := range 3 { // first "foo" (bytes 0-2): the other match
-		fg, _, attr := cellStyle(screen, x+gw+i, y+2).Decompose()
+		fg, _, attr := cellStyle(screen, x+1+gw+i, y+2).Decompose()
 		if attr&tcell.AttrReverse == 0 {
 			t.Errorf("other-match cell %d not drawn Reverse", i)
 		}
@@ -1144,7 +1144,7 @@ func TestDiffViewSearchCurrentHighlightsOnlyTheCurrentMatch(t *testing.T) {
 		}
 	}
 	for i := 8; i < 11; i++ { // second "foo" (bytes 8-10): the current match
-		fg, _, attr := cellStyle(screen, x+gw+i, y+2).Decompose()
+		fg, _, attr := cellStyle(screen, x+1+gw+i, y+2).Decompose()
 		if attr&tcell.AttrReverse == 0 {
 			t.Errorf("current-match cell %d not drawn Reverse", i)
 		}
@@ -1477,7 +1477,7 @@ func TestDiffViewCommentImagesComeFromTheCommentsOwnSource(t *testing.T) {
 	if len(asked) != 1 || asked[0] != "RC_1" {
 		t.Errorf("factory asked for subjects %v, want [RC_1]", asked)
 	}
-	if len(fake.calls) != 1 || fake.calls[0].src != "https://e.com/a.png" || fake.calls[0].maxCols != 58 {
+	if len(fake.calls) != 1 || fake.calls[0].src != "https://e.com/a.png" || fake.calls[0].maxCols != 56 {
 		t.Errorf("source calls = %+v, want the comment's image with the border subtracted from the width", fake.calls)
 	}
 	if !hasCommentRow(dv, kitty.Rows(3, 2)[1]) {
@@ -1485,5 +1485,75 @@ func TestDiffViewCommentImagesComeFromTheCommentsOwnSource(t *testing.T) {
 	}
 	if hasCommentRow(dv, "[image: shot]") {
 		t.Error("the text placeholder is still shown beside a ready image")
+	}
+}
+
+// TestDiffViewCursorRowIsFramedAndKeepsKindTint guards the frame-only cursor:
+// the cursor line of an added row has bars at both edges, and the whole
+// row — frame columns included — keeps the Add tint.
+func TestDiffViewCursorRowIsFramedAndKeepsKindTint(t *testing.T) {
+	dv := NewDiffView()
+	dv.SetFile(twoHunkFile(t))
+	dv.SetRect(0, 0, 60, 20)
+	screen := newTestScreen(t, 60, 20)
+	dv.Draw(screen)
+	// Cursor starts on the first selectable row; move to the "+new2" line.
+	for dv.rows[dv.selectable[dv.cursor]].lineKind != diff.Add {
+		dv.MoveBy(1)
+	}
+	dv.Draw(screen)
+
+	y := 0
+	for i := 0; i < dv.selectable[dv.cursor]; i++ {
+		y += dv.rows[i].lineCount()
+	}
+	gw := SpanWidth(dv.rows[dv.selectable[dv.cursor]].gutter)
+	_, addBG, _ := theme.DiffLineStyle(diff.Add, false).Decompose()
+
+	for _, x := range []int{0, 59} {
+		if got := cellRune(screen, x, y); got != '┃' {
+			t.Errorf("cell (%d,%d) = %q, want '┃'", x, y, got)
+		}
+		if _, bg, _ := cellStyle(screen, x, y).Decompose(); bg != addBG {
+			t.Errorf("frame cell (%d,%d) background = %v, want the Add tint %v", x, y, bg, addBG)
+		}
+	}
+	if _, bg, _ := cellStyle(screen, 1+gw+2, y).Decompose(); bg != addBG {
+		t.Errorf("cursor content background = %v, want the Add tint %v", bg, addBG)
+	}
+	if got := cellRune(screen, 0, y-1); got == '┃' {
+		t.Errorf("row above the cursor has a frame bar")
+	}
+}
+
+// TestDiffViewTintSpansReservedColumns covers a tinted row away from the
+// cursor: its kind tint reaches both reserved frame columns, so the band
+// is not cut short at the edges.
+func TestDiffViewTintSpansReservedColumns(t *testing.T) {
+	dv := NewDiffView()
+	dv.SetFile(twoHunkFile(t))
+	dv.SetRect(0, 0, 60, 20)
+	screen := newTestScreen(t, 60, 20)
+	dv.Draw(screen)
+
+	y, found := 0, false
+	for i, row := range dv.rows {
+		if row.kind == rowKindLine && row.lineKind == diff.Add && i != dv.selectable[dv.cursor] {
+			found = true
+			break
+		}
+		y += row.lineCount()
+	}
+	if !found {
+		t.Fatal("fixture has no added line away from the cursor")
+	}
+	_, addBG, _ := theme.DiffLineStyle(diff.Add, false).Decompose()
+	for _, x := range []int{0, 59} {
+		if got := cellRune(screen, x, y); got == '┃' {
+			t.Errorf("non-cursor row has a frame bar at (%d,%d)", x, y)
+		}
+		if _, bg, _ := cellStyle(screen, x, y).Decompose(); bg != addBG {
+			t.Errorf("edge cell (%d,%d) background = %v, want the Add tint %v", x, y, bg, addBG)
+		}
 	}
 }

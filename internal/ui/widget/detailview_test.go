@@ -159,7 +159,7 @@ func TestDetailViewScrollsLongDescription(t *testing.T) {
 		dv.MoveBy(1)
 	}
 	dv.Draw(screen)
-	if got := cellRune(screen, 1, 0); got != '3' {
+	if got := cellRune(screen, 2, 0); got != '3' {
 		t.Errorf("first line after 3 scrolls = L%c, want L3", got)
 	}
 
@@ -169,5 +169,32 @@ func TestDetailViewScrollsLongDescription(t *testing.T) {
 	dv.Draw(screen)
 	if dv.lineOff < 0 || dv.lineOff > 12-8 {
 		t.Errorf("lineOff = %d after resize, want within [0, 4]", dv.lineOff)
+	}
+}
+
+func TestDetailViewBuildsBlocksAtInsetWidth(t *testing.T) {
+	tests := []struct {
+		name  string
+		inner int
+		want  int
+	}{
+		{"wide", 40, 38},
+		{"minimum framed", 3, 1},
+		{"too narrow for a frame", 2, 2},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			dv := NewDetailView()
+			dv.SetRect(0, 0, tc.inner, 5)
+			got := -1
+			dv.SetBlocks([]Block{{ID: "b", Selectable: true, Build: func(w int) [][]Span {
+				got = w
+				return nil
+			}}})
+			dv.Draw(newTestScreen(t, tc.inner, 5))
+			if got != tc.want {
+				t.Errorf("Build width = %d, want %d", got, tc.want)
+			}
+		})
 	}
 }

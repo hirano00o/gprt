@@ -741,7 +741,8 @@ func (dv *DiffView) ensureVisible() {
 // rebuild — see rebuild) and renders the visible rows.
 func (dv *DiffView) Draw(screen tcell.Screen) {
 	dv.DrawForSubclass(screen, dv)
-	x, y, width, height := dv.GetInnerRect()
+	fx, y, fullWidth, height := dv.GetInnerRect()
+	x, width := frameInset(fx, fullWidth)
 	if width != dv.lastWidth {
 		dv.rebuild(width)
 		dv.lastWidth = width
@@ -762,18 +763,21 @@ func (dv *DiffView) Draw(screen tcell.Screen) {
 		isCursorRow := i == cursorRowIdx
 		isSelectedRow := hasSel && row.kind == rowKindLine && row.hunk == selHunk && row.line >= selLo && row.line <= selHi
 
-		bgStyle := theme.DiffLineStyle(row.lineKind, isCursorRow, isSelectedRow)
+		bgStyle := theme.DiffLineStyle(row.lineKind, isSelectedRow)
 		_, bg, _ := bgStyle.Decompose()
 
 		n := row.lineCount()
 		for pl := 0; pl < n && line < y+height; pl++ {
-			for cx := x; cx < x+width; cx++ {
+			for cx := fx; cx < fx+fullWidth; cx++ {
 				screen.SetContent(cx, line, ' ', nil, bgStyle)
 			}
 			if row.kind == rowKindLine {
 				dv.drawLineRow(screen, x, line, width, row, bg)
 			} else if pl < len(row.lines) {
 				DrawSpans(screen, x, line, width, withBackground(row.lines[pl], bg))
+			}
+			if isCursorRow {
+				drawCursorFrame(screen, fx, line, fullWidth, bg)
 			}
 			line++
 		}

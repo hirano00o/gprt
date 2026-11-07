@@ -16,15 +16,13 @@ var (
 )
 
 // DiffLineStyle returns the background style for one diff row: kind picks
-// the base tint (Add/Del tinted, Context the plain Base background);
-// selected (a "V" visual-selection row) overlays a distinct highlight; and
-// cursor (the row under the cursor) overlays theme.Cursor's background,
-// taking priority over selected when both apply — the single row the
-// cursor is on should always be the most visually prominent one, even
-// inside an active selection. Callers layer their own foreground spans
-// (TokenStyle, gutter numbers, markers) on top with this style's
-// background, per gutter/content column.
-func DiffLineStyle(kind diff.LineKind, cursor, selected bool) tcell.Style {
+// the base tint (Add/Del tinted, Context the plain Base background) and
+// selected (a "V" visual-selection row) overlays a distinct highlight. The
+// cursor row is not tinted here; widgets mark it with a frame so the kind
+// tint stays visible. Callers layer their own foreground spans (TokenStyle,
+// gutter numbers, markers) on top with this style's background, per
+// gutter/content column.
+func DiffLineStyle(kind diff.LineKind, selected bool) tcell.Style {
 	s := Base
 	switch kind {
 	case diff.Add:
@@ -37,10 +35,6 @@ func DiffLineStyle(kind diff.LineKind, cursor, selected bool) tcell.Style {
 
 	if selected {
 		s = s.Background(colorDiffSelectedBg)
-	}
-	if cursor {
-		_, bg, _ := Cursor.Decompose()
-		s = s.Background(bg)
 	}
 	return s
 }
