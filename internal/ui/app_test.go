@@ -2259,13 +2259,13 @@ func TestAppHelpSearchScrollsToMatchOnNarrowScreen(t *testing.T) {
 
 	sendRune(app.app, '/')
 	waitFor(t, app.app, func() bool { return app.app.GetFocus() == app.helpSearchInput })
-	for _, r := range "reopen, merge" {
+	for _, r := range "ready, merge" {
 		sendRune(app.app, r)
 	}
 	sendSpecial(app.app, tcell.KeyEnter)
 	waitFor(t, app.app, func() bool { return app.helpMatchCount > 0 })
 
-	assertHelpCurrentMatchVisible(t, app, screen, "reopen, merge")
+	assertHelpCurrentMatchVisible(t, app, screen, "ready, merge")
 }
 
 // assertHelpCurrentMatchVisible fails t unless exactly one row of the help
@@ -2367,7 +2367,7 @@ func TestAppHelpCommandsLineListsEveryCommand(t *testing.T) {
 	waitFor(t, app.app, func() bool { return app.overlay == "help" })
 
 	text := query(app.app, func() string { return app.helpView.GetText(true) })
-	if !containsSubstring(text, "close, reopen, merge") {
+	if !containsSubstring(text, "close, reopen, ready, merge") {
 		t.Errorf("help text does not list every submitCommand command: %q", text)
 	}
 }

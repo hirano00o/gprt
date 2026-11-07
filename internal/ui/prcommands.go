@@ -1,9 +1,9 @@
-// prcommands.go implements the ":close" and ":reopen" command-line
-// commands (docs/KEYBINDINGS.md's "':' commands" table): a confirm dialog
-// gates the actual Store.Close/Reopen call, and pendingMutation tracks its
-// outcome (Store.MutationError(), never LastError()) for a success/failure
-// toast — mirroring composer.go's pendingSend for a mutation with no
-// composer text of its own. ":merge" is implemented in mergedialog.go.
+// prcommands.go implements the ":close", ":reopen" and ":ready"
+// command-line commands (docs/KEYBINDINGS.md's "':' commands" table): a
+// confirm dialog gates the actual Store.Close/Reopen/SetDraft call, and
+// pendingMutation tracks its outcome (Store.MutationError(), never
+// LastError()) for a success/failure toast — mirroring composer.go's
+// pendingSend for a mutation with no composer text of its own. ":merge" is implemented in mergedialog.go.
 package ui
 
 import (
@@ -17,7 +17,7 @@ import (
 
 // pendingSimpleMutation is pendingSend's counterpart for a non-composer
 // mutation: successVerb names the outcome shown by the success toast
-// ("closed", "reopened", "merged").
+// ("closed", "reopened", "marked ready for review", "merged").
 type pendingSimpleMutation struct {
 	successVerb string
 }
@@ -45,15 +45,29 @@ func (a *App) cmdReopen() {
 	)
 }
 
-// confirmSimplePRMutation is cmdClose's/cmdReopen's shared shape: requires
-// an open, loaded pull request; refuses with a toast when canAct(pr) is
-// false ("you <permissionMsg>") or fitsState(pr) is false ("pull request is
-// <stateMsg>"); otherwise shows a confirm dialog ("<title> #N?") whose own
-// onConfirm re-checks Store.CurrentRef() against the ref captured here
-// (docs/DESIGN.md's "deferred callback" convention: every store call made
-// from a deferred callback re-checks the ref the dialog opened for) before
-// calling enqueue and tracking its outcome (successVerb, "closed"/
-// "reopened") via pendingMutation.
+// cmdReady implements ":ready", taking a draft pull request out of draft
+// via Store.SetDraft(false). Gated on ViewerCanUpdate, the same permission
+// the edit form's own Draft checkbox requires, since GitHub exposes no
+// dedicated viewer-can-mark-ready flag.
+func (a *App) cmdReady() {
+	a.confirmSimplePRMutation("Mark ready", "marked ready for review", "cannot mark this pull request ready",
+		func(pr *model.PullRequest) bool { return pr.ViewerCanUpdate },
+		func(pr *model.PullRequest) bool { return pr.State == model.PRStateOpen && pr.IsDraft },
+		"not an open draft",
+		func() bool { return a.deps.Store.SetDraft(false) },
+	)
+}
+
+// confirmSimplePRMutation is cmdClose's/cmdReopen's/cmdReady's shared
+// shape: requires an open, loaded pull request; refuses with a toast when
+// canAct(pr) is false ("you <permissionMsg>") or fitsState(pr) is false
+// ("pull request is <stateMsg>"); otherwise shows a confirm dialog
+// ("<title> #N?") whose own onConfirm re-checks Store.CurrentRef() against
+// the ref captured here (docs/DESIGN.md's "deferred callback" convention:
+// every store call made from a deferred callback re-checks the ref the
+// dialog opened for) before calling enqueue and tracking its outcome
+// (successVerb, "closed"/"reopened"/"marked ready for review") via
+// pendingMutation.
 func (a *App) confirmSimplePRMutation(
 	title, successVerb, permissionMsg string,
 	canAct, fitsState func(pr *model.PullRequest) bool,

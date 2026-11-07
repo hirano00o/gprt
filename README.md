@@ -12,7 +12,7 @@ A terminal UI for GitHub pull requests. Browse, review, comment, and merge witho
 - **Files view** with a file tree and a syntax-highlighted diff. Review threads appear inline and can be folded.
 - **Reviewing**: comment on a line, a range, or a whole file; reply; resolve threads; post a comment right away or build up a pending review and submit it as Approve, Request changes, or Comment.
 - **Reactions** and `@`-mention completion with the repository's users.
-- **Editing and lifecycle**: edit a PR's title, description, base, labels, reviewers, and draft state; create pull requests from the TUI; merge, close, and reopen through `:merge`, `:close`, `:reopen`, each behind a confirmation.
+- **Editing and lifecycle**: edit a PR's title, description, base, labels, reviewers, and draft state; create pull requests from the TUI; merge, close, reopen, and mark a draft ready for review through `:merge`, `:close`, `:reopen`, `:ready`, each behind a confirmation.
 - **Vim-style editor** for every text you write, with `:e` to jump into your `$EDITOR`. Drafts are saved as you type and survive restarts.
 - **Fast and quiet**: reuses your `gh` login, caches API responses on disk, refreshes in the background, and lets you remap every navigation key.
 
@@ -106,7 +106,7 @@ All keys below except the editor's own can be remapped. The full reference, incl
 | `Ctrl-w o` | Show or hide the PR list |
 | `o` | Open the current item in the browser |
 | `R` | Reload, ignoring the cache |
-| `:` | Command line: `:merge`, `:close`, `:reopen`, `:reload`, `:messages`, `:help`, `:q` |
+| `:` | Command line: `:merge`, `:close`, `:reopen`, `:ready`, `:reload`, `:messages`, `:help`, `:q` |
 | `?` | Help (`/` inside it searches the binding list, `n` / `N` cycle matches) |
 | `q`, `Ctrl-c` | Close the open dialog, or quit |
 

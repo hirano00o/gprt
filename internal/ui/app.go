@@ -216,7 +216,7 @@ type App struct {
 	pendingSend *pendingSend
 
 	// pendingMutation tracks a non-composer, single mutation triggered from
-	// a command or dialog (:close, :reopen, :merge) whose outcome should
+	// a command or dialog (:close, :reopen, :ready, :merge) whose outcome should
 	// show a success/failure toast — pendingSend's own counterpart
 	// (prcommands.go) for a mutation with no composer text of its own. At
 	// most one can ever be outstanding, mirroring pendingSend's own
