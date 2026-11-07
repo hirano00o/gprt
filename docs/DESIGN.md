@@ -5,7 +5,7 @@ Condensed architecture reference for `gprt`. See `docs/REQUIREMENTS.md` for feat
 ## Module layout and dependency rules
 
 ```
-go.mod                         module github.com/hirano00o/gprt (go 1.26)
+go.mod                         module github.com/hirano00o/gprt (go 1.27)
 cmd/gprt/main.go               flags (--debug, --config), config load, wiring, app.Run(); returns immediately after Run
 internal/config/               YAML config (strict), defaults, gh-style dir resolution
 internal/logging/              slog file logger, ring buffer of recent errors (shown by :messages)

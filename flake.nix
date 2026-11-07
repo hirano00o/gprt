@@ -18,7 +18,8 @@
     in
     {
       packages = forAllSystems (pkgs: {
-        default = pkgs.buildGoModule {
+        # Not buildGoModule: nixpkgs' default go still lags behind go.mod.
+        default = pkgs.buildGo127Module {
           pname = "gprt";
           inherit version;
           src = self;
