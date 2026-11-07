@@ -54,7 +54,10 @@ func (a *App) buildRows() []widget.ListRow {
 
 	rows := make([]widget.ListRow, 0, len(storeRows))
 	rowIndex := make(map[string]*previewState, len(storeRows))
-	for _, g := range groups {
+	for gi, g := range groups {
+		if gi > 0 {
+			rows = append(rows, spacerListRow(g.section))
+		}
 		rows = append(rows, headerListRow(g.section, g.state, len(g.items), a.deps.Icons))
 		for i, r := range g.items {
 			id := r.Item.PR.Ref.Key()
@@ -78,6 +81,12 @@ func sectionStateIndex(states []store.SectionState) map[model.Section]store.Sect
 		out[s.Section] = s
 	}
 	return out
+}
+
+// spacerListRow is the blank, non-selectable row separating sec's heading
+// from the section above it.
+func spacerListRow(sec model.Section) widget.ListRow {
+	return widget.ListRow{ID: "spacer:" + sec.Name, Lines: [][]widget.Span{{}}}
 }
 
 // headerListRow renders one section heading: the section marker, its name,
