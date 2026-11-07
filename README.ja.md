@@ -8,6 +8,7 @@ GitHub のプルリクエストをターミナルで扱うための TUI です�
 
 - **すべてのプルリクエストを 1 つの一覧に**: 複数リポジトリをまたいで、自分(とチーム)へのレビュー依頼、自分の PR、関わっている PR、さらに任意の検索条件をセクションとして表示します。`/` で絞り込み、open / closed / merged を切り替えられます。
 - **PR ビュー**: 説明文、ラベル、レビュアー、CI チェック、会話のタイムライン全体を表示します。説明文とコメントは GitHub Flavored Markdown として描画します(見出し、リスト、テーブル、シンタックスハイライト付きのコードブロック、リンクなど)。
+- **画像表示**: 説明文やコメントの中で単独の行にある画像を、kitty グラフィックスプロトコル(kitty、Ghostty)でターミナルに描画します。それ以外の画像や、対応していないターミナルでは `[image: alt]` の文字表示のままです。
 - **Files ビュー**: ファイルツリーとシンタックスハイライト付きの diff。レビュースレッドは diff 内にインライン表示され、折りたためます。
 - **レビュー**: 行・範囲・ファイル単位のコメント、返信、スレッドの解決。コメントを即時投稿するか、ペンディングレビューに溜めて Approve / Request changes / Comment として提出するかを選べます。
 - **リアクション**と、リポジトリのユーザーによる `@` メンション補完。
@@ -72,6 +73,7 @@ icons: unicode            # unicode | nerd (Nerd Font glyphs)
 editor: ""                # command for :e; defaults to $EDITOR, then vim
 browser: ""               # command for o; defaults to $BROWSER, then the OS default
 highlight_style: github-dark  # any chroma style name
+image_protocol: auto      # auto | kitty | none; draw images with the kitty graphics protocol
 tab_width: 4
 list:
   state: open             # open | closed | merged | all
@@ -83,6 +85,8 @@ keys:                     # remap any action (vim notation); see docs/KEYBINDING
   diff.comment: "c"
   pr.submit: "S"
 ```
+
+`image_protocol` が `auto` のときは、環境変数(`KITTY_WINDOW_ID`、`GHOSTTY_RESOURCES_DIR`、`TERM`、`TERM_PROGRAM`)から kitty または Ghostty と判断できた場合に画像を描画します。`none` では常に文字表示のままです。tmux の中で使うときは、`tmux.conf` に `set -g allow-passthrough on` を書いてください。書かないと画像がターミナルに届きません。また、`TERM` が 256 色に対応している必要があります(`tmux-256color`、`xterm-256color`、kitty や Ghostty 自身の値など)。画像の識別子を色で伝えるため、`NO_COLOR` を設定すると画像は表示されません。画像のダウンロードに GitHub のトークンは使いません。
 
 `editor` と `browser` はシェルのクォート規則で分割され、`$VAR` と `~` は展開されます(glob は展開されません)。`GPRT_BROWSER` は `browser` の設定より優先されます。
 

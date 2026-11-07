@@ -105,6 +105,7 @@ icons: nerd
 editor: nvim
 browser: firefox
 highlight_style: monokai
+image_protocol: kitty
 tab_width: 2
 list:
   state: all
@@ -128,6 +129,7 @@ keys:
 		Editor:          "nvim",
 		Browser:         "firefox",
 		HighlightStyle:  "monokai",
+		ImageProtocol:   "kitty",
 		TabWidth:        2,
 		List: ListConfig{
 			State:    "all",

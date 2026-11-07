@@ -20,17 +20,20 @@ import (
 // (nothing selected yet, or the detail failed to load), a single
 // informational block is returned instead of the full layout. logger
 // receives a warning if the timeline contains a malformed item (see
-// conversationBlocks); a nil logger discards it.
-func buildPRBlocks(pr *model.PullRequest, state store.DetailState, viewerLogin string, icons theme.Icons, logger *slog.Logger) []widget.Block {
+// conversationBlocks); a nil logger discards it. images supplies the
+// ImageSource of each text that can contain images (nil: text placeholders).
+func buildPRBlocks(
+	pr *model.PullRequest, state store.DetailState, viewerLogin string, icons theme.Icons, logger *slog.Logger, images imageSources,
+) []widget.Block {
 	if pr == nil {
 		return []widget.Block{emptyPRBlock(state)}
 	}
 
 	blocks := make([]widget.Block, 0, 2+len(pr.Checks)+len(pr.Timeline))
 	blocks = append(blocks, headerBlock(pr, state, viewerLogin, icons))
-	blocks = append(blocks, descriptionBlock(pr))
+	blocks = append(blocks, descriptionBlock(pr, images))
 	blocks = append(blocks, checksBlocks(pr, icons)...)
-	blocks = append(blocks, conversationBlocks(pr, logger)...)
+	blocks = append(blocks, conversationBlocks(pr, logger, images)...)
 	return blocks
 }
 

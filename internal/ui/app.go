@@ -9,9 +9,11 @@ package ui
 import (
 	"context"
 	"log/slog"
+	"os"
 	"regexp"
 	"time"
 
+	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 
 	"github.com/hirano00o/gprt/internal/browser"
@@ -56,6 +58,9 @@ type Deps struct {
 	// write-through saving, restore, and the status bar's draft count
 	// are skipped).
 	Drafts *drafts.Store
+	// Getenv reads the environment, to decide whether the terminal can show
+	// images and whether it runs inside tmux. Nil means os.Getenv.
+	Getenv func(string) string
 }
 
 // App is gprt's tview application: the root layout, the router, and the
@@ -76,6 +81,9 @@ type App struct {
 	detailPages  *tview.Pages
 	prView       *widget.DetailView
 	currentTab   string
+
+	// images draws images with the kitty graphics protocol (see images.go).
+	images *imageBackend
 
 	// Files tab: a tree of changed files (left) and the diff of whichever
 	// file is selected (right) — see files.go.
@@ -534,13 +542,26 @@ type previewState struct {
 // before Run is ever called), but starts no goroutines and makes no store
 // calls until Run.
 func New(deps Deps) *App {
+	if deps.Getenv == nil {
+		deps.Getenv = os.Getenv
+	}
+	logger := deps.Logger
+	if logger == nil {
+		logger = slog.New(slog.DiscardHandler)
+	}
 	a := &App{
 		deps:       deps,
 		app:        tview.NewApplication(),
 		currentTab: "pr",
 		seq:        keys.NewSequencer(deps.Keymap),
 		cmdHistIdx: -1,
+		images:     newImageBackend(deps.Store, deps.Config.ImageProtocol, deps.Getenv, logger),
 	}
+	a.app.SetBeforeDrawFunc(func(screen tcell.Screen) bool {
+		a.images.beforeDraw(screen)
+		return false
+	})
+	a.app.SetAfterDrawFunc(a.images.flush)
 	a.build()
 	return a
 }

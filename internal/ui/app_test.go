@@ -51,6 +51,7 @@ type fakeGitHub struct {
 	filesPages  map[string][]gh.FilesResult
 	filesErrs   map[string]map[int]error
 	filesBlock  chan struct{}
+	bodyHTML    map[string]string
 
 	// fileContent backs FileContent (see SetFileContent): keyed by blob SHA
 	// rather than by ref/path, matching the real endpoint, which addresses
@@ -647,6 +648,29 @@ func (f *fakeGitHub) SetMentionableUsersBlock(ch chan struct{}) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.mentionableUsersBlock = ch
+}
+
+// SetBodyHTML registers the rendered HTML BodyHTML returns for a node ID.
+func (f *fakeGitHub) SetBodyHTML(id, html string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.bodyHTML == nil {
+		f.bodyHTML = map[string]string{}
+	}
+	f.bodyHTML[id] = html
+}
+
+// BodyHTML returns what SetBodyHTML registered for each requested id.
+func (f *fakeGitHub) BodyHTML(_ context.Context, ids []string) (map[string]string, model.RateLimit, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := map[string]string{}
+	for _, id := range ids {
+		if html, ok := f.bodyHTML[id]; ok {
+			out[id] = html
+		}
+	}
+	return out, model.RateLimit{}, nil
 }
 
 func (f *fakeGitHub) MentionableUsers(ctx context.Context, repo model.RepoRef, query string, first int) ([]model.User, model.RateLimit, error) {
@@ -1508,6 +1532,25 @@ func fixtureDetailPR(ref model.PRRef) model.PullRequest {
 // waits for Run to return.
 func newTestApp(t *testing.T, overrides map[string]string) (*App, <-chan struct{}, *fakeGitHub, tcell.SimulationScreen) {
 	t.Helper()
+	return newTestAppWith(t, overrides, testAppOpts{})
+}
+
+// testAppOpts tunes newTestAppWith; the zero value is newTestApp's setup.
+type testAppOpts struct {
+	// config adjusts the default configuration.
+	config func(*config.Config)
+	// images is the store's image downloader (nil disables images there).
+	images store.ImageFetcher
+	// getenv is the App's environment (nil: an empty one, so no test ever
+	// depends on the developer's terminal).
+	getenv func(string) string
+	// tty, when set, is returned by the screen's Tty(), as on a real terminal.
+	tty tcell.Tty
+}
+
+// newTestAppWith is newTestApp with opts applied.
+func newTestAppWith(t *testing.T, overrides map[string]string, opts testAppOpts) (*App, <-chan struct{}, *fakeGitHub, tcell.SimulationScreen) {
+	t.Helper()
 
 	km, err := keys.Merge(keys.Defaults(), overrides)
 	if err != nil {
@@ -1542,6 +1585,9 @@ func newTestApp(t *testing.T, overrides map[string]string) (*App, <-chan struct{
 
 	cfg := config.Default()
 	cfg.RefreshInterval = time.Hour // long enough to never tick during a test
+	if opts.config != nil {
+		opts.config(&cfg)
+	}
 
 	draftStore, err := drafts.New(t.TempDir())
 	if err != nil {
@@ -1556,8 +1602,13 @@ func newTestApp(t *testing.T, overrides map[string]string) (*App, <-chan struct{
 		Logger:   logger,
 		Config:   cfg,
 		Host:     "github.com",
+		Images:   opts.images,
 	})
 
+	getenv := opts.getenv
+	if getenv == nil {
+		getenv = func(string) string { return "" }
+	}
 	app = New(Deps{
 		Store:  st,
 		Config: cfg,
@@ -1571,6 +1622,7 @@ func newTestApp(t *testing.T, overrides map[string]string) (*App, <-chan struct{
 		Recent:  recorder.Recent,
 		Version: "test",
 		Drafts:  draftStore,
+		Getenv:  getenv,
 	})
 
 	screen := tcell.NewSimulationScreen("")
@@ -1578,7 +1630,11 @@ func newTestApp(t *testing.T, overrides map[string]string) (*App, <-chan struct{
 		t.Fatalf("screen.Init: %v", err)
 	}
 	screen.SetSize(100, 30)
-	app.app.SetScreen(screen)
+	if opts.tty != nil {
+		app.app.SetScreen(ttyScreen{SimulationScreen: screen, tty: opts.tty})
+	} else {
+		app.app.SetScreen(screen)
+	}
 
 	// done is closed, never sent-on, so both the test and this cleanup can
 	// safely wait on it — closing broadcasts to every receiver, whereas a

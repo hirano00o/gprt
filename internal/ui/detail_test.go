@@ -48,7 +48,7 @@ func TestBuildPRBlocksEmptyStateVariants(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			blocks := buildPRBlocks(nil, tc.state, "octocat", theme.Unicode(), nil)
+			blocks := buildPRBlocks(nil, tc.state, "octocat", theme.Unicode(), nil, nil)
 			if len(blocks) != 1 {
 				t.Fatalf("len(blocks) = %d, want 1", len(blocks))
 			}
@@ -191,7 +191,7 @@ func TestHeaderBlockShowsStandingError(t *testing.T) {
 
 func TestDescriptionBlockBlankBody(t *testing.T) {
 	pr := &model.PullRequest{Body: "", URL: "https://example.com/pr/1"}
-	b := descriptionBlock(pr)
+	b := descriptionBlock(pr, nil)
 	if !b.Selectable || b.URL != pr.URL {
 		t.Errorf("description block = %+v, want selectable with the PR URL", b)
 	}
@@ -207,18 +207,18 @@ func TestDescriptionBlockBlankBody(t *testing.T) {
 // only looks at whitespace) does not catch it.
 func TestDescriptionBlockOnlyFenceMarkersFallsBackToNoDescription(t *testing.T) {
 	pr := &model.PullRequest{Body: "```\n```"}
-	lines := descriptionBlock(pr).Build(80)
+	lines := descriptionBlock(pr, nil).Build(80)
 	if len(lines) == 0 {
 		t.Fatal("descriptionBlock produced zero lines for a fence-only body; a selectable row must never have zero height")
 	}
-	if got := blockText(descriptionBlock(pr), 80); !strings.Contains(got, "no description") {
+	if got := blockText(descriptionBlock(pr, nil), 80); !strings.Contains(got, "no description") {
 		t.Errorf("fence-only body description = %q, want a (no description) placeholder", got)
 	}
 }
 
 func TestDescriptionBlockHeadingIsBold(t *testing.T) {
 	pr := &model.PullRequest{Body: "# Summary\nSome details here."}
-	lines := descriptionBlock(pr).Build(80)
+	lines := descriptionBlock(pr, nil).Build(80)
 	if len(lines) == 0 || len(lines[0]) == 0 {
 		t.Fatal("expected at least one rendered line")
 	}
@@ -233,7 +233,7 @@ func TestDescriptionBlockHeadingIsBold(t *testing.T) {
 
 func TestDescriptionBlockOnlyHTMLCommentFallsBackToNoDescription(t *testing.T) {
 	pr := &model.PullRequest{Body: "<!-- fill in the template -->"}
-	if got := blockText(descriptionBlock(pr), 80); !strings.Contains(got, "no description") {
+	if got := blockText(descriptionBlock(pr, nil), 80); !strings.Contains(got, "no description") {
 		t.Errorf("comment-only body description = %q, want a (no description) placeholder", got)
 	}
 }
@@ -241,7 +241,7 @@ func TestDescriptionBlockOnlyHTMLCommentFallsBackToNoDescription(t *testing.T) {
 func TestDescriptionBlockCodeFenceDoesNotWordWrap(t *testing.T) {
 	body := "before\n```\n" + strings.Repeat("x", 50) + "\n```\nafter"
 	pr := &model.PullRequest{Body: body}
-	lines := descriptionBlock(pr).Build(10)
+	lines := descriptionBlock(pr, nil).Build(10)
 
 	var codeLineText string
 	for _, line := range lines {
@@ -269,7 +269,7 @@ func TestDescriptionBlockCodeFenceDoesNotWordWrap(t *testing.T) {
 
 func TestDescriptionBlockRendersBullets(t *testing.T) {
 	pr := &model.PullRequest{Body: "- first\n* second"}
-	text := blockText(descriptionBlock(pr), 80)
+	text := blockText(descriptionBlock(pr, nil), 80)
 	if !strings.Contains(text, "• first") || !strings.Contains(text, "• second") {
 		t.Errorf("description with bullets = %q, want each item rendered with a • marker", text)
 	}
@@ -280,7 +280,7 @@ func TestDescriptionBlockReactions(t *testing.T) {
 		Body:           "hello",
 		ReactionGroups: []model.ReactionGroup{{Content: model.ReactionThumbsUp, Count: 2}},
 	}
-	text := blockText(descriptionBlock(pr), 80)
+	text := blockText(descriptionBlock(pr, nil), 80)
 	if !strings.Contains(text, "2") || !strings.Contains(text, model.ReactionThumbsUp.Emoji()) {
 		t.Errorf("description with reactions = %q, want the thumbs-up count rendered", text)
 	}
@@ -410,7 +410,7 @@ func TestConversationBlocksIssueComment(t *testing.T) {
 			URL:            "https://example.com/comment/1",
 		},
 	}}}
-	blocks := conversationBlocks(pr, nil)
+	blocks := conversationBlocks(pr, nil, nil)
 	if len(blocks) != 1 {
 		t.Fatalf("len(blocks) = %d, want 1", len(blocks))
 	}
@@ -442,7 +442,7 @@ func TestConversationBlocksReviewVerbs(t *testing.T) {
 				Kind:   model.TimelineKindReview,
 				Review: &model.Review{Author: model.User{Login: "erin"}, State: tc.state, Body: "lgtm", URL: "https://example.com/review/1"},
 			}}}
-			blocks := conversationBlocks(pr, nil)
+			blocks := conversationBlocks(pr, nil, nil)
 			text := blockText(blocks[0], 80)
 			if !strings.Contains(text, tc.want) {
 				t.Errorf("review verb text = %q, want it to contain %q", text, tc.want)
@@ -468,7 +468,7 @@ func TestConversationBlocksZeroTimestampsOmitRelativeTime(t *testing.T) {
 		{Kind: model.TimelineKindReview, Review: &model.Review{Author: model.User{Login: "erin"}, State: model.ReviewStatePending}},
 		{Kind: model.TimelineKindEvent, Event: &model.Event{Type: "MergedEvent", Actor: model.User{Login: "frank"}}},
 	}}
-	for i, b := range conversationBlocks(pr, nil) {
+	for i, b := range conversationBlocks(pr, nil, nil) {
 		lines := b.Build(80)
 		header := lines[0][0].Text
 		if strings.Contains(header, "ago") {
@@ -485,7 +485,7 @@ func TestConversationBlocksCommit(t *testing.T) {
 		Kind:   model.TimelineKindCommit,
 		Commit: &model.Commit{OID: "abcdef1234567890", Message: "Fix bug\n\nlonger body", Author: model.User{Login: "frank"}},
 	}}}
-	blocks := conversationBlocks(pr, nil)
+	blocks := conversationBlocks(pr, nil, nil)
 	if blocks[0].Selectable {
 		t.Error("a commit row must not be selectable")
 	}
@@ -536,7 +536,7 @@ func TestConversationBlocksEventVerbs(t *testing.T) {
 				Kind:  model.TimelineKindEvent,
 				Event: &model.Event{Type: tc.typ, Actor: model.User{Login: "grace"}, Detail: tc.detail},
 			}}}
-			blocks := conversationBlocks(pr, nil)
+			blocks := conversationBlocks(pr, nil, nil)
 			if blocks[0].Selectable {
 				t.Error("an event row must not be selectable")
 			}
@@ -562,7 +562,7 @@ func TestConversationBlocksNilPayloadRendersUnavailableInsteadOfPanicking(t *tes
 		{Kind: model.TimelineKindEvent, Event: nil},
 	}}
 
-	blocks := conversationBlocks(pr, nil) // must not panic on a corrupt entry
+	blocks := conversationBlocks(pr, nil, nil) // must not panic on a corrupt entry
 	if len(blocks) != 4 {
 		t.Fatalf("len(blocks) = %d, want 4 (one per timeline item, even a corrupt one)", len(blocks))
 	}
@@ -584,7 +584,7 @@ func TestConversationBlocksRenderMarkdownBodies(t *testing.T) {
 		{Kind: model.TimelineKindIssueComment, IssueComment: &model.IssueComment{Author: model.User{Login: "dave"}, Body: "# Notes\n- one"}},
 		{Kind: model.TimelineKindReview, Review: &model.Review{Author: model.User{Login: "erin"}, State: model.ReviewStateCommented, Body: "# Notes\n- one"}},
 	}}
-	for i, b := range conversationBlocks(pr, nil) {
+	for i, b := range conversationBlocks(pr, nil, nil) {
 		text := blockText(b, 80)
 		if !strings.Contains(text, "• one") || strings.Contains(text, "# Notes") {
 			t.Errorf("blocks[%d] text = %q, want Markdown rendered (• bullet, no # marker)", i, text)

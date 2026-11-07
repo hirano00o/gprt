@@ -98,6 +98,7 @@ func (s *Store) OpenPR(ref model.PRRef) {
 	// opened), but any previous PR's file list/highlight pool is reset.
 	s.resetFiles()
 	s.resetOutdatedAnchors()
+	s.resetImages()
 	// Recomputed immediately, not left to whenever the next fetch
 	// resolves: without this, LastError() would keep reporting the
 	// *previous* pull request's standing error for however long the new
@@ -199,6 +200,7 @@ func (s *Store) ClosePR() {
 	s.detailFetchedAt = time.Time{}
 	s.resetFiles()
 	s.resetOutdatedAnchors()
+	s.resetImages()
 	s.recomputeLastErr()
 
 	s.emit(Event{Kind: EventPRChanged})

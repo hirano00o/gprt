@@ -78,6 +78,11 @@ const (
 	// return different data: a compare for some original commit finished
 	// (successfully or not) for the current pull request (see outdated.go).
 	EventOutdatedAnchorsChanged
+	// EventImagesChanged fires whenever Image would return a different
+	// answer for some image: a batch of bodyHTML was resolved, or a
+	// download finished (successfully or not). It is never emitted from
+	// within Image itself.
+	EventImagesChanged
 )
 
 // Event is published synchronously, on the UI goroutine, by Subscribe

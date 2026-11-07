@@ -45,7 +45,7 @@ var (
 	htmlCommentRe = regexp.MustCompile(`(?s)<!--.*?(?:-->|\z)`)
 	htmlTagRe     = regexp.MustCompile(`(?s)</?[A-Za-z][^>]*>`)
 	htmlImgRe     = regexp.MustCompile(`(?is)<img\b[^>]*>`)
-	htmlAltRe     = regexp.MustCompile(`(?is)\balt\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))`)
+	htmlAttrRe    = regexp.MustCompile(`(?is)\b([a-z][a-z0-9_:-]*)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))`)
 	// htmlRawTextRe matches the opening of a CommonMark type-1 HTML block.
 	htmlRawTextRe = regexp.MustCompile(`(?i)^\s*<(script|style|pre|textarea)\b`)
 )
@@ -60,9 +60,14 @@ var (
 // HTML is reduced to its text. Only foreground colours and attributes are
 // used, so a row's cursor background shows through.
 //
+// An image standing alone on its line (a Markdown image, or an HTML-block
+// line whose only visible content is one <img>) is asked of images and drawn
+// as placeholder cells when it is ready; any other image, and every image
+// when images is nil, is a muted "[image: alt]" text.
+//
 // A blank body, or one with nothing visible (only an HTML comment, only
 // fence markers), yields no lines: callers pick their own placeholder.
-func RenderMarkdown(body string, width int) [][]Span {
+func RenderMarkdown(body string, width int, images ImageSource) [][]Span {
 	if strings.TrimSpace(body) == "" {
 		return nil
 	}
@@ -71,12 +76,13 @@ func RenderMarkdown(body string, width int) [][]Span {
 	}
 	src := []byte(body)
 	doc := mdParser.Parse(text.NewReader(src))
-	return (&mdRenderer{src: src}).blocks(doc, width, false)
+	return (&mdRenderer{src: src, images: images}).blocks(doc, width, false)
 }
 
 // mdRenderer walks a goldmark AST over src into Span lines.
 type mdRenderer struct {
-	src []byte
+	src    []byte
+	images ImageSource
 }
 
 // blocks renders parent's block children, one blank line between
@@ -121,9 +127,32 @@ func (r *mdRenderer) block(n ast.Node, width int) [][]Span {
 }
 
 // paragraph word-wraps n's inline content, or returns nil when it has no
-// visible text (for example a paragraph of only an HTML comment).
+// visible text (for example a paragraph of only an HTML comment). A line
+// holding only an image is rendered by imageLines instead.
 func (r *mdRenderer) paragraph(n ast.Node, base tcell.Style, width int) [][]Span {
-	spans := r.inline(n, base)
+	var out [][]Span
+	var run []Span
+	flush := func() {
+		out = append(out, wrapParagraph(run, width)...)
+		run = nil
+	}
+	for _, line := range splitInlineLines(n) {
+		if ref, ok := r.standaloneImage(line); ok {
+			flush()
+			out = append(out, r.imageLines(ref, width)...)
+			continue
+		}
+		for _, c := range line {
+			run = append(run, r.inlineNode(c, base)...)
+		}
+	}
+	flush()
+	return out
+}
+
+// wrapParagraph word-wraps one run of inline spans, or returns nil when it
+// has no visible text.
+func wrapParagraph(spans []Span, width int) [][]Span {
 	if strings.TrimSpace(spansText(spans)) == "" {
 		return nil
 	}
@@ -319,7 +348,12 @@ func (r *mdRenderer) htmlBlock(n *ast.HTMLBlock, width int) [][]Span {
 
 	var out [][]Span
 	for line := range strings.SplitSeq(content, "\n") {
-		if spans := htmlLineSpans(strings.TrimSpace(line)); len(spans) > 0 {
+		line = strings.TrimSpace(line)
+		if ref, ok := htmlStandaloneImage(line); ok {
+			out = append(out, r.imageLines(ref, width)...)
+			continue
+		}
+		if spans := htmlLineSpans(line); len(spans) > 0 {
 			out = append(out, WrapSpans(spans, width)...)
 		}
 	}
@@ -352,14 +386,23 @@ func htmlLineSpans(line string) []Span {
 	return spans
 }
 
+// htmlAttrs returns the lower-cased attributes of an HTML tag, their values
+// entity-decoded.
+func htmlAttrs(tag string) map[string]string {
+	attrs := map[string]string{}
+	for _, m := range htmlAttrRe.FindAllStringSubmatch(tag, -1) {
+		name := strings.ToLower(m[1])
+		if _, seen := attrs[name]; !seen {
+			attrs[name] = resolveEntities([]byte(m[2] + m[3] + m[4]))
+		}
+	}
+	return attrs
+}
+
 // htmlImgAlt returns the (entity-decoded) alt attribute of an <img> tag, or
 // "" when it has none.
 func htmlImgAlt(tag string) string {
-	m := htmlAltRe.FindStringSubmatch(tag)
-	if m == nil {
-		return ""
-	}
-	return resolveEntities([]byte(m[1] + m[2] + m[3]))
+	return htmlAttrs(tag)["alt"]
 }
 
 // imagePlaceholder is the muted text standing in for an image.

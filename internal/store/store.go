@@ -65,6 +65,10 @@ type GitHub interface {
 	// source.
 	MentionableUsers(ctx context.Context, repo model.RepoRef, query string, first int) ([]model.User, model.RateLimit, error)
 
+	// BodyHTML returns the rendered HTML of the given pull request,
+	// comment, and review nodes' bodies, keyed by node ID (see images.go).
+	BodyHTML(ctx context.Context, ids []string) (map[string]string, model.RateLimit, error)
+
 	// Repository metadata reads (see repository.go): loaded together by
 	// EnsureRepositoryMetadata to drive the edit/merge/create-PR forms.
 	Repository(ctx context.Context, repo model.RepoRef) (model.RepositoryInfo, model.RateLimit, error)
@@ -118,6 +122,9 @@ type Deps struct {
 	// callback), matching docs/DESIGN.md's concurrency rules. Production
 	// wires this to app.QueueUpdateDraw; tests use a channel-driven fake.
 	Dispatch func(func())
+	// Images downloads the images embedded in pull request text. Nil
+	// disables inline images: Store.Image then always reports ImageNone.
+	Images ImageFetcher
 	// Logger receives structured logs for failed fetches and recovered
 	// panics.
 	Logger *slog.Logger
@@ -353,6 +360,9 @@ type Store struct {
 	filesCancel        context.CancelFunc
 	filesFetchInFlight bool
 
+	// images is the inline-image bookkeeping (see images.go).
+	images imageState
+
 	// highlighter tokenises hunk lines for syntax colouring; it is safe
 	// for concurrent use (see internal/highlight's own doc comments), so
 	// one instance is shared across every files generation's worker pool.
@@ -506,6 +516,7 @@ func New(deps Deps) *Store {
 		highlighter:    highlight.New(highlight.Options{}),
 		mentionable:    make(map[model.RepoRef]mentionableEntry),
 		repoMetadata:   make(map[model.RepoRef]repoMetadataEntry),
+		images:         newImageState(),
 	}
 	return s
 }

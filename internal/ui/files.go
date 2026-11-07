@@ -53,6 +53,7 @@ func (a *App) buildFilesTab() {
 	a.treeExpanded = true
 
 	a.diffView = widget.NewDiffView()
+	a.diffView.SetImageSource(a.images.sources())
 
 	a.filesFlex = tview.NewFlex().SetDirection(tview.FlexColumn)
 	a.layoutFilesPanes()

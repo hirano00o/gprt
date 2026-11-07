@@ -14,6 +14,11 @@ func TestConfig_Validate(t *testing.T) {
 	}{
 		{"valid default", func(c *Config) {}, ""},
 		{"invalid icons", func(c *Config) { c.Icons = "emoji" }, "icons:"},
+		{"unknown image protocol", func(c *Config) { c.ImageProtocol = "sixel" }, "image_protocol:"},
+		{"image protocol auto", func(c *Config) { c.ImageProtocol = "auto" }, ""},
+		{"image protocol kitty", func(c *Config) { c.ImageProtocol = "kitty" }, ""},
+		{"image protocol none", func(c *Config) { c.ImageProtocol = "none" }, ""},
+		{"empty image protocol means auto", func(c *Config) { c.ImageProtocol = "" }, ""},
 		{"invalid list state", func(c *Config) { c.List.State = "draft" }, "list.state:"},
 		{"refresh interval too short", func(c *Config) { c.RefreshInterval = 29 * time.Second }, "refresh_interval:"},
 		{"refresh interval exactly minimum is valid", func(c *Config) { c.RefreshInterval = 30 * time.Second }, ""},

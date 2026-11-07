@@ -69,12 +69,7 @@ func (r *mdRenderer) inlineNode(n ast.Node, style tcell.Style) []Span {
 	case *ast.Image:
 		return []Span{{Text: imagePlaceholder(r.plain(n)), Style: theme.Muted}}
 	case *ast.RawHTML:
-		var b strings.Builder
-		for i := range n.Segments.Len() {
-			seg := n.Segments.At(i)
-			b.Write(seg.Value(r.src))
-		}
-		raw := b.String()
+		raw := r.rawHTML(n)
 		if htmlBreakRe.MatchString(raw) {
 			return []Span{{Text: "\n", Style: style}}
 		}
@@ -87,6 +82,16 @@ func (r *mdRenderer) inlineNode(n ast.Node, style tcell.Style) []Span {
 	default:
 		return r.inline(n, style)
 	}
+}
+
+// rawHTML returns the source text of an inline HTML node.
+func (r *mdRenderer) rawHTML(n *ast.RawHTML) string {
+	var b strings.Builder
+	for i := range n.Segments.Len() {
+		seg := n.Segments.At(i)
+		b.Write(seg.Value(r.src))
+	}
+	return b.String()
 }
 
 // plain returns n's descendant text with no styling, for comparing a link's

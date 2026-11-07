@@ -76,6 +76,12 @@ func (a *App) subscribeStore() {
 				// coordinate — drop it until the next n/N sets a new one.
 				a.diffView.ClearSearchCurrent()
 			}
+		case store.EventImagesChanged:
+			// An image resolved, loaded, or failed: the blocks that show it
+			// change from a placeholder text to the picture's rows. Both
+			// re-sets keep the cursor and scroll position (by row identity).
+			a.renderPRTab()
+			a.refreshCurrentFile()
 		case store.EventOutdatedAnchorsChanged:
 			// A compare resolved: threads it relocates move from the
 			// "Outdated threads" block to their own line. Further commits'

@@ -22,6 +22,11 @@ type Config struct {
 	// HighlightStyle is the chroma style name used for diff syntax
 	// highlighting.
 	HighlightStyle string `yaml:"highlight_style"`
+	// ImageProtocol selects how images in pull request text are shown:
+	// "kitty" draws them with the kitty graphics protocol, "none" leaves a
+	// text placeholder, and "auto" (the default) picks kitty when the
+	// environment indicates a terminal that supports it (kitty, Ghostty).
+	ImageProtocol string `yaml:"image_protocol"`
 	// TabWidth is the number of columns a tab expands to when rendering
 	// diffs. Must be between 1 and 16 inclusive. A non-integral YAML value
 	// (for example 2.5) is silently truncated by the YAML decoder before
@@ -58,6 +63,7 @@ func Default() Config {
 		RefreshInterval: 5 * time.Minute,
 		Icons:           "unicode",
 		HighlightStyle:  "github-dark",
+		ImageProtocol:   "auto",
 		TabWidth:        4,
 		List: ListConfig{
 			State: "open",
