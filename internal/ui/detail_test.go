@@ -203,9 +203,8 @@ func TestDescriptionBlockBlankBody(t *testing.T) {
 // TestDescriptionBlockOnlyFenceMarkersFallsBackToNoDescription guards
 // against a zero-height selectable row: a body consisting only of fence
 // markers (no lines of actual content, inside or outside the fence) makes
-// every line in renderMarkdownLite's loop toggle inFence without ever
-// appending anything, so the naive body-is-blank check (which only looks
-// at whitespace) does not catch it.
+// RenderMarkdown render no lines, so the naive body-is-blank check (which
+// only looks at whitespace) does not catch it.
 func TestDescriptionBlockOnlyFenceMarkersFallsBackToNoDescription(t *testing.T) {
 	pr := &model.PullRequest{Body: "```\n```"}
 	lines := descriptionBlock(pr).Build(80)
@@ -223,9 +222,19 @@ func TestDescriptionBlockHeadingIsBold(t *testing.T) {
 	if len(lines) == 0 || len(lines[0]) == 0 {
 		t.Fatal("expected at least one rendered line")
 	}
+	if got := lines[0][0].Text; got != "Summary" {
+		t.Errorf("heading line text = %q, want the heading text without its # marker", got)
+	}
 	_, _, attrs := lines[0][0].Style.Decompose()
 	if attrs&tcell.AttrBold == 0 {
 		t.Errorf("heading line style = %v, want bold", lines[0][0].Style)
+	}
+}
+
+func TestDescriptionBlockOnlyHTMLCommentFallsBackToNoDescription(t *testing.T) {
+	pr := &model.PullRequest{Body: "<!-- fill in the template -->"}
+	if got := blockText(descriptionBlock(pr), 80); !strings.Contains(got, "no description") {
+		t.Errorf("comment-only body description = %q, want a (no description) placeholder", got)
 	}
 }
 
@@ -258,11 +267,11 @@ func TestDescriptionBlockCodeFenceDoesNotWordWrap(t *testing.T) {
 	}
 }
 
-func TestDescriptionBlockKeepsBullets(t *testing.T) {
+func TestDescriptionBlockRendersBullets(t *testing.T) {
 	pr := &model.PullRequest{Body: "- first\n* second"}
 	text := blockText(descriptionBlock(pr), 80)
-	if !strings.Contains(text, "- first") || !strings.Contains(text, "* second") {
-		t.Errorf("description with bullets = %q, want the bullet markers kept", text)
+	if !strings.Contains(text, "• first") || !strings.Contains(text, "• second") {
+		t.Errorf("description with bullets = %q, want each item rendered with a • marker", text)
 	}
 }
 
@@ -563,6 +572,22 @@ func TestConversationBlocksNilPayloadRendersUnavailableInsteadOfPanicking(t *tes
 		}
 		if got := blockText(b, 80); !strings.Contains(got, "unavailable") {
 			t.Errorf("blocks[%d] text = %q, want it to mention being unavailable", i, got)
+		}
+	}
+}
+
+// TestConversationBlocksRenderMarkdownBodies covers issue comment and
+// review bodies going through widget.RenderMarkdown rather than plain
+// wrapping: a bullet gets a • marker and a heading loses its # marker.
+func TestConversationBlocksRenderMarkdownBodies(t *testing.T) {
+	pr := &model.PullRequest{Timeline: []model.TimelineItem{
+		{Kind: model.TimelineKindIssueComment, IssueComment: &model.IssueComment{Author: model.User{Login: "dave"}, Body: "# Notes\n- one"}},
+		{Kind: model.TimelineKindReview, Review: &model.Review{Author: model.User{Login: "erin"}, State: model.ReviewStateCommented, Body: "# Notes\n- one"}},
+	}}
+	for i, b := range conversationBlocks(pr, nil) {
+		text := blockText(b, 80)
+		if !strings.Contains(text, "• one") || strings.Contains(text, "# Notes") {
+			t.Errorf("blocks[%d] text = %q, want Markdown rendered (• bullet, no # marker)", i, text)
 		}
 	}
 }

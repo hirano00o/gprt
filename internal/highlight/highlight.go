@@ -91,22 +91,51 @@ func New(opts Options) *Highlighter {
 // if a lexer's own newline handling (some force a trailing "\n" before
 // tokenising) shifted the boundary by one somewhere along the way.
 func (h *Highlighter) Lines(path string, lines []string) ([][]Token, error) {
-	if len(lines) == 0 {
+	if !h.withinLimits(lines) {
 		return nil, nil
 	}
+	return tokenise(h.lexerFor(path), lines)
+}
 
+// LinesForLanguage is Lines for source whose language is named rather than
+// implied by a file name — a Markdown fenced code block's info string, for
+// example "go" or "JS". lang is resolved by chroma's lexers.Get, which
+// matches lexer names and aliases case-insensitively, then file extensions. The same limits and (nil, nil) "render as
+// plain text" outcomes as Lines apply, plus: lang is empty or names no
+// known lexer.
+func (h *Highlighter) LinesForLanguage(lang string, lines []string) ([][]Token, error) {
+	if lang == "" || !h.withinLimits(lines) {
+		return nil, nil
+	}
+	var lexer chroma.Lexer
+	if found := lexers.Get(lang); found != nil {
+		lexer = chroma.Coalesce(found)
+	}
+	return tokenise(lexer, lines)
+}
+
+// withinLimits reports whether lines is non-empty and small enough to
+// highlight under h's MaxLineBytes / MaxTotalBytes.
+func (h *Highlighter) withinLimits(lines []string) bool {
+	if len(lines) == 0 {
+		return false
+	}
 	total := 0
 	for _, l := range lines {
 		if len(l) > h.opts.MaxLineBytes {
-			return nil, nil
+			return false
 		}
 		total += len(l)
 		if total > h.opts.MaxTotalBytes {
-			return nil, nil
+			return false
 		}
 	}
+	return true
+}
 
-	lexer := h.lexerFor(path)
+// tokenise runs lexer over lines as described in Lines' doc comment, or
+// returns (nil, nil) when lexer is nil.
+func tokenise(lexer chroma.Lexer, lines []string) ([][]Token, error) {
 	if lexer == nil {
 		return nil, nil
 	}

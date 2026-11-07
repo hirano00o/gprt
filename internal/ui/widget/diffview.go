@@ -1263,8 +1263,9 @@ func threadHeaderSpans(t model.ReviewThread, folded bool) []Span {
 const commentBorder = "│ "
 
 // commentLines renders one review comment: an "@login · <relative>" header,
-// its body wrapped to width (minus the border's own width), and a reactions
-// summary line when it has any — all indented with commentBorder.
+// its body rendered as Markdown to width (minus the border's own width), and
+// a reactions summary line when it has any — all indented with
+// commentBorder.
 func commentLines(c model.ReviewComment, width int) [][]Span {
 	borderWidth := SpanWidth([]Span{{Text: commentBorder}})
 	bodyWidth := width - borderWidth
@@ -1286,8 +1287,8 @@ func commentLines(c model.ReviewComment, width int) [][]Span {
 	}
 	lines := [][]Span{headerLine}
 
-	for _, l := range WrapText(c.Body, bodyWidth) {
-		lines = append(lines, []Span{{Text: commentBorder, Style: theme.Muted}, {Text: l, Style: theme.Base}})
+	for _, l := range RenderMarkdown(c.Body, bodyWidth) {
+		lines = append(lines, append([]Span{{Text: commentBorder, Style: theme.Muted}}, l...))
 	}
 
 	if r := reactionSummary(c.ReactionGroups); len(r) > 0 {

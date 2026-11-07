@@ -221,3 +221,52 @@ func TestLines_JoinsWithNewlineNotPrefixes(t *testing.T) {
 		t.Errorf("rebuilt line 0 = %q, want the original text preserved", rebuilt.String())
 	}
 }
+
+func TestLinesForLanguage(t *testing.T) {
+	tests := []struct {
+		name      string
+		lang      string
+		lines     []string
+		wantNil   bool
+		wantLines int
+	}{
+		{"known language", "go", []string{"package main", "func main() {}"}, false, 2},
+		{"name is case-insensitive", "GoLang", []string{"package main"}, false, 1},
+		{"alias", "js", []string{"const a = 1"}, false, 1},
+		{"unknown language", "no-such-language", []string{"x"}, true, 0},
+		{"empty language", "", []string{"x"}, true, 0},
+		{"no lines", "go", nil, true, 0},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := New(Options{}).LinesForLanguage(tc.lang, tc.lines)
+			if err != nil {
+				t.Fatalf("LinesForLanguage() error = %v", err)
+			}
+			if tc.wantNil {
+				if got != nil {
+					t.Errorf("LinesForLanguage() = %+v, want nil", got)
+				}
+				return
+			}
+			if len(got) != tc.wantLines {
+				t.Fatalf("len(LinesForLanguage()) = %d, want %d", len(got), tc.wantLines)
+			}
+			var joined strings.Builder
+			for _, tok := range got[0] {
+				joined.WriteString(tok.Text)
+			}
+			if joined.String() != tc.lines[0] {
+				t.Errorf("first line tokens re-join to %q, want %q", joined.String(), tc.lines[0])
+			}
+		})
+	}
+}
+
+func TestLinesForLanguage_OverLimitsReturnsNil(t *testing.T) {
+	h := New(Options{MaxLineBytes: 5, MaxTotalBytes: 100})
+	got, err := h.LinesForLanguage("go", []string{"package main"})
+	if err != nil || got != nil {
+		t.Errorf("LinesForLanguage(long line) = %+v, %v; want nil, nil", got, err)
+	}
+}

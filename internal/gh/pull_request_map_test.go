@@ -9,7 +9,7 @@ import (
 // TestMapPullRequestDetailNormalizesCRLF guards against a Windows-authored
 // pull request body, comment, review, or commit message headline leaking
 // "\r\n" line endings into model.PullRequest: gprt's own rendering (word
-// wrap, line-by-line Markdown-lite parsing) only ever splits on "\n",
+// wrap, and the GFM renderer's code blocks) only ever splits on "\n",
 // so a stray "\r" would otherwise survive as a literal, visible control
 // character at the end of every wrapped line.
 func TestMapPullRequestDetailNormalizesCRLF(t *testing.T) {

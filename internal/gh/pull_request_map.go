@@ -10,10 +10,10 @@ import (
 // normalizeNewlines replaces every "\r\n" in s with a bare "\n". GitHub
 // passes a pull request's body, comment/review bodies, and commit message
 // headlines through verbatim, so a Windows-authored one can carry CRLF line
-// endings; gprt's own rendering (word wrap, line-by-line Markdown-lite
-// parsing in internal/ui) only ever splits on "\n", which would otherwise
-// leave a stray "\r" as a literal, visible control character at the end of
-// every such line.
+// endings; gprt's own rendering (word wrap and the GFM renderer's code
+// blocks in internal/ui/widget) only ever splits on "\n", which would
+// otherwise leave a stray "\r" as a literal, visible control character at
+// the end of every such line.
 func normalizeNewlines(s string) string {
 	return strings.ReplaceAll(s, "\r\n", "\n")
 }

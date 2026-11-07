@@ -1417,3 +1417,32 @@ func TestDiffViewOutdatedThreadWithLineRendersInlineWithOutdatedStatus(t *testin
 		t.Error("inline outdated thread's comment body was not rendered")
 	}
 }
+
+// TestCommentLinesRenderMarkdownBodyInsideBorder covers a review comment's
+// body being rendered as Markdown, with every body line (wrapped or not)
+// still prefixed by the border and no wider than the requested width.
+func TestCommentLinesRenderMarkdownBodyInsideBorder(t *testing.T) {
+	c := model.ReviewComment{
+		Author: model.User{Login: "alice"},
+		Body:   "# Plan\n- first step is rather long indeed\n- `code`",
+		State:  model.ReviewCommentStateSubmitted,
+	}
+	lines := commentLines(c, 24)
+
+	var text []string
+	for _, line := range lines {
+		if w := SpanWidth(line); w > 24 {
+			t.Errorf("line %q has width %d, want <= 24", spansText(line), w)
+		}
+		text = append(text, spansText(line))
+	}
+	joined := strings.Join(text, "\n")
+	for _, want := range []string{"│ Plan", "│ • first step is rather", "│   long indeed", "│ • code"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("comment lines =\n%s\nwant a line containing %q", joined, want)
+		}
+	}
+	if strings.Contains(joined, "# Plan") {
+		t.Errorf("comment lines =\n%s\nwant the heading marker removed", joined)
+	}
+}
