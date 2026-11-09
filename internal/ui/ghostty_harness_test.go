@@ -502,3 +502,36 @@ func (g *ghosttyApp) ImageIDsBeforePlaceholderWrites(t *testing.T) [][]uint32 {
 	}
 	return slices.Clone(g.vt.beforePlaceholder)
 }
+
+// GraphemeClusterMode reports whether the terminal has mode 2027 (grapheme
+// clusters) on, which decides how it measures emoji sequences.
+func (g *ghosttyApp) GraphemeClusterMode(t *testing.T) bool {
+	t.Helper()
+	g.vt.mu.Lock()
+	defer g.vt.mu.Unlock()
+	on, err := g.vt.term.Mode(libghostty.ModeGraphemeCluster)
+	if err != nil {
+		t.Fatalf("Mode(2027): %v", err)
+	}
+	return on
+}
+
+// ActiveScreen reports which screen buffer (primary or alternate) is showing.
+// It returns the error instead of failing the test, so it can be used on the
+// UI goroutine.
+func (g *ghosttyApp) ActiveScreen() (libghostty.TerminalScreen, error) {
+	g.vt.mu.Lock()
+	defer g.vt.mu.Unlock()
+	return g.vt.term.ActiveScreen()
+}
+
+// KittyFlagsErr is KittyFlags for the UI goroutine: it returns the error.
+func (g *ghosttyApp) KittyFlagsErr() (libghostty.KittyKeyFlags, error) {
+	g.vt.mu.Lock()
+	defer g.vt.mu.Unlock()
+	return g.vt.term.KittyKeyboardFlags()
+}
+
+// Scribble writes bytes straight into the terminal, as a program other than
+// gprt (an external editor) would while gprt is suspended.
+func (g *ghosttyApp) Scribble(s string) { g.vt.write([]byte(s)) }
