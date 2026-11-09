@@ -2,6 +2,21 @@ package keys
 
 import "github.com/gdamore/tcell/v2"
 
+// Canonicalize rewrites a CSI-u report of Ctrl-I or Ctrl-[ to the Tab or Esc
+// event a legacy terminal produces for those keys, and returns any other event
+// unchanged. Normalize alone is not enough for them: the raw event is what
+// reaches tview's widgets, which only know KeyTab and KeyEsc. tcell maps only
+// Ctrl+letter to a KeyCtrl* constant, so Ctrl-[ arrives as a '[' rune.
+func Canonicalize(ev *tcell.EventKey) *tcell.EventKey {
+	switch {
+	case ev.Key() == tcell.KeyCtrlI:
+		return tcell.NewEventKey(tcell.KeyTab, 0, tcell.ModNone)
+	case ev.Key() == tcell.KeyRune && ev.Rune() == '[' && ev.Modifiers() == tcell.ModCtrl:
+		return tcell.NewEventKey(tcell.KeyEsc, 0, tcell.ModNone)
+	}
+	return ev
+}
+
 // Normalize converts a raw tcell key event into the canonical Key(s) it
 // represents, collapsing terminal-protocol differences that would otherwise
 // make the same physical keypress look different to the router:
@@ -24,13 +39,14 @@ import "github.com/gdamore/tcell/v2"
 // Every other key (arrows, function keys, page/home/end, a plain rune with
 // no special modifier) passes through unchanged.
 func Normalize(ev *tcell.EventKey) []Key {
+	ev = Canonicalize(ev)
 	k := ev.Key()
 	mod := ev.Modifiers()
 
 	switch k {
 	case tcell.KeyCtrlH, tcell.KeyBackspace, tcell.KeyBackspace2:
 		return []Key{{Kind: KindSpecial, Special: tcell.KeyBackspace}}
-	case tcell.KeyCtrlI, tcell.KeyTab:
+	case tcell.KeyTab:
 		return []Key{{Kind: KindSpecial, Special: tcell.KeyTab}}
 	case tcell.KeyCtrlM, tcell.KeyEnter:
 		return []Key{{Kind: KindSpecial, Special: tcell.KeyEnter}}
