@@ -180,6 +180,13 @@ go vet ./...
 golangci-lint run ./...
 ```
 
+Integration tests that run the real terminal screen against libghostty-vt sit behind the `ghostty` build tag and need Zig 0.17.x and pkg-config:
+
+```sh
+pkg_config_env="$(./scripts/build-libghostty-vt.sh)" && export "$pkg_config_env"
+go test -race -tags ghostty ./internal/ui -run Ghostty
+```
+
 The architecture is described in [docs/DESIGN.md](docs/DESIGN.md), the feature list with its status in [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md), and every key with its action ID in [docs/KEYBINDINGS.md](docs/KEYBINDINGS.md).
 
 ## License

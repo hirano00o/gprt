@@ -76,7 +76,7 @@ These are not independently numbered requirements; they are the building blocks 
 - `reviewThreads` includes the viewer's PENDING threads (M3b). If not, merge the `reviews(states:[PENDING]).comments` connection into the thread model.
 - Mixed-side ranges (`startSide: LEFT`, `side: RIGHT`) accepted or rejected (M3b).
 - Negated qualifiers (`-user-review-requested:@me`) accepted by search (M1a); otherwise rely on dedupe only.
-- Key events on the user's terminal: `internal/ui/keys.Normalize` and the router are implemented and unit-tested for both legacy (`KeyBackspace`) and CSI-u (`KeyCtrlH`) reporting of Ctrl-H; validating against the user's actual terminal is still open (`go run ./cmd/gprt`).
+- Key events on the user's terminal: `internal/ui/keys.Normalize` and the router are implemented and unit-tested for both legacy (`KeyBackspace`) and CSI-u (`KeyCtrlH`) reporting of Ctrl-H. Ctrl-H, Backspace, Ctrl-M, Enter, Tab and Esc are verified end to end with libghostty-vt's legacy and kitty key encodings by the `ghostty` build-tagged tests (`internal/ui/ghostty_keys_test.go`); other terminals are still unverified (`go run ./cmd/gprt`). Those tests skip two known CSI-u gaps: Ctrl-[ does not act as Esc (tcell reports `KeyRune '['` with `ModCtrl`, which `Normalize` does not map), and Ctrl-I does not move form focus (the form receives the raw `KeyCtrlI`).
 
 ## Known limitations (v1)
 
