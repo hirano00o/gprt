@@ -2288,13 +2288,13 @@ func TestAppHelpSearchScrollsToMatchOnNarrowScreen(t *testing.T) {
 
 	sendRune(app.app, '/')
 	waitFor(t, app.app, func() bool { return app.app.GetFocus() == app.helpSearchInput })
-	for _, r := range "ready, merge" {
+	for _, r := range "default: list" {
 		sendRune(app.app, r)
 	}
 	sendSpecial(app.app, tcell.KeyEnter)
 	waitFor(t, app.app, func() bool { return app.helpMatchCount > 0 })
 
-	assertHelpCurrentMatchVisible(t, app, screen, "ready, merge")
+	assertHelpCurrentMatchVisible(t, app, screen, "default: list")
 }
 
 // assertHelpCurrentMatchVisible fails t unless exactly one row of the help
@@ -2386,18 +2386,49 @@ func TestAppHelpSearchInvalidPatternShowsInTitle(t *testing.T) {
 	})
 }
 
-// TestAppHelpCommandsLineListsEveryCommand guards buildHelpText's command
-// list against drifting out of sync with submitCommand's own switch (see
-// its doc comment).
-func TestAppHelpCommandsLineListsEveryCommand(t *testing.T) {
+// TestAppHelpListsEveryCommand guards the help's ":" command rows against
+// drifting out of sync with submitCommand's own switch, and checks that
+// the command-line history keys are explained.
+func TestAppHelpListsEveryCommand(t *testing.T) {
 	app, _, _, _ := newTestApp(t, nil)
 
 	sendRune(app.app, '?')
 	waitFor(t, app.app, func() bool { return app.overlay == "help" })
 
 	text := query(app.app, func() string { return app.helpView.GetText(true) })
-	if !containsSubstring(text, "close, reopen, ready, merge") {
-		t.Errorf("help text does not list every submitCommand command: %q", text)
+	for _, want := range []string{":q, :quit", ":help", ":messages", ":reload", ":close", ":reopen", ":ready", ":merge", "Up/Down"} {
+		if !containsSubstring(text, want) {
+			t.Errorf("help text does not mention %q: %q", want, text)
+		}
+	}
+}
+
+// TestAppHelpExplainsFilterSyntax checks the list filter's qualifiers,
+// which are parsed by the store and bound to no key, are discoverable
+// from the help.
+func TestAppHelpExplainsFilterSyntax(t *testing.T) {
+	app, _, _, _ := newTestApp(t, nil)
+
+	text, _, _, _ := app.buildHelpText(nil, 0)
+
+	for _, want := range []string{"repo:", "author:", "reviewer:", "label:", "state:", "#number"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("help text does not mention filter syntax %q", want)
+		}
+	}
+}
+
+// TestAppHelpListsTreeOnlyKeys checks the Files tree keys that bypass the
+// keymap (h, and tview's own K/J) still appear in the help.
+func TestAppHelpListsTreeOnlyKeys(t *testing.T) {
+	app, _, _, _ := newTestApp(t, nil)
+
+	text, _, _, _ := app.buildHelpText(nil, 0)
+
+	for _, want := range []string{"Files tree (fixed keys):", "collapse, or go to the parent", "K / J"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("help text does not mention %q", want)
+		}
 	}
 }
 

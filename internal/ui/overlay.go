@@ -190,15 +190,38 @@ var helpContexts = []struct {
 // starts in the same column.
 const helpActionWidth = 22
 
-// helpCommandsLine lists every ":" command submitCommand recognizes; kept
-// in sync with its switch by hand (a mismatch only ever makes the help
-// text wrong, never the command itself unusable, so a generated list is
-// not worth the extra indirection for one line).
-const helpCommandsLine = ": commands: q, quit, help, messages, reload, close, reopen, ready, merge"
+// helpStaticLines documents what the keymap cannot describe: the list
+// filter syntax (parseFilter), every ":" command submitCommand recognizes,
+// and the Files tree keys that bypass the keymap. Kept in sync by hand (a
+// mismatch only ever makes the help text wrong, never the feature itself
+// unusable, so generating it is not worth the extra indirection).
+var helpStaticLines = []string{
+	"Filter (/ in the list; words AND-ed, case-insensitive; Enter keeps, Esc clears):",
+	"  repo:<text>      owner/name contains text",
+	"  author:<login>   opened by login",
+	"  reviewer:<login> review requested from login (user or team)",
+	"  label:<name>     has the label",
+	"  state:<state>    open, closed, merged or all; searches again (default: list.state)",
+	"  <text>           title, #number, owner/name or author contains text",
+	"",
+	"Commands (: then Enter; Up/Down recall earlier ones, Esc cancels):",
+	"  :q, :quit        Quit",
+	"  :help            Show this help",
+	"  :messages        Show recent errors and warnings",
+	"  :reload          Reload, ignoring the cache",
+	"  :close           Close the open pull request",
+	"  :reopen          Reopen the open pull request",
+	"  :ready           Mark the draft ready for review",
+	"  :merge           Merge, choosing the method in a dialog",
+	"",
+	"Files tree (fixed keys):",
+	"  h                collapse, or go to the parent",
+	"  K / J            go to the parent / the last child",
+}
 
 // buildHelpText renders the help overlay's full text: gprt's version, then
 // every effective binding (defaults merged with the user's config) for
-// each of helpContexts, then helpCommandsLine. Every line is passed
+// each of helpContexts, then helpStaticLines. Every line is passed
 // through tview.Escape: helpView enables dynamic colours
 // (SetDynamicColors(true), for the style tag below), which would
 // otherwise misparse a literal "[" in a binding sequence like "[c"/"]f" as
@@ -245,7 +268,7 @@ func (a *App) buildHelpText(re *regexp.Regexp, current int) (text string, n, lin
 		}
 		raw = append(raw, "")
 	}
-	raw = append(raw, helpCommandsLine)
+	raw = append(raw, helpStaticLines...)
 
 	var b strings.Builder
 	for lineNo, rawLine := range raw {

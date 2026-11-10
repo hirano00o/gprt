@@ -54,7 +54,7 @@ go build ./cmd/gprt
 gprt
 ```
 
-左の一覧に自分のプルリクエストが表示されます。`j`/`k` で移動、`Enter` で開き(一覧は隠れて全幅表示になり、`Ctrl-w h` で戻ります)、`gt`/`gT` で **PR** タブと **Files** タブを切り替えます。`?` でキー一覧、`:` でコマンド入力、`q` で終了です。
+左の一覧に自分のプルリクエストが表示されます。`j`/`k` で移動、`Enter` で開き(一覧は隠れて全幅表示になり、`Ctrl-w h` で戻ります)、`gt`/`gT` で **PR** タブと **Files** タブを切り替えます。`?` でキー一覧、`:` でコマンド入力、`q` で終了です。フィルタの書き方(`repo:`、`author:` など)、すべての `:` コマンド、ダイアログやフォームの中で使うキーは [docs/USAGE.md](docs/USAGE.md)(英語)にまとめています。
 
 | フラグ | 効果 |
 |--------|------|
@@ -106,7 +106,7 @@ keys:                     # remap any action (vim notation); see docs/KEYBINDING
 | `Ctrl-w o` | PR 一覧の表示 / 非表示 |
 | `o` | 現在の項目をブラウザで開く |
 | `R` | キャッシュを無視して再読み込み |
-| `:` | コマンド入力: `:merge`、`:close`、`:reopen`、`:ready`、`:reload`、`:messages`、`:help`、`:q` |
+| `:` | コマンド入力: `:merge`、`:close`、`:reopen`、`:ready`、`:reload`、`:messages`、`:help`、`:q` / `:quit`。`Up` / `Down` で履歴を呼び出す([詳細](docs/USAGE.md#commands)) |
 | `?` | ヘルプ(その中で `/` を押すとキー一覧を検索でき、`n` / `N` でマッチを巡回) |
 | `q`, `Ctrl-c` | 開いているダイアログを閉じる、または終了 |
 
@@ -115,7 +115,7 @@ keys:                     # remap any action (vim notation); see docs/KEYBINDING
 | キー | 動作 |
 |------|------|
 | `Enter`, `l` | プルリクエストを開き、一覧を隠す(`Ctrl-w h` または `Ctrl-w o` で再表示) |
-| `/` | 一覧を絞り込む(`Esc` で解除) |
+| `/` | 入力に合わせて一覧を絞り込む。`repo:`、`author:`、`reviewer:`、`label:`、`state:` と自由な文字列が使える(`Enter` で確定、`Esc` で解除。[書き方](docs/USAGE.md#filtering-the-list)) |
 | `n` | プルリクエストを作成 |
 
 ### PR タブ
@@ -135,6 +135,8 @@ keys:                     # remap any action (vim notation); see docs/KEYBINDING
 | キー | 動作 |
 |------|------|
 | `Enter`, `l` | カーソル位置のファイルを開く(ツリー内) |
+| `h` | ディレクトリを折りたたむ、または親へ移動(ツリー内。変更不可) |
+| `K` / `J` | 親 / 最後の子へ移動(ツリー内。変更不可) |
 | `Enter` | 折りたたまれた領域(`⋯ N lines hidden ⋯`)上で展開する |
 | `Ctrl-w t` | ファイルツリーの表示 / 非表示 |
 | `V` | 範囲コメント用に行を選択(もう一度 `V` または `Esc` で取り消し) |
