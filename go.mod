@@ -13,6 +13,7 @@ require (
 	github.com/rivo/tview v0.42.0
 	github.com/sahilm/fuzzy v0.1.3
 	github.com/yuin/goldmark v1.8.7
+	go.mitchellh.com/libghostty v0.0.0-20261107144202-b13f277ddcb2
 	golang.org/x/image v0.47.0
 	mvdan.cc/sh/v3 v3.14.1
 )

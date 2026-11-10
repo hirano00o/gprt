@@ -23,7 +23,7 @@
           pname = "gprt";
           inherit version;
           src = self;
-          vendorHash = "sha256-wkf3CSXEJR9h9bsUmajQ94y+NzIioJMwJA2hEEhbm5A=";
+          vendorHash = "sha256-I4s6yQONAlI8T2t74PPHvpYTQKaodvdGMn7DkzLYZ/Q=";
           # Not ./...: the darwin build sandbox forbids the loopback listeners
           # internal/gh's httptest servers need. CI runs the full suite.
           subPackages = [ "cmd/gprt" ];

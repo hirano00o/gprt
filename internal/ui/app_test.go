@@ -1552,6 +1552,29 @@ type testAppOpts struct {
 func newTestAppWith(t *testing.T, overrides map[string]string, opts testAppOpts) (*App, <-chan struct{}, *fakeGitHub, tcell.SimulationScreen) {
 	t.Helper()
 
+	app, fake := buildTestApp(t, overrides, opts)
+
+	screen := tcell.NewSimulationScreen("")
+	if err := screen.Init(); err != nil {
+		t.Fatalf("screen.Init: %v", err)
+	}
+	screen.SetSize(100, 30)
+	if opts.tty != nil {
+		app.app.SetScreen(ttyScreen{SimulationScreen: screen, tty: opts.tty})
+	} else {
+		app.app.SetScreen(screen)
+	}
+
+	return app, startTestApp(t, app), fake, screen
+}
+
+// buildTestApp assembles an App on the standard fixtures (one PR per
+// section) up to, but not including, its screen: a caller attaches a screen
+// with app.app.SetScreen and then calls startTestApp. Only opts.config,
+// opts.images and opts.getenv are used; opts.tty belongs to the screen.
+func buildTestApp(t *testing.T, overrides map[string]string, opts testAppOpts) (*App, *fakeGitHub) {
+	t.Helper()
+
 	km, err := keys.Merge(keys.Defaults(), overrides)
 	if err != nil {
 		t.Fatalf("keys.Merge: %v", err)
@@ -1625,16 +1648,15 @@ func newTestAppWith(t *testing.T, overrides map[string]string, opts testAppOpts)
 		Getenv:  getenv,
 	})
 
-	screen := tcell.NewSimulationScreen("")
-	if err := screen.Init(); err != nil {
-		t.Fatalf("screen.Init: %v", err)
-	}
-	screen.SetSize(100, 30)
-	if opts.tty != nil {
-		app.app.SetScreen(ttyScreen{SimulationScreen: screen, tty: opts.tty})
-	} else {
-		app.app.SetScreen(screen)
-	}
+	return app, fake
+}
+
+// startTestApp runs app.Run on its own goroutine (stopped at cleanup) and
+// waits for both fixtures to load, with the cursor on the first row. The
+// returned channel is closed when Run returns. The screen must already be
+// attached.
+func startTestApp(t *testing.T, app *App) <-chan struct{} {
+	t.Helper()
 
 	// done is closed, never sent-on, so both the test and this cleanup can
 	// safely wait on it — closing broadcasts to every receiver, whereas a
@@ -1673,7 +1695,7 @@ func newTestAppWith(t *testing.T, overrides map[string]string, opts testAppOpts)
 	// order is fully determined by fixed section priority, never by
 	// fetch-arrival order.
 	act(app.app, func() { app.listView.MoveTop() })
-	return app, done, fake, screen
+	return done
 }
 
 // act runs f on the UI goroutine (via app.QueueUpdate) and waits for it to

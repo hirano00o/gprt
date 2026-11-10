@@ -180,6 +180,13 @@ go vet ./...
 golangci-lint run ./...
 ```
 
+実際の端末画面を libghostty-vt に接続する結合テストは `ghostty` ビルドタグで分けています。実行には Zig 0.17.x と pkg-config が必要です。
+
+```sh
+pkg_config_env="$(./scripts/build-libghostty-vt.sh)" && export "$pkg_config_env"
+go test -race -tags ghostty ./internal/ui -run Ghostty
+```
+
 アーキテクチャは [docs/DESIGN.md](docs/DESIGN.md)、機能一覧と実装状況は [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md)、全キーとアクション ID は [docs/KEYBINDINGS.md](docs/KEYBINDINGS.md) にまとめています(いずれも英語)。
 
 ## ライセンス
