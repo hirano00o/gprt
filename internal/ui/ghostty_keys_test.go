@@ -13,14 +13,14 @@ import (
 )
 
 func TestGhosttyStartupRendersPRTitle(t *testing.T) {
-	g := newGhosttyApp(t, nil)
+	g := newGhosttyApp(t, testAppOpts{}, nil)
 	g.Eventually(t, func(s string) bool {
 		return strings.Contains(s, "First PR") && strings.Contains(s, "Second PR")
 	})
 }
 
 func TestGhosttyEnablesKittyDisambiguate(t *testing.T) {
-	g := newGhosttyApp(t, nil)
+	g := newGhosttyApp(t, testAppOpts{}, nil)
 	g.Eventually(t, func(s string) bool { return strings.Contains(s, "First PR") })
 	if got := g.KittyFlags(t); got&libghostty.KittyKeyDisambiguate == 0 {
 		t.Fatalf("kitty keyboard flags = %#b, want the disambiguate bit set by tcell", got)
@@ -162,7 +162,7 @@ func TestGhosttyKeysMatchBetweenCSIuAndLegacy(t *testing.T) {
 				if !mode.legacy && tc.csiuGap != "" {
 					t.Skip(tc.csiuGap)
 				}
-				g := newGhosttyApp(t, func(f *fakeGitHub) {
+				g := newGhosttyApp(t, testAppOpts{}, func(f *fakeGitHub) {
 					f.SetViewerRepositories([]model.RepositorySummary{{Ref: fixtureRef(1).Repo}})
 				})
 				g.Eventually(t, func(s string) bool { return strings.Contains(s, "First PR") })
@@ -184,7 +184,7 @@ func TestGhosttyKeysMatchBetweenCSIuAndLegacy(t *testing.T) {
 // the next row, i.e. gprt's and the terminal's widths agree.
 func TestGhosttyJapaneseTitleOccupiesTwoCellsPerCharacter(t *testing.T) {
 	const title = "日本語タイトル"
-	g := newGhosttyApp(t, func(f *fakeGitHub) {
+	g := newGhosttyApp(t, testAppOpts{}, func(f *fakeGitHub) {
 		f.SetResult(
 			gh.BuildSearchQuery(model.SectionKindDirectReview, "", "open"),
 			gh.SearchResult{Items: []model.PullRequest{fixturePR(1, title)}},
