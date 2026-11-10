@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/rivo/tview"
 	"go.mitchellh.com/libghostty"
 
 	"github.com/hirano00o/gprt/internal/gh"
@@ -91,6 +92,31 @@ func TestGhosttyKeysMatchBetweenCSIuAndLegacy(t *testing.T) {
 	formClosed := func(t *testing.T, g *ghosttyApp, _ bool) {
 		waitFor(t, g.app.app, func() bool { return g.app.overlay == "" })
 	}
+	titleText := func(g *ghosttyApp) string {
+		return g.app.createForm.GetFormItem(3).(*tview.InputField).GetText()
+	}
+	onTitleHoldingAB := func(t *testing.T, g *ghosttyApp, legacy bool) {
+		openCreateForm(t, g, legacy)
+		for item := 1; item <= 3; item++ {
+			g.Press(t, legacy, libghostty.KeyTab, 0, "", 0)
+			waitForFormItem(t, g, item)
+		}
+		g.Type(t, legacy, "ab")
+		waitFor(t, g.app.app, func() bool { return titleText(g) == "ab" })
+	}
+	lastCharDeleted := func(t *testing.T, g *ghosttyApp, _ bool) {
+		waitFor(t, g.app.app, func() bool { return titleText(g) == "a" })
+	}
+	onCancelButton := func(t *testing.T, g *ghosttyApp, legacy bool) {
+		openCreateForm(t, g, legacy)
+		for range 8 { // the five fields, then Edit body, Reviewers and Create
+			g.Press(t, legacy, libghostty.KeyTab, 0, "", 0)
+		}
+		waitFor(t, g.app.app, func() bool {
+			_, button := g.app.createForm.GetFocusedItemIndex()
+			return button == 3
+		})
+	}
 
 	tests := []struct {
 		name      string
@@ -139,6 +165,22 @@ func TestGhosttyKeysMatchBetweenCSIuAndLegacy(t *testing.T) {
 		{
 			name: "ctrl-[ closes the form", key: libghostty.KeyBracketLeft, mods: libghostty.ModCtrl, unshifted: '[',
 			wantCSIu: "\x1b[91;5u", before: onFirstFormItem, after: formClosed,
+		},
+		{
+			name: "ctrl-h deletes in a text field", key: libghostty.KeyH, mods: libghostty.ModCtrl, unshifted: 'h',
+			wantCSIu: "\x1b[104;5u", wantLegacy: "\x08", before: onTitleHoldingAB, after: lastCharDeleted,
+		},
+		{
+			name: "backspace deletes in a text field", key: libghostty.KeyBackspace,
+			wantCSIu: "\x7f", wantLegacy: "\x7f", before: onTitleHoldingAB, after: lastCharDeleted,
+		},
+		{
+			name: "enter presses the focused button", key: libghostty.KeyEnter,
+			wantCSIu: "\r", wantLegacy: "\r", before: onCancelButton, after: formClosed,
+		},
+		{
+			name: "ctrl-m presses the focused button", key: libghostty.KeyM, mods: libghostty.ModCtrl, unshifted: 'm',
+			wantCSIu: "\x1b[109;5u", before: onCancelButton, after: formClosed,
 		},
 	}
 

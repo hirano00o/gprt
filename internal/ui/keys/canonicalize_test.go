@@ -12,7 +12,9 @@ func TestCanonicalizeRewritesCSIuReportsToLegacyKeys(t *testing.T) {
 		ev   *tcell.EventKey
 		want tcell.Key
 	}{
+		{"Ctrl-H", tcell.NewEventKey(tcell.KeyCtrlH, 0, tcell.ModCtrl), tcell.KeyBackspace},
 		{"Ctrl-I", tcell.NewEventKey(tcell.KeyCtrlI, 0, tcell.ModCtrl), tcell.KeyTab},
+		{"Ctrl-M", tcell.NewEventKey(tcell.KeyCtrlM, 0, tcell.ModCtrl), tcell.KeyEnter},
 		{"Ctrl-[", tcell.NewEventKey(tcell.KeyRune, '[', tcell.ModCtrl), tcell.KeyEsc},
 	}
 	for _, tc := range tests {
