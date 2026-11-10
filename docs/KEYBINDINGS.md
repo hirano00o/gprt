@@ -16,7 +16,7 @@ The `?` help and `:messages` overlays are scrollable `TextView`s: `q` or `Esc` c
 
 ## Remapping
 
-`keys:` in `config.yaml` remaps a binding by **Action ID**, using vim notation for the key sequence (`<C-w>o`, `gt`, `]c`, `<Esc>`, `<Enter>`). Any action not listed in `keys:` keeps its default sequence. Example:
+`keys:` in `config.yaml` remaps a binding by **Action ID**, using vim notation for the key sequence (`<C-w>o`, `gt`, `]c`, `<Esc>`, `<Enter>`). Any action not listed in `keys:` keeps its default sequence. A Ctrl binding over a non-letter is accepted only if legacy terminals send a control byte for it: `<C-]>`, `<C-\>`, `<C-^>`, `<C-_>`, `<C-@>`, and the keys that send the same bytes (`<C-2>` to `<C-8>`, `<C-/>`; `<C-3>` is `<Esc>` and `<C-8>` is `<BS>`). The others, such as `<C-;>`, `<C-,>`, `<C-0>`, `<C-1>` and `<C-9>`, are rejected: gprt ignores those keypresses on CSI-u terminals, and a legacy terminal sends nothing for them or, for `<C-0>`, `<C-1>` and `<C-9>`, the plain digit. Example:
 
 ```yaml
 keys:

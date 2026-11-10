@@ -289,9 +289,16 @@ type ghosttyApp struct {
 // the App is built and before it starts, to adjust its fake GitHub.
 func newGhosttyApp(t *testing.T, opts testAppOpts, setup func(*fakeGitHub)) *ghosttyApp {
 	t.Helper()
+	return newGhosttyAppWithKeys(t, nil, opts, setup)
+}
+
+// newGhosttyAppWithKeys is newGhosttyApp with keymap overrides, as in
+// newTestApp.
+func newGhosttyAppWithKeys(t *testing.T, overrides map[string]string, opts testAppOpts, setup func(*fakeGitHub)) *ghosttyApp {
+	t.Helper()
 	t.Setenv("LC_ALL", "en_US.UTF-8") // tcell reads it before LC_CTYPE and LANG
 
-	app, fake := buildTestApp(t, nil, opts)
+	app, fake := buildTestApp(t, overrides, opts)
 	if setup != nil {
 		setup(fake)
 	}

@@ -3,6 +3,7 @@
 package ui
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -263,5 +264,66 @@ func TestGhosttyJapaneseTitleOccupiesTwoCellsPerCharacter(t *testing.T) {
 	}
 	if got, want := lastBorder(uint32(row)), lastBorder(uint32(row)+1); got < 0 || got != want {
 		t.Errorf("list border at x=%d on the title row, x=%d on the next row; want equal", got, want)
+	}
+}
+
+// ctrlPunctuationCases are keys a CSI-u terminal reports as Ctrl-modified
+// runes. A legacy terminal sends a control byte for the first five and
+// nothing for the rest.
+var ctrlPunctuationCases = []struct {
+	name      string
+	key       libghostty.Key
+	mods      libghostty.Mods
+	unshifted rune
+}{
+	{"ctrl-]", libghostty.KeyBracketRight, libghostty.ModCtrl, ']'},
+	{"ctrl-5", libghostty.KeyDigit5, libghostty.ModCtrl, '5'},
+	{"ctrl-6", libghostty.KeyDigit6, libghostty.ModCtrl, '6'},
+	{"ctrl-/", libghostty.KeySlash, libghostty.ModCtrl, '/'},
+	{"ctrl-space", libghostty.KeySpace, libghostty.ModCtrl, ' '},
+	{"ctrl-;", libghostty.KeySemicolon, libghostty.ModCtrl, ';'},
+	{"ctrl-shift-6", libghostty.KeyDigit6, libghostty.ModCtrl | libghostty.ModShift, '6'},
+}
+
+func TestGhosttyCtrlPunctuationTypesNothing(t *testing.T) {
+	for _, tc := range ctrlPunctuationCases {
+		for _, legacy := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/legacy=%v", tc.name, legacy), func(t *testing.T) {
+				g := newGhosttyApp(t, testAppOpts{}, func(f *fakeGitHub) {
+					f.SetViewerRepositories([]model.RepositorySummary{{Ref: fixtureRef(1).Repo}})
+				})
+				g.Eventually(t, func(s string) bool { return strings.Contains(s, "First PR") })
+				openCreateForm(t, g, legacy)
+				for item := 1; item <= 3; item++ {
+					g.Press(t, legacy, libghostty.KeyTab, 0, "", 0)
+					waitForFormItem(t, g, item)
+				}
+
+				g.Press(t, legacy, tc.key, tc.mods, "", tc.unshifted)
+				g.Type(t, legacy, "z")
+
+				var text string
+				waitFor(t, g.app.app, func() bool {
+					text = g.app.createForm.GetFormItem(3).(*tview.InputField).GetText()
+					return strings.HasSuffix(text, "z")
+				})
+				if text != "z" {
+					t.Errorf("title field text = %q, want only %q", text, "z")
+				}
+			})
+		}
+	}
+}
+
+func TestGhosttyCtrlPunctuationBindingMatchesBothTerminals(t *testing.T) {
+	for _, legacy := range []bool{false, true} {
+		t.Run(fmt.Sprintf("legacy=%v", legacy), func(t *testing.T) {
+			g := newGhosttyAppWithKeys(t, map[string]string{"global.help": "<C-]>"}, testAppOpts{}, nil)
+			g.Eventually(t, func(s string) bool { return strings.Contains(s, "First PR") })
+
+			g.Press(t, legacy, libghostty.KeyBracketRight, libghostty.ModCtrl, "", ']')
+
+			waitFor(t, g.app.app, func() bool { return g.app.overlay == "help" })
+		})
 	}
 }

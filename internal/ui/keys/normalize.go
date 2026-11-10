@@ -2,25 +2,67 @@ package keys
 
 import "github.com/gdamore/tcell/v2"
 
-// Canonicalize rewrites a CSI-u report of Ctrl-H, Ctrl-I, Ctrl-M, or Ctrl-[ to
-// the Backspace, Tab, Enter, or Esc event a legacy terminal produces for those
-// keys, and returns any other event unchanged. Normalize alone is not enough
-// for them: the raw event is what reaches tview's widgets, which only know the
-// legacy keys. tcell maps only Ctrl+letter to a KeyCtrl* constant, so Ctrl-[
-// arrives as a '[' rune.
-func Canonicalize(ev *tcell.EventKey) *tcell.EventKey {
-	switch {
-	case ev.Key() == tcell.KeyCtrlH:
-		return tcell.NewEventKey(tcell.KeyBackspace, 0, tcell.ModNone)
-	case ev.Key() == tcell.KeyCtrlI:
-		return tcell.NewEventKey(tcell.KeyTab, 0, tcell.ModNone)
-	case ev.Key() == tcell.KeyCtrlM:
-		return tcell.NewEventKey(tcell.KeyEnter, 0, tcell.ModNone)
-	case ev.Key() == tcell.KeyRune && ev.Rune() == '[' && ev.Modifiers() == tcell.ModCtrl:
-		return tcell.NewEventKey(tcell.KeyEsc, 0, tcell.ModNone)
-	}
-	return ev
+// ctrlPunctuation maps the rune of a CSI-u Ctrl+punctuation report to the key
+// tcell reports for the byte a legacy terminal sends instead (xterm's
+// convention, which Ghostty follows). The digits and space are the keys that
+// send those bytes on a US layout; '@', '^' and '_' are their caret-notation
+// names, which other layouts type unshifted and which keys.Key.String
+// displays.
+var ctrlPunctuation = map[rune]tcell.Key{
+	'@': tcell.KeyCtrlSpace, '2': tcell.KeyCtrlSpace, ' ': tcell.KeyCtrlSpace,
+	'[': tcell.KeyEsc, '3': tcell.KeyEsc,
+	'\\': tcell.KeyCtrlBackslash, '4': tcell.KeyCtrlBackslash,
+	']': tcell.KeyCtrlRightSq, '5': tcell.KeyCtrlRightSq,
+	'^': tcell.KeyCtrlCarat, '6': tcell.KeyCtrlCarat,
+	'_': tcell.KeyCtrlUnderscore, '/': tcell.KeyCtrlUnderscore, '7': tcell.KeyCtrlUnderscore,
+	'8': tcell.KeyBackspace,
 }
+
+// Canonicalize rewrites a CSI-u key report to the event a legacy terminal
+// produces for the same key, so every widget behaves the same on both:
+//
+//   - Ctrl-H, Ctrl-I and Ctrl-M become Backspace, Tab and Enter.
+//   - Ctrl with a digit or punctuation that sends a control byte on a legacy
+//     terminal becomes the key tcell reports for that byte (see
+//     ctrlPunctuation): Esc and Backspace without modifiers, the KeyCtrl*
+//     constants with ModCtrl.
+//   - Any other ASCII digit or punctuation with Ctrl, or with Ctrl and Shift,
+//     returns nil and the caller must drop the event. A legacy terminal sends
+//     nothing for these, except Ctrl-0, Ctrl-1 and Ctrl-9, which it sends as
+//     the plain digit; they are dropped too, so these keys never type text.
+//
+// Any other event is returned unchanged. Normalize alone is not enough: the
+// raw event is what reaches tview's widgets, which would type a rune and only
+// know the legacy keys. tcell maps only Ctrl+letter to a KeyCtrl* constant,
+// so the punctuation keys arrive as runes.
+func Canonicalize(ev *tcell.EventKey) *tcell.EventKey {
+	switch ev.Key() {
+	case tcell.KeyCtrlH:
+		return tcell.NewEventKey(tcell.KeyBackspace, 0, tcell.ModNone)
+	case tcell.KeyCtrlI:
+		return tcell.NewEventKey(tcell.KeyTab, 0, tcell.ModNone)
+	case tcell.KeyCtrlM:
+		return tcell.NewEventKey(tcell.KeyEnter, 0, tcell.ModNone)
+	case tcell.KeyRune:
+	default:
+		return ev
+	}
+	r, mod := ev.Rune(), ev.Modifiers()
+	if mod&^tcell.ModShift != tcell.ModCtrl || r < ' ' || r > '~' || isASCIILetter(r) {
+		return ev
+	}
+	k, ok := ctrlPunctuation[r]
+	switch {
+	case !ok || mod != tcell.ModCtrl:
+		return nil
+	case k == tcell.KeyEsc || k == tcell.KeyBackspace:
+		return tcell.NewEventKey(k, 0, tcell.ModNone)
+	default:
+		return tcell.NewEventKey(k, 0, tcell.ModCtrl)
+	}
+}
+
+func isASCIILetter(r rune) bool { return r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' }
 
 // Normalize converts a raw tcell key event into the canonical Key(s) it
 // represents, collapsing terminal-protocol differences that would otherwise
@@ -42,9 +84,12 @@ func Canonicalize(ev *tcell.EventKey) *tcell.EventKey {
 //     separately.
 //
 // Every other key (arrows, function keys, page/home/end, a plain rune with
-// no special modifier) passes through unchanged.
+// no special modifier) passes through unchanged. A key Canonicalize drops
+// normalizes to no keys at all.
 func Normalize(ev *tcell.EventKey) []Key {
-	ev = Canonicalize(ev)
+	if ev = Canonicalize(ev); ev == nil {
+		return nil
+	}
 	k := ev.Key()
 	mod := ev.Modifiers()
 
