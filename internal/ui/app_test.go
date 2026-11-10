@@ -2568,6 +2568,21 @@ func TestAppRemappedKeyFromConfig(t *testing.T) {
 	waitFor(t, app.app, func() bool { return app.listView.CurrentID() == before })
 }
 
+// TestAppCtrlPunctuationBindingMatchesBothTerminals: a CSI-u terminal
+// reports Ctrl-] as a ']' rune, a legacy one as KeyCtrlRightSq.
+func TestAppCtrlPunctuationBindingMatchesBothTerminals(t *testing.T) {
+	for name, ev := range map[string]*tcell.EventKey{
+		"csi-u":  tcell.NewEventKey(tcell.KeyRune, ']', tcell.ModCtrl),
+		"legacy": tcell.NewEventKey(tcell.KeyCtrlRightSq, 0, tcell.ModCtrl),
+	} {
+		t.Run(name, func(t *testing.T) {
+			app, _, _, _ := newTestApp(t, map[string]string{"global.help": "<C-]>"})
+			sendKey(app.app, ev)
+			waitFor(t, app.app, func() bool { return app.overlay == "help" })
+		})
+	}
+}
+
 func TestAppCtrlHAmbiguityBothSwitchTabs(t *testing.T) {
 	t.Run("legacy terminal reports KeyBackspace", func(t *testing.T) {
 		app, _, _, _ := newTestApp(t, nil)

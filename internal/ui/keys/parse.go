@@ -28,10 +28,11 @@ var namedSpecials = map[string]tcell.Key{
 
 // Parse decodes a vim-notation key sequence, such as "<C-w>o", "gt", or
 // "<Esc>", into the Keys it represents. Every bracketed "<...>" token names
-// either a Ctrl combination over a single letter ("<C-w>"), the space key
-// ("<Space>"), or one of gprt's named special keys (see namedSpecials); any
-// character outside brackets is a literal rune key. Parse returns an error
-// for an empty sequence or an unrecognized "<...>" token.
+// either a Ctrl combination over a single rune ("<C-w>", "<C-]>"), the space
+// key ("<Space>"), or one of gprt's named special keys (see namedSpecials);
+// any character outside brackets is a literal rune key. Parse returns an
+// error for an empty sequence, an unrecognized "<...>" token, or a Ctrl
+// combination Canonicalize drops ("<C-;>"), which could never match.
 func Parse(seq string) ([]Key, error) {
 	if seq == "" {
 		return nil, fmt.Errorf("keys: empty key sequence")
@@ -74,10 +75,13 @@ func parseToken(token string) (Key, error) {
 		if rest == "" || size != len(rest) || r == utf8.RuneError {
 			return Key{}, fmt.Errorf("a Ctrl binding names exactly one rune")
 		}
-		if r == '[' {
-			return Key{Kind: KindSpecial, Special: tcell.KeyEsc}, nil
+		// Normalizing the keypress itself yields exactly the Key the
+		// router will see for it, on CSI-u and legacy terminals alike.
+		ks := Normalize(tcell.NewEventKey(tcell.KeyRune, r, tcell.ModCtrl))
+		if len(ks) != 1 {
+			return Key{}, fmt.Errorf("gprt ignores Ctrl-%c: a legacy terminal sends nothing or the plain key for it", r)
 		}
-		return Key{Kind: KindRune, Rune: toLowerLetter(r), Mod: tcell.ModCtrl}, nil
+		return ks[0], nil
 	}
 	return Key{}, fmt.Errorf("unknown key name")
 }

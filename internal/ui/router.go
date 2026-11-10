@@ -21,7 +21,9 @@ import (
 // routeComposerKey); an open overlay only responds to q/Esc; otherwise
 // every key feeds the Sequencer and resolved actions dispatch.
 func (a *App) handleKey(ev *tcell.EventKey) *tcell.EventKey {
-	ev = keys.Canonicalize(ev)
+	if ev = keys.Canonicalize(ev); ev == nil {
+		return nil
+	}
 	normalized := keys.Normalize(ev)
 	if containsCtrlC(normalized) {
 		// Ctrl-C bypasses routeComposerKey entirely (it is handled here,

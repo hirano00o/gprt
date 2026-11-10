@@ -58,6 +58,19 @@ func TestEditorHandleForwardsCSIuCtrlHAndCtrlMAsEditingKeys(t *testing.T) {
 	}
 }
 
+func TestEditorHandleTypesNothingForCtrlPunctuation(t *testing.T) {
+	e, screen := newTestEditor(t, Options{})
+
+	sendEditorRune(e, screen, 'i')
+	sendEditorKey(e, screen, tcell.NewEventKey(tcell.KeyRune, ']', tcell.ModCtrl))
+	sendEditorKey(e, screen, tcell.NewEventKey(tcell.KeyRune, ';', tcell.ModCtrl))
+	sendEditorRune(e, screen, 'z')
+
+	if got, want := e.Text(), "z"; got != want {
+		t.Fatalf("text = %q, want %q", got, want)
+	}
+}
+
 func TestEditorTypingAndModeIndicator(t *testing.T) {
 	e, screen := newTestEditor(t, Options{})
 

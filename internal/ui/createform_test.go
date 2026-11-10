@@ -1216,6 +1216,31 @@ func TestCreateFormCtrlMPressesTheFocusedButton(t *testing.T) {
 	waitFor(t, app.app, func() bool { return app.overlay == "" })
 }
 
+// TestCreateFormCtrlPunctuationTypesNothing: a CSI-u terminal reports these
+// keys as Ctrl-modified runes, which tview would type; a legacy terminal sends
+// a control byte or nothing, so no text appears there.
+func TestCreateFormCtrlPunctuationTypesNothing(t *testing.T) {
+	app, _, fake, _ := newTestApp(t, nil)
+	fake.SetViewerRepositories(nil)
+
+	openCreateFormDismissingRepoAutocomplete(t, app)
+	for range 3 { // repo -> head -> base -> title
+		sendSpecial(app.app, tcell.KeyTab)
+	}
+	for _, r := range "];6 " {
+		sendKey(app.app, tcell.NewEventKey(tcell.KeyRune, r, tcell.ModCtrl))
+	}
+	sendKey(app.app, tcell.NewEventKey(tcell.KeyRune, '6', tcell.ModCtrl|tcell.ModShift))
+	sendRune(app.app, 'z')
+
+	got := query(app.app, func() string {
+		return app.createForm.GetFormItem(3).(*tview.InputField).GetText()
+	})
+	if got != "z" {
+		t.Errorf("title field text = %q, want only the plain %q", got, "z")
+	}
+}
+
 // TestComposerInsertModeCtrlHAndCtrlMEditTheText: the composer forwards the
 // raw event to tview.TextArea, so both keys must already be rewritten by then.
 func TestComposerInsertModeCtrlHAndCtrlMEditTheText(t *testing.T) {

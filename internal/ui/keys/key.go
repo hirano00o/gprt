@@ -52,6 +52,12 @@ var specialNames = map[tcell.Key]string{
 	tcell.KeyPgDn:      "PageDown",
 	tcell.KeyHome:      "Home",
 	tcell.KeyEnd:       "End",
+	// Ctrl+punctuation, which Normalize keeps as these control keys.
+	tcell.KeyCtrlSpace:      "C-@",
+	tcell.KeyCtrlBackslash:  "C-\\",
+	tcell.KeyCtrlRightSq:    "C-]",
+	tcell.KeyCtrlCarat:      "C-^",
+	tcell.KeyCtrlUnderscore: "C-_",
 }
 
 // String renders k in vim notation, e.g. "j", "<C-w>", "<Esc>". This is the

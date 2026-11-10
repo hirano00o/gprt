@@ -214,7 +214,9 @@ func (e *Editor) HasFocus() bool { return e.area.HasFocus() }
 // earlier key in the sequence caused the caller to close and discard it
 // before the loop reaches the next one).
 func (e *Editor) Handle(ev *tcell.EventKey) bool {
-	ev = keys.Canonicalize(ev)
+	if ev = keys.Canonicalize(ev); ev == nil {
+		return true
+	}
 	for _, k := range keys.Normalize(ev) {
 		e.HandleKey(k, ev)
 	}
