@@ -155,7 +155,10 @@ func (a *App) subscribeStore() {
 				a.rebuildEditLabelsList()
 			}
 		case store.EventViewerRepositoriesChanged:
-			if a.createFormRepoField != nil {
+			// Only refresh a drop-down that is still shown: Autocomplete()
+			// would otherwise reopen one the user dismissed with Esc (or
+			// left by moving focus), hijacking the next Tab.
+			if a.createFormRepoField != nil && a.createFormRepoSuggesting && a.app.GetFocus() == a.createFormRepoField {
 				a.createFormRepoField.Autocomplete()
 			}
 		case store.EventPullRequestCreated:
