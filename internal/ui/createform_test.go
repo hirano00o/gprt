@@ -1231,6 +1231,8 @@ func TestCreateFormCtrlPunctuationTypesNothing(t *testing.T) {
 		sendKey(app.app, tcell.NewEventKey(tcell.KeyRune, r, tcell.ModCtrl))
 	}
 	sendKey(app.app, tcell.NewEventKey(tcell.KeyRune, '6', tcell.ModCtrl|tcell.ModShift))
+	// Dropped whole: an Esc prefix left behind would close the form.
+	sendKey(app.app, tcell.NewEventKey(tcell.KeyRune, ';', tcell.ModCtrl|tcell.ModAlt))
 	sendRune(app.app, 'z')
 
 	got := query(app.app, func() string {
