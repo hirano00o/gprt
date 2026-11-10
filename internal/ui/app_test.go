@@ -2416,6 +2416,18 @@ func TestAppHelpExplainsFilterSyntax(t *testing.T) {
 			t.Errorf("help text does not mention filter syntax %q", want)
 		}
 	}
+
+	// The syntax sits far below the List section, so the list.filter row
+	// itself must point the reader there.
+	for _, line := range strings.Split(text, "\n") {
+		if strings.Contains(line, "list.filter") {
+			if !strings.Contains(line, "see Filter below") {
+				t.Errorf("list.filter row = %q, want it to point to the Filter section", line)
+			}
+			return
+		}
+	}
+	t.Error("no help row for list.filter")
 }
 
 // TestAppHelpListsTreeOnlyKeys checks the Files tree keys that bypass the
