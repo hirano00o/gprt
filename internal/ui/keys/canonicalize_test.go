@@ -94,6 +94,91 @@ func TestCanonicalizeDropsCtrlPunctuationALegacyTerminalCannotSend(t *testing.T)
 	}
 }
 
+// TestCanonicalizeAppliesTheCtrlRuleUnderAlt: a CSI-u Ctrl-Alt report is
+// treated as Alt (an Esc prefix) over the Ctrl key the Ctrl rule gives.
+func TestCanonicalizeAppliesTheCtrlRuleUnderAlt(t *testing.T) {
+	ctrlAlt := tcell.ModCtrl | tcell.ModAlt
+	tests := []struct {
+		r    rune
+		want tcell.Key
+		mod  tcell.ModMask
+	}{
+		{']', tcell.KeyCtrlRightSq, ctrlAlt},
+		{'6', tcell.KeyCtrlCarat, ctrlAlt},
+		{' ', tcell.KeyCtrlSpace, ctrlAlt},
+		{'[', tcell.KeyEsc, tcell.ModAlt},
+		{'3', tcell.KeyEsc, tcell.ModAlt},
+		{'8', tcell.KeyBackspace, tcell.ModAlt},
+	}
+	for _, tc := range tests {
+		t.Run(string(tc.r), func(t *testing.T) {
+			got := Canonicalize(tcell.NewEventKey(tcell.KeyRune, tc.r, ctrlAlt))
+			if got == nil || got.Key() != tc.want || got.Modifiers() != tc.mod || got.Rune() != 0 {
+				t.Errorf("Canonicalize(Ctrl-Alt-%c) = %+v, want key %v with mods %v and no rune", tc.r, got, tc.want, tc.mod)
+			}
+		})
+	}
+	for _, ev := range []*tcell.EventKey{
+		tcell.NewEventKey(tcell.KeyRune, ';', ctrlAlt),
+		tcell.NewEventKey(tcell.KeyRune, '0', ctrlAlt),
+		tcell.NewEventKey(tcell.KeyRune, '6', ctrlAlt|tcell.ModShift),
+	} {
+		if got := Canonicalize(ev); got != nil {
+			t.Errorf("Canonicalize(rune %q mods %v) = %+v, want nil", ev.Rune(), ev.Modifiers(), got)
+		}
+	}
+}
+
+func TestNormalizeExpandsCtrlAltPunctuationToEscThenTheCtrlKey(t *testing.T) {
+	want, err := Parse("<Esc><C-]>")
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	got := Normalize(tcell.NewEventKey(tcell.KeyRune, ']', tcell.ModCtrl|tcell.ModAlt))
+	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
+		t.Errorf("Normalize(Ctrl-Alt-]) = %+v, want %+v", got, want)
+	}
+}
+
+func TestNormalizeDoesNotPrefixEscToOtherCtrlAltSpecialKeys(t *testing.T) {
+	got := Normalize(tcell.NewEventKey(tcell.KeyUp, 0, tcell.ModCtrl|tcell.ModAlt))
+	if len(got) != 1 || got[0].Special != tcell.KeyUp {
+		t.Errorf("Normalize(Ctrl-Alt-Up) = %+v, want the single Up key", got)
+	}
+}
+
+func TestNormalizeCtrlAltEscAndBackspaceKeysAreSingleKeys(t *testing.T) {
+	for r, want := range map[rune]tcell.Key{'[': tcell.KeyEsc, '3': tcell.KeyEsc, '8': tcell.KeyBackspace} {
+		got := Normalize(tcell.NewEventKey(tcell.KeyRune, r, tcell.ModCtrl|tcell.ModAlt))
+		if len(got) != 1 || got[0] != (Key{Kind: KindSpecial, Special: want}) {
+			t.Errorf("Normalize(Ctrl-Alt-%c) = %+v, want a single %v", r, got, want)
+		}
+	}
+}
+
+// TestCtrlAltFromLegacyTerminals pins what tcell's legacy parser reports for
+// ESC plus a control byte: ESC 0x1D arrives as Ctrl-Alt-'}', which is left
+// as it was (Esc then '}'), and ESC ESC 0x1D as KeyCtrlRightSq with
+// Ctrl|Alt, which reads as Esc then Ctrl-].
+func TestCtrlAltFromLegacyTerminals(t *testing.T) {
+	misread := tcell.NewEventKey(tcell.KeyRune, '}', tcell.ModCtrl|tcell.ModAlt)
+	if got := Canonicalize(misread); got != misread {
+		t.Errorf("Canonicalize(Ctrl-Alt-}) = %+v, want the original event", got)
+	}
+	if got := Normalize(misread); len(got) != 2 || got[0].Special != tcell.KeyEsc || got[1] != (Key{Kind: KindRune, Rune: '}'}) {
+		t.Errorf("Normalize(Ctrl-Alt-}) = %+v, want Esc then '}'", got)
+	}
+
+	want, err := Parse("<Esc><C-]>")
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	got := Normalize(tcell.NewEventKey(tcell.KeyCtrlRightSq, 0, tcell.ModCtrl|tcell.ModAlt))
+	if len(got) != 2 || got[0] != want[0] || got[1] != want[1] {
+		t.Errorf("Normalize(Alt KeyCtrlRightSq) = %+v, want %+v", got, want)
+	}
+}
+
 func TestNormalizeIgnoresDroppedKeys(t *testing.T) {
 	if got := Normalize(tcell.NewEventKey(tcell.KeyRune, ';', tcell.ModCtrl)); len(got) != 0 {
 		t.Errorf("Normalize(Ctrl-;) = %+v, want no keys", got)
@@ -154,10 +239,10 @@ func TestCanonicalizeLeavesOtherEventsUntouched(t *testing.T) {
 	}{
 		{"plain [", tcell.NewEventKey(tcell.KeyRune, '[', tcell.ModNone)},
 		{"Alt-[", tcell.NewEventKey(tcell.KeyRune, '[', tcell.ModAlt)},
-		{"Ctrl-Alt-[", tcell.NewEventKey(tcell.KeyRune, '[', tcell.ModCtrl|tcell.ModAlt)},
+		{"Ctrl-Alt-a", tcell.NewEventKey(tcell.KeyRune, 'a', tcell.ModCtrl|tcell.ModAlt)},
+		{"Ctrl-Meta-;", tcell.NewEventKey(tcell.KeyRune, ';', tcell.ModCtrl|tcell.ModMeta)},
 		{"Ctrl-C", tcell.NewEventKey(tcell.KeyCtrlC, 0, tcell.ModCtrl)},
 		{"Ctrl-Shift-H", tcell.NewEventKey(tcell.KeyRune, 'H', tcell.ModCtrl|tcell.ModShift)},
-		{"Ctrl-Alt-;", tcell.NewEventKey(tcell.KeyRune, ';', tcell.ModCtrl|tcell.ModAlt)},
 		{"Ctrl-あ", tcell.NewEventKey(tcell.KeyRune, 'あ', tcell.ModCtrl)},
 		{"plain ;", tcell.NewEventKey(tcell.KeyRune, ';', tcell.ModNone)},
 		{"Tab", tcell.NewEventKey(tcell.KeyTab, 0, tcell.ModNone)},

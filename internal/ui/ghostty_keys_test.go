@@ -283,6 +283,20 @@ var ctrlPunctuationCases = []struct {
 	{"ctrl-space", libghostty.KeySpace, libghostty.ModCtrl, ' '},
 	{"ctrl-;", libghostty.KeySemicolon, libghostty.ModCtrl, ';'},
 	{"ctrl-shift-6", libghostty.KeyDigit6, libghostty.ModCtrl | libghostty.ModShift, '6'},
+	{"ctrl-alt-;", libghostty.KeySemicolon, libghostty.ModCtrl | libghostty.ModAlt, ';'},
+}
+
+// TestGhosttyCtrlAltPunctuationIsEscThenTheCtrlKey: on CSI-u, Ctrl-Alt-]
+// must reach the keymap as Esc followed by <C-]>, the Alt (Esc-prefix)
+// convention Normalize applies. Legacy is not compared: tcell misreads the
+// legacy bytes ESC 0x1D as Ctrl-Alt-} there.
+func TestGhosttyCtrlAltPunctuationIsEscThenTheCtrlKey(t *testing.T) {
+	g := newGhosttyAppWithKeys(t, map[string]string{"global.help": "<C-]>"}, testAppOpts{}, nil)
+	g.Eventually(t, func(s string) bool { return strings.Contains(s, "First PR") })
+
+	g.Press(t, false, libghostty.KeyBracketRight, libghostty.ModCtrl|libghostty.ModAlt, "", ']')
+
+	waitFor(t, g.app.app, func() bool { return g.app.overlay == "help" })
 }
 
 func TestGhosttyCtrlPunctuationTypesNothing(t *testing.T) {
