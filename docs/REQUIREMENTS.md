@@ -82,6 +82,7 @@ These are not independently numbered requirements; they are the building blocks 
 
 - Multi-line range comments are single-side only (all deletion lines or all addition/context lines, not a mix).
 - No mouse support.
+- On terminals that do not cluster graphemes (mode 2027 off, such as libghostty-vt's default or Ghostty's `grapheme-width-method = legacy`), VS16 emoji are drawn one cell wide while gprt reserves two, and ZWJ and skin-tone sequences are partly overwritten by the text after them; row layout stays aligned. tcell never enables mode 2027, but Ghostty's own default is `unicode`, which measures the same widths as gprt.
 - No local checkout of a pull request's branch.
 - No CI rerun and no check-run log viewing; checks can only be viewed and opened in the browser.
 - The vim editor's own keys are fixed and cannot be remapped through config.
