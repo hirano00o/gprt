@@ -31,10 +31,9 @@ var ctrlPunctuation = map[rune]tcell.Key{
 //     ignores it on Esc and Backspace, as for those keys' own Alt reports.
 //   - Any other ASCII digit or punctuation with Ctrl, or with Ctrl and Shift,
 //     with or without Alt (but see below), returns nil and the caller must
-//     drop the event. A
-//     legacy terminal sends nothing for these, except Ctrl-0, Ctrl-1 and
-//     Ctrl-9, which it sends as the plain digit; they are dropped too, so
-//     these keys never type text.
+//     drop the event. A legacy terminal sends nothing for these, except
+//     Ctrl-0, Ctrl-1 and Ctrl-9, which it sends as the plain digit; they are
+//     dropped too, so these keys never type text.
 //
 // With Alt, a rune from '`' up is returned unchanged: that is how tcell
 // misreports a legacy terminal's ESC plus a control byte (Ctrl-Alt-] as
