@@ -9,7 +9,8 @@ import (
 )
 
 // handleKey is the App's single app.SetInputCapture function: every key
-// event is normalized and routed here before any primitive sees it.
+// event is canonicalized, normalized and routed here before any primitive
+// sees it.
 // Ctrl-C quits immediately, unless a mutation is in flight, in which case
 // it asks for confirmation first (see quitWithConfirmIfMutating) —
 // regardless of what has focus, including the composer, so a composer's
@@ -20,6 +21,7 @@ import (
 // routeComposerKey); an open overlay only responds to q/Esc; otherwise
 // every key feeds the Sequencer and resolved actions dispatch.
 func (a *App) handleKey(ev *tcell.EventKey) *tcell.EventKey {
+	ev = keys.Canonicalize(ev)
 	normalized := keys.Normalize(ev)
 	if containsCtrlC(normalized) {
 		// Ctrl-C bypasses routeComposerKey entirely (it is handled here,

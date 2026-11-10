@@ -74,6 +74,9 @@ func parseToken(token string) (Key, error) {
 		if rest == "" || size != len(rest) || r == utf8.RuneError {
 			return Key{}, fmt.Errorf("a Ctrl binding names exactly one rune")
 		}
+		if r == '[' {
+			return Key{Kind: KindSpecial, Special: tcell.KeyEsc}, nil
+		}
 		return Key{Kind: KindRune, Rune: toLowerLetter(r), Mod: tcell.ModCtrl}, nil
 	}
 	return Key{}, fmt.Errorf("unknown key name")

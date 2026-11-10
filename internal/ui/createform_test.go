@@ -1116,6 +1116,62 @@ func TestCreateFormArrowKeysMoveBetweenTitleAndDraft(t *testing.T) {
 	}
 }
 
+// TestCreateFormCtrlIMovesToTheNextField: a CSI-u terminal reports Ctrl-I as
+// KeyCtrlI, where a legacy one sends Tab, and the form only reacts to KeyTab.
+func TestCreateFormCtrlIMovesToTheNextField(t *testing.T) {
+	app, _, fake, _ := newTestApp(t, nil)
+	fake.SetViewerRepositories(nil)
+
+	openCreateFormDismissingRepoAutocomplete(t, app)
+	if item, _ := formFocusIndex(app.app, app.createForm); item != 0 {
+		t.Fatalf("focused form item before Ctrl-I = %d, want 0", item)
+	}
+
+	sendKey(app.app, tcell.NewEventKey(tcell.KeyCtrlI, 0, tcell.ModCtrl))
+	if item, _ := formFocusIndex(app.app, app.createForm); item != 1 {
+		t.Fatalf("focused form item after Ctrl-I = %d, want 1", item)
+	}
+}
+
+// TestCreateFormCtrlBracketClosesTheDropDownWithoutTyping: a CSI-u terminal
+// reports Ctrl-[ as a '[' rune, which must not reach the focused field.
+func TestCreateFormCtrlBracketClosesTheDropDownWithoutTyping(t *testing.T) {
+	app, _, fake, _ := newTestApp(t, nil)
+	fake.SetViewerRepositories([]model.RepositorySummary{{Ref: fixtureRef(1).Repo}})
+
+	sendRune(app.app, 'n')
+	waitFor(t, app.app, func() bool {
+		return app.deps.Store.ViewerRepositories() != nil && app.createFormRepoSuggesting
+	})
+
+	sendKey(app.app, tcell.NewEventKey(tcell.KeyRune, '[', tcell.ModCtrl))
+
+	if got := query(app.app, func() string { return app.createFormRepoField.GetText() }); got != "" {
+		t.Errorf("repository field text = %q, want it empty", got)
+	}
+	if query(app.app, func() bool { return app.createFormRepoSuggesting }) {
+		t.Error("drop-down still marked as showing after Ctrl-[")
+	}
+}
+
+// TestConfirmDialogCtrlBracketCancels: the confirm dialog hands the raw event
+// to tview.Modal, so Ctrl-[ must already be Esc by then.
+func TestConfirmDialogCtrlBracketCancels(t *testing.T) {
+	app, _, _, _ := newTestApp(t, nil)
+	var confirmed bool
+	act(app.app, func() { app.showConfirm("Sure?", "Yes", func() { confirmed = true }) })
+	if query(app.app, func() string { return app.overlay }) == "" {
+		t.Fatal("confirm dialog did not open")
+	}
+
+	sendKey(app.app, tcell.NewEventKey(tcell.KeyRune, '[', tcell.ModCtrl))
+
+	waitFor(t, app.app, func() bool { return app.overlay == "" })
+	if query(app.app, func() bool { return confirmed }) {
+		t.Error("Ctrl-[ confirmed the dialog, want it cancelled")
+	}
+}
+
 // TestCreateFormArrowKeysReachButtonsAndBack covers the same rewriting at
 // the form's own item/button boundary: Down from the last field (Draft)
 // reaches the first button, and Up from a button returns to the field

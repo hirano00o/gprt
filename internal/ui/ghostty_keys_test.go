@@ -102,8 +102,6 @@ func TestGhosttyKeysMatchBetweenCSIuAndLegacy(t *testing.T) {
 		// for the key: Ctrl-I, Ctrl-M and Ctrl-[ are Tab, Enter and Esc there,
 		// which their own cases already cover.
 		wantLegacy string
-		// csiuGap, when set, skips the CSI-u run and says what is broken.
-		csiuGap string
 		// before drives the app to a state where the key has a visible
 		// effect and checks that the effect has not happened yet.
 		before step
@@ -133,7 +131,6 @@ func TestGhosttyKeysMatchBetweenCSIuAndLegacy(t *testing.T) {
 		{
 			name: "ctrl-i moves to the next form field", key: libghostty.KeyI, mods: libghostty.ModCtrl, unshifted: 'i',
 			wantCSIu: "\x1b[105;5u", before: onFirstFormItem, after: onSecondFormItem,
-			csiuGap: "known gap: the form receives the raw KeyCtrlI, which tview does not treat as Tab",
 		},
 		{
 			name: "esc closes the form", key: libghostty.KeyEscape,
@@ -142,7 +139,6 @@ func TestGhosttyKeysMatchBetweenCSIuAndLegacy(t *testing.T) {
 		{
 			name: "ctrl-[ closes the form", key: libghostty.KeyBracketLeft, mods: libghostty.ModCtrl, unshifted: '[',
 			wantCSIu: "\x1b[91;5u", before: onFirstFormItem, after: formClosed,
-			csiuGap: "known gap: tcell reports KeyRune '[' with ModCtrl, which Normalize does not map to Esc",
 		},
 	}
 
@@ -159,9 +155,6 @@ func TestGhosttyKeysMatchBetweenCSIuAndLegacy(t *testing.T) {
 				continue
 			}
 			t.Run(tc.name+"/"+mode.name, func(t *testing.T) {
-				if !mode.legacy && tc.csiuGap != "" {
-					t.Skip(tc.csiuGap)
-				}
 				g := newGhosttyApp(t, testAppOpts{}, func(f *fakeGitHub) {
 					f.SetViewerRepositories([]model.RepositorySummary{{Ref: fixtureRef(1).Repo}})
 				})
