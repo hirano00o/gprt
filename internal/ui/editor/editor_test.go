@@ -44,6 +44,20 @@ func typeEditorText(e *Editor, screen tcell.Screen, s string) {
 	}
 }
 
+func TestEditorHandleForwardsCSIuCtrlHAndCtrlMAsEditingKeys(t *testing.T) {
+	e, screen := newTestEditor(t, Options{})
+
+	sendEditorRune(e, screen, 'i')
+	typeEditorText(e, screen, "ab")
+	sendEditorKey(e, screen, tcell.NewEventKey(tcell.KeyCtrlH, 0, tcell.ModCtrl))
+	sendEditorKey(e, screen, tcell.NewEventKey(tcell.KeyCtrlM, 0, tcell.ModCtrl))
+	sendEditorRune(e, screen, 'c')
+
+	if got, want := e.Text(), "a\nc"; got != want {
+		t.Fatalf("text = %q, want %q", got, want)
+	}
+}
+
 func TestEditorTypingAndModeIndicator(t *testing.T) {
 	e, screen := newTestEditor(t, Options{})
 

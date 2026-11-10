@@ -2,15 +2,20 @@ package keys
 
 import "github.com/gdamore/tcell/v2"
 
-// Canonicalize rewrites a CSI-u report of Ctrl-I or Ctrl-[ to the Tab or Esc
-// event a legacy terminal produces for those keys, and returns any other event
-// unchanged. Normalize alone is not enough for them: the raw event is what
-// reaches tview's widgets, which only know KeyTab and KeyEsc. tcell maps only
-// Ctrl+letter to a KeyCtrl* constant, so Ctrl-[ arrives as a '[' rune.
+// Canonicalize rewrites a CSI-u report of Ctrl-H, Ctrl-I, Ctrl-M, or Ctrl-[ to
+// the Backspace, Tab, Enter, or Esc event a legacy terminal produces for those
+// keys, and returns any other event unchanged. Normalize alone is not enough
+// for them: the raw event is what reaches tview's widgets, which only know the
+// legacy keys. tcell maps only Ctrl+letter to a KeyCtrl* constant, so Ctrl-[
+// arrives as a '[' rune.
 func Canonicalize(ev *tcell.EventKey) *tcell.EventKey {
 	switch {
+	case ev.Key() == tcell.KeyCtrlH:
+		return tcell.NewEventKey(tcell.KeyBackspace, 0, tcell.ModNone)
 	case ev.Key() == tcell.KeyCtrlI:
 		return tcell.NewEventKey(tcell.KeyTab, 0, tcell.ModNone)
+	case ev.Key() == tcell.KeyCtrlM:
+		return tcell.NewEventKey(tcell.KeyEnter, 0, tcell.ModNone)
 	case ev.Key() == tcell.KeyRune && ev.Rune() == '[' && ev.Modifiers() == tcell.ModCtrl:
 		return tcell.NewEventKey(tcell.KeyEsc, 0, tcell.ModNone)
 	}
@@ -44,11 +49,11 @@ func Normalize(ev *tcell.EventKey) []Key {
 	mod := ev.Modifiers()
 
 	switch k {
-	case tcell.KeyCtrlH, tcell.KeyBackspace, tcell.KeyBackspace2:
+	case tcell.KeyBackspace, tcell.KeyBackspace2:
 		return []Key{{Kind: KindSpecial, Special: tcell.KeyBackspace}}
 	case tcell.KeyTab:
 		return []Key{{Kind: KindSpecial, Special: tcell.KeyTab}}
-	case tcell.KeyCtrlM, tcell.KeyEnter:
+	case tcell.KeyEnter:
 		return []Key{{Kind: KindSpecial, Special: tcell.KeyEnter}}
 	case tcell.KeyCtrlLeftSq, tcell.KeyEsc:
 		return []Key{{Kind: KindSpecial, Special: tcell.KeyEsc}}

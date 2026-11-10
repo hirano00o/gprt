@@ -1172,6 +1172,78 @@ func TestConfirmDialogCtrlBracketCancels(t *testing.T) {
 	}
 }
 
+// TestCreateFormCtrlHDeletesInATextField: a CSI-u terminal reports Ctrl-H as
+// KeyCtrlH, where a legacy one sends Backspace, and tview only deletes on the
+// latter.
+func TestCreateFormCtrlHDeletesInATextField(t *testing.T) {
+	app, _, fake, _ := newTestApp(t, nil)
+	fake.SetViewerRepositories(nil)
+
+	openCreateFormDismissingRepoAutocomplete(t, app)
+	for range 3 { // repo -> head -> base -> title
+		sendSpecial(app.app, tcell.KeyTab)
+	}
+	sendRune(app.app, 'a')
+	sendRune(app.app, 'b')
+
+	sendKey(app.app, tcell.NewEventKey(tcell.KeyCtrlH, 0, tcell.ModCtrl))
+
+	got := query(app.app, func() string {
+		return app.createForm.GetFormItem(3).(*tview.InputField).GetText()
+	})
+	if got != "a" {
+		t.Errorf("title field text after Ctrl-H = %q, want %q", got, "a")
+	}
+}
+
+// TestCreateFormCtrlMPressesTheFocusedButton: a CSI-u terminal reports Ctrl-M
+// as KeyCtrlM, where a legacy one sends Enter, and tview.Button only reacts to
+// the latter.
+func TestCreateFormCtrlMPressesTheFocusedButton(t *testing.T) {
+	app, _, fake, _ := newTestApp(t, nil)
+	fake.SetViewerRepositories(nil)
+
+	openCreateFormDismissingRepoAutocomplete(t, app)
+	for range 8 { // the five fields, then Edit body, Reviewers and Create
+		sendSpecial(app.app, tcell.KeyTab)
+	}
+	if _, button := formFocusIndex(app.app, app.createForm); button != 3 {
+		t.Fatalf("focused form button = %d, want 3 (Cancel)", button)
+	}
+
+	sendKey(app.app, tcell.NewEventKey(tcell.KeyCtrlM, 0, tcell.ModCtrl))
+
+	waitFor(t, app.app, func() bool { return app.overlay == "" })
+}
+
+// TestComposerInsertModeCtrlHAndCtrlMEditTheText: the composer forwards the
+// raw event to tview.TextArea, so both keys must already be rewritten by then.
+func TestComposerInsertModeCtrlHAndCtrlMEditTheText(t *testing.T) {
+	app, _, fake, _ := newTestApp(t, nil)
+	repo := model.RepoRef{Host: "github.com", Owner: "acme", Name: "widgets"}
+	fake.SetViewerRepositories([]model.RepositorySummary{{Ref: repo, ID: "R_1", DefaultBranch: "main"}})
+
+	sendRune(app.app, 'n')
+	waitFor(t, app.app, func() bool { return app.createForm != nil })
+	act(app.app, func() { app.createFormRepoField.SetText("acme/widgets") })
+	act(app.app, func() { app.openCreatePRBodyComposer() })
+	waitFor(t, app.app, func() bool { return composerOpen(app) })
+
+	sendRune(app.app, 'i')
+	sendRune(app.app, 'a')
+	sendRune(app.app, 'b')
+	sendKey(app.app, tcell.NewEventKey(tcell.KeyCtrlH, 0, tcell.ModCtrl))
+	sendKey(app.app, tcell.NewEventKey(tcell.KeyCtrlM, 0, tcell.ModCtrl))
+	sendRune(app.app, 'c')
+	sendSpecial(app.app, tcell.KeyEsc)
+	sendKey(app.app, tcell.NewEventKey(tcell.KeyRune, 's', tcell.ModCtrl))
+
+	waitFor(t, app.app, func() bool { return !composerOpen(app) })
+	if got, want := query(app.app, func() string { return app.createFormBody }), "a\nc"; got != want {
+		t.Errorf("createFormBody = %q, want %q", got, want)
+	}
+}
+
 // TestCreateFormArrowKeysReachButtonsAndBack covers the same rewriting at
 // the form's own item/button boundary: Down from the last field (Draft)
 // reaches the first button, and Up from a button returns to the field
