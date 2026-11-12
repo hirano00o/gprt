@@ -155,11 +155,11 @@ func (a *App) subscribeStore() {
 				a.rebuildEditLabelsList()
 			}
 		case store.EventViewerRepositoriesChanged:
-			// Only refresh a drop-down that is still shown: Autocomplete()
-			// would otherwise reopen one the user dismissed with Esc (or
-			// left by moving focus), hijacking the next Tab.
-			if a.createFormRepoField != nil && a.createFormRepoSuggesting && a.app.GetFocus() == a.createFormRepoField {
-				a.createFormRepoField.Autocomplete()
+			// Only refresh a drop-down that is still shown, so the
+			// "(loading repositories…)" placeholder is replaced but one the
+			// user dismissed stays closed.
+			if a.createFormRepoField != nil {
+				refreshAutocompleteIfWanted(a.app, a.createFormRepoField, a.createFormRepoSuggesting)
 			}
 		case store.EventPullRequestCreated:
 			if ev.Ref != nil {

@@ -510,6 +510,7 @@ func (a *App) createFormHeadAutocomplete(text string) []string {
 		a.createFormHeadTimer.Stop()
 	}
 	repo := a.createFormRepo
+	dismissals := a.createFormHeadDismissals
 	a.createFormHeadTimer = time.AfterFunc(createFormBranchDebounce, func() {
 		a.app.QueueUpdateDraw(func() {
 			a.deps.Store.SearchBranches(repo, text, func(branches []model.Branch, err error) {
@@ -522,7 +523,7 @@ func (a *App) createFormHeadAutocomplete(text string) []string {
 				}
 				a.createFormHeadSuggestions = names
 				a.createFormHeadLastQuery = text
-				a.createFormHeadField.Autocomplete()
+				refreshAutocompleteIfWanted(a.app, a.createFormHeadField, dismissals == a.createFormHeadDismissals)
 			})
 		})
 	})
@@ -539,6 +540,7 @@ func (a *App) createFormBaseAutocomplete(text string) []string {
 		a.createFormBaseTimer.Stop()
 	}
 	repo := a.createFormRepo
+	dismissals := a.createFormBaseDismissals
 	a.createFormBaseTimer = time.AfterFunc(createFormBranchDebounce, func() {
 		a.app.QueueUpdateDraw(func() {
 			a.deps.Store.SearchBranches(repo, text, func(branches []model.Branch, err error) {
@@ -551,7 +553,7 @@ func (a *App) createFormBaseAutocomplete(text string) []string {
 				}
 				a.createFormBaseSuggestions = names
 				a.createFormBaseLastQuery = text
-				a.createFormBaseField.Autocomplete()
+				refreshAutocompleteIfWanted(a.app, a.createFormBaseField, dismissals == a.createFormBaseDismissals)
 			})
 		})
 	})
@@ -974,6 +976,8 @@ func (a *App) routeCreateFormKey(ev *tcell.EventKey, normalized []keys.Key) *tce
 				a.createFormRepoSuggesting = false
 				a.createFormHeadSuggesting = false
 				a.createFormBaseSuggesting = false
+				a.createFormHeadDismissals++
+				a.createFormBaseDismissals++
 				return ev
 			}
 			a.cancelCreateForm()

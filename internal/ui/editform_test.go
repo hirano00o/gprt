@@ -386,6 +386,42 @@ func TestEditFormBaseBranchAutocompleteDebouncesSearchBranches(t *testing.T) {
 	waitFor(t, app.app, func() bool { return len(app.editFormBranchSuggestions) == 2 })
 }
 
+// TestEditFormBaseResultsAfterEscKeepDropDownClosed: a branch search still
+// in flight when the user dismisses the Base drop-down with Esc must not
+// reopen it when it resolves, or the next Tab would move through the
+// candidates instead of to the Draft checkbox.
+func TestEditFormBaseResultsAfterEscKeepDropDownClosed(t *testing.T) {
+	old := editFormBranchDebounce
+	editFormBranchDebounce = 5 * time.Millisecond
+	t.Cleanup(func() { editFormBranchDebounce = old })
+
+	app, _, fake, _ := newTestApp(t, nil)
+	ref := fixtureRef(1)
+	openDetailForComposer(t, app, fake, editablePR(ref))
+	fake.SetBranches("d", []model.Branch{{Name: "develop"}})
+	fake.SetBranches("dx", []model.Branch{{Name: "dx-branch"}})
+
+	sendRune(app.app, 'E')
+	waitFor(t, app.app, func() bool { return app.editForm != nil })
+	act(app.app, func() { app.editFormBaseField.SetText("") })
+	sendSpecial(app.app, tcell.KeyTab) // title -> base
+	waitFor(t, app.app, func() bool { return app.app.GetFocus() == app.editFormBaseField })
+
+	sendRune(app.app, 'd')
+	waitFor(t, app.app, func() bool { return app.editFormBaseSuggesting })
+	block := make(chan struct{})
+	fake.SetBranchesBlock(block)
+	sendRune(app.app, 'x') // "dx" stays blocked, whether or not its debounce fired yet
+	sendSpecial(app.app, tcell.KeyEsc)
+	close(block)
+	waitFor(t, app.app, func() bool { return app.editFormBranchLastQuery == "dx" })
+
+	sendSpecial(app.app, tcell.KeyTab)
+	if item, _ := formFocusIndex(app.app, app.editForm); item != 2 {
+		t.Fatalf("focused form item after Tab = %d, want 2 (Draft)", item)
+	}
+}
+
 // TestEditFormBaseBranchAutocompleteDoesNotReTriggerItsOwnDebounce is a
 // regression test for a real bug (not just test flakiness) a -count=2 run
 // caught: editFormBranchAutocomplete's own debounced callback calls

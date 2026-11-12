@@ -315,6 +315,10 @@ type App struct {
 	// forever.
 	editFormBranchLastQuery string
 	editFormBranchTimer     *time.Timer
+	// editFormBranchDismissals counts Escs that closed editFormBaseField's
+	// drop-down; a search started before the latest one stores its result
+	// but does not reopen the drop-down the user just closed.
+	editFormBranchDismissals int
 	// editFormBaseSuggesting mirrors whether editFormBaseField's own
 	// autocomplete drop-down is currently shown (wrapFormAutocomplete,
 	// formnav.go) — routeEditFormKey consults it (forced false whenever
@@ -450,6 +454,10 @@ type App struct {
 	createFormBaseSuggestions []string
 	createFormBaseLastQuery   string
 	createFormBaseTimer       *time.Timer
+	// createFormHeadDismissals/createFormBaseDismissals mirror
+	// editFormBranchDismissals for each branch field.
+	createFormHeadDismissals int
+	createFormBaseDismissals int
 	// createFormRepoSuggesting/createFormHeadSuggesting/createFormBaseSuggesting
 	// mirror editFormBaseSuggesting for each of the create form's own three
 	// autocompleted fields.
