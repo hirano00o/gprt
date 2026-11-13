@@ -117,19 +117,35 @@ const (
 	rowKindGap
 )
 
+// diffHalf is one column of a rowKindLine row: the whole row in the unified
+// layout (the only one so far). It keeps the gutter (line numbers + marker,
+// never horizontally scrolled) and the content (syntax spans, scrolled by
+// hOffset) separate so Draw can apply the horizontal-scroll offset to the
+// content only. content holds one []Span per display line, so a half can
+// span several screen lines without the row's other halves having to; a row
+// is as tall as its tallest half.
+type diffHalf struct {
+	// line indexes DiffFile.Hunks[row.hunk].Lines (never OldNo/NewNo, which
+	// are not unique per line); -1 marks a blank column that anchors no line.
+	line    int
+	kind    diff.LineKind
+	gutter  []Span
+	content [][]Span
+}
+
 // diffRow is one row of DiffView's rebuilt content. Only rowKindLine and
-// rowKindThreadHeader are selectable. rowKindLine keeps its gutter (line
-// numbers + marker, never horizontally scrolled) and content (syntax spans,
-// scrolled by hOffset) separate so Draw can apply the horizontal-scroll
-// offset to the content only; every other kind uses the generic,
-// possibly-multi-line lines field instead.
+// rowKindThreadHeader are selectable. rowKindLine rows carry their
+// columns in halves; every other kind uses the generic, possibly-multi-line
+// lines field instead.
 type diffRow struct {
 	kind diffRowKind
 
-	// hunk/line identify a rowKindLine row's position in DiffFile.Hunks, and
-	// are otherwise unused (zero).
-	hunk, line int
-	lineKind   diff.LineKind
+	// hunk identifies a rowKindLine row's hunk in DiffFile.Hunks (its line
+	// within the hunk is halves[i].line), and is otherwise unused (zero).
+	hunk int
+
+	// halves is a rowKindLine row's columns: always exactly one for now.
+	halves []diffHalf
 
 	// threadID identifies a rowKindThreadHeader row's thread, for
 	// SetThreadFolded/ToggleFoldAtCursor/CursorThread and for restoring the
@@ -143,10 +159,16 @@ type diffRow struct {
 	// the file's head content has ever been fetched).
 	gapStart, gapCount int
 
-	gutter  []Span
-	content []Span
-
 	lines [][]Span
+}
+
+// primary returns r's only half (the unified layout has no other), or the
+// zero diffHalf for kinds that have none.
+func (r diffRow) primary() diffHalf {
+	if len(r.halves) == 0 {
+		return diffHalf{}
+	}
+	return r.halves[0]
 }
 
 func (r diffRow) selectable() bool {
@@ -156,7 +178,11 @@ func (r diffRow) selectable() bool {
 // lineCount is how many physical screen lines r occupies.
 func (r diffRow) lineCount() int {
 	if r.kind == rowKindLine {
-		return 1
+		n := 0
+		for _, h := range r.halves {
+			n = max(n, len(h.content))
+		}
+		return n
 	}
 	return len(r.lines)
 }
@@ -190,7 +216,7 @@ func keyForRow(r diffRow) diffRowKey {
 	case rowKindGap:
 		return diffRowKey{isGap: true, gapStart: r.gapStart}
 	default:
-		return diffRowKey{hunk: r.hunk, line: r.line}
+		return diffRowKey{hunk: r.hunk, line: r.primary().line}
 	}
 }
 
@@ -250,7 +276,7 @@ type DiffView struct {
 
 	// searchRE is the currently active "/" search's compiled pattern (see
 	// SetSearch/ClearSearch), or nil when no search is active. Applied at
-	// rebuild time only (lineRow, once per rebuild), not per Draw — the
+	// rebuild time only (lineHalf, once per rebuild), not per Draw — the
 	// same span-precomputation rule every other line decoration here
 	// follows.
 	searchRE *regexp.Regexp
@@ -272,7 +298,7 @@ type DiffView struct {
 }
 
 // SetSearch activates re: every line matching it is highlighted (see
-// lineRow) starting at the next rebuild. Any current-match marker from a
+// lineHalf) starting at the next rebuild. Any current-match marker from a
 // previous search (SetSearchCurrent) is cleared, since it belongs to that
 // search's own match list, not this one; callers that jump to a match right
 // after (diffSearchStep, submitDiffSearch) call SetSearchCurrent again to
@@ -487,7 +513,7 @@ func (dv *DiffView) setCursor(i int) {
 
 func (dv *DiffView) refreshLineTracking() {
 	if row, ok := dv.currentRow(); ok && row.kind == rowKindLine {
-		dv.curLineHunk, dv.curLineLine = row.hunk, row.line
+		dv.curLineHunk, dv.curLineLine = row.hunk, row.primary().line
 	}
 }
 
@@ -590,7 +616,7 @@ func (dv *DiffView) StartVisual() {
 		return
 	}
 	dv.inVisual = true
-	dv.visualAnchorHunk, dv.visualAnchorLine = row.hunk, row.line
+	dv.visualAnchorHunk, dv.visualAnchorLine = row.hunk, row.primary().line
 }
 
 // EndVisual cancels an active visual selection (Esc).
@@ -665,10 +691,11 @@ func (dv *DiffView) CursorLine() (diff.Line, bool) {
 		return diff.Line{}, false
 	}
 	h := dv.file.Hunks[row.hunk]
-	if row.line < 0 || row.line >= len(h.Lines) {
+	li := row.primary().line
+	if li < 0 || li >= len(h.Lines) {
 		return diff.Line{}, false
 	}
-	return h.Lines[row.line], true
+	return h.Lines[li], true
 }
 
 // CursorThread returns the review thread under the cursor, if the cursor is
@@ -761,9 +788,10 @@ func (dv *DiffView) Draw(screen tcell.Screen) {
 	for i := dv.offset; i < len(dv.rows) && line < y+height; i++ {
 		row := dv.rows[i]
 		isCursorRow := i == cursorRowIdx
-		isSelectedRow := hasSel && row.kind == rowKindLine && row.hunk == selHunk && row.line >= selLo && row.line <= selHi
+		half := row.primary()
+		isSelectedRow := hasSel && row.kind == rowKindLine && row.hunk == selHunk && half.line >= selLo && half.line <= selHi
 
-		bgStyle := theme.DiffLineStyle(row.lineKind, isSelectedRow)
+		bgStyle := theme.DiffLineStyle(half.kind, isSelectedRow)
 		_, bg, _ := bgStyle.Decompose()
 
 		n := row.lineCount()
@@ -788,8 +816,9 @@ func (dv *DiffView) Draw(screen tcell.Screen) {
 // its content with the horizontal-scroll offset applied, with a "‹" marker
 // when scrolled.
 func (dv *DiffView) drawLineRow(screen tcell.Screen, x, y, width int, row diffRow, bg tcell.Color) {
-	gutterSpans := withBackground(row.gutter, bg)
-	gw := SpanWidth(row.gutter)
+	half := row.primary()
+	gutterSpans := withBackground(half.gutter, bg)
+	gw := SpanWidth(half.gutter)
 	if gw > width {
 		gw = width
 	}
@@ -809,7 +838,7 @@ func (dv *DiffView) drawLineRow(screen tcell.Screen, x, y, width int, row diffRo
 	if contentWidth <= 0 {
 		return
 	}
-	DrawSpansOffset(screen, contentX, y, contentWidth, dv.hOffset, withBackground(row.content, bg))
+	DrawSpansOffset(screen, contentX, y, contentWidth, dv.hOffset, withBackground(half.content[0], bg))
 }
 
 // rebuild recomputes every row of the current file at width, preserving the
@@ -838,7 +867,7 @@ func (dv *DiffView) rebuild(width int) {
 			dv.selectable = append(dv.selectable, i)
 		}
 	}
-	dv.maxHOffset = maxHOffsetFor(b.longestContent, width, b.gutterWidth)
+	dv.maxHOffset = maxHOffsetFor(b.longestContent, b.contentWidth)
 	dv.hOffset = clamp(dv.hOffset, 0, dv.maxHOffset)
 
 	dv.cursor = clamp(oldCursor, 0, len(dv.selectable)-1)
@@ -876,7 +905,7 @@ func (dv *DiffView) applyPendingLineCursor() {
 	if hi, li, ok := diff.LocateLine(dv.file.Hunks, dv.pendingCursorSide, dv.pendingCursorLine); ok {
 		for i, idx := range dv.selectable {
 			r := dv.rows[idx]
-			if r.kind == rowKindLine && r.hunk == hi && r.line == li {
+			if r.kind == rowKindLine && r.hunk == hi && r.primary().line == li {
 				dv.cursor = i
 				dv.pendingCursorSet = false
 				break
@@ -923,27 +952,15 @@ func (dv *DiffView) applyPendingThreadCursor() {
 	}
 }
 
-// contentWidthFor returns the display width available for a diff line's
-// content once its fixed-width gutter (line numbers + marker + the draft
-// marker column + one separating space) is subtracted, never less than 1.
-func contentWidthFor(width, gutterWidth int) int {
-	gutterTotal := gutterWidth*2 + 5 // "%*d %*d %s %s " layout, see gutterSpansFor
-	w := width - gutterTotal
-	if w < 1 {
-		w = 1
-	}
-	return w
-}
-
 // maxHOffsetFor returns the furthest hOffset that still leaves at least one
 // content column on screen: drawLineRow only ever spends a cell on the "‹"
 // marker once hOffset > 0, so the content actually visible while scrolled is
-// contentWidthFor(width, gutterWidth)-1 cells wide, one narrower than the
-// unscrolled (hOffset == 0) case contentWidthFor itself describes. Without
+// contentWidth-1 cells wide, one narrower than the unscrolled (hOffset == 0)
+// case contentWidth itself describes. Without
 // the "+1" below, the longest line's very last column would never scroll
 // into view — hOffset would already be clamped one cell short of it.
-func maxHOffsetFor(longestContent, width, gutterWidth int) int {
-	overflow := longestContent - contentWidthFor(width, gutterWidth)
+func maxHOffsetFor(longestContent, contentWidth int) int {
+	overflow := longestContent - contentWidth
 	if overflow <= 0 {
 		return 0
 	}
@@ -958,11 +975,18 @@ type diffBuilder struct {
 	rows           []diffRow
 	gutterWidth    int
 	longestContent int
+
+	// contentWidth is the display width left for a diff line's content once
+	// its gutter is subtracted, never less than 1. The gutter is the same
+	// width for every line of a file, so one sample line's gutter (blank
+	// draft column included) stands in for all of them.
+	contentWidth int
 }
 
 func (b *diffBuilder) build() {
 	f := b.dv.file
 	b.gutterWidth = gutterDigitWidth(f.Hunks)
+	b.contentWidth = max(b.width-SpanWidth(gutterSpansFor(diff.Line{}, b.gutterWidth, "")), 1)
 
 	b.rows = append(b.rows, b.fileHeaderRow(f))
 
@@ -1001,7 +1025,7 @@ func (b *diffBuilder) build() {
 			}
 			b.rows = append(b.rows, b.hunkHeaderRow(h))
 			for li, l := range h.Lines {
-				b.rows = append(b.rows, b.lineRow(f, hi, li, l))
+				b.rows = append(b.rows, diffRow{kind: rowKindLine, hunk: hi, halves: []diffHalf{b.lineHalf(f, hi, li, l)}})
 				for _, t := range inline[hunkLineKey{hi, li}] {
 					b.appendThread(t)
 				}
@@ -1106,23 +1130,29 @@ func (b *diffBuilder) hunkHeaderRow(h diff.Hunk) diffRow {
 	return diffRow{kind: rowKindHunkHeader, lines: [][]Span{{{Text: text, Style: theme.Muted}}}}
 }
 
-func (b *diffBuilder) lineRow(f DiffFile, hunkIdx, lineIdx int, l diff.Line) diffRow {
-	row := diffRow{kind: rowKindLine, hunk: hunkIdx, line: lineIdx, lineKind: l.Kind}
+// lineHalf builds the gutter and content of line lineIdx of hunk hunkIdx,
+// folding in its search highlight and draft marker, and tracks the longest
+// content seen for maxHOffsetFor.
+func (b *diffBuilder) lineHalf(f DiffFile, hunkIdx, lineIdx int, l diff.Line) diffHalf {
 	draftMark := ""
 	if f.DraftLines[DraftAnchor{Hunk: hunkIdx, Line: lineIdx}] {
 		draftMark = f.DraftMarker
 	}
-	row.gutter = gutterSpansFor(l, b.gutterWidth, draftMark)
-	row.content = contentSpansFor(f, hunkIdx, lineIdx, l)
+	content := contentSpansFor(f, hunkIdx, lineIdx, l)
 	if b.dv.searchRE != nil {
 		if ranges := b.dv.searchRE.FindAllStringIndex(l.Text, -1); len(ranges) > 0 {
-			row.content = b.dv.highlightSearchRanges(row.content, f.Path, hunkIdx, lineIdx, l.Text, ranges)
+			content = b.dv.highlightSearchRanges(content, f.Path, hunkIdx, lineIdx, l.Text, ranges)
 		}
 	}
-	if w := SpanWidth(row.content); w > b.longestContent {
+	if w := SpanWidth(content); w > b.longestContent {
 		b.longestContent = w
 	}
-	return row
+	return diffHalf{
+		line:    lineIdx,
+		kind:    l.Kind,
+		gutter:  gutterSpansFor(l, b.gutterWidth, draftMark),
+		content: [][]Span{content},
+	}
 }
 
 // highlightSearchRanges applies theme.SearchMatch to every range in ranges

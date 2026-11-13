@@ -54,7 +54,7 @@ func rowText(r diffRow, li int) string {
 	var spans []Span
 	switch {
 	case r.kind == rowKindLine:
-		spans = append(append([]Span{}, r.gutter...), r.content...)
+		spans = append(append([]Span{}, r.primary().gutter...), r.primary().content[0]...)
 	case li < len(r.lines):
 		spans = r.lines[li]
 	}
@@ -95,7 +95,7 @@ func TestDiffViewRendersFileHeaderHunkHeadersGuttersAndMarkers(t *testing.T) {
 				sawHunkHeader2 = true
 			}
 		case rowKindLine:
-			for _, s := range r.gutter {
+			for _, s := range r.primary().gutter {
 				if s.Text == "+" {
 					sawPlus = true
 				}
@@ -916,15 +916,15 @@ func TestDiffViewDraftMarkerRendersInGutter(t *testing.T) {
 			continue
 		}
 		marked := false
-		for _, s := range r.gutter {
+		for _, s := range r.primary().gutter {
 			if s.Text == "M" {
 				marked = true
 			}
 		}
 		if marked {
 			markedRows++
-			if r.hunk != 0 || r.line != 1 {
-				t.Errorf("draft marker rendered on row (hunk=%d, line=%d), want only (0, 1)", r.hunk, r.line)
+			if r.hunk != 0 || r.primary().line != 1 {
+				t.Errorf("draft marker rendered on row (hunk=%d, line=%d), want only (0, 1)", r.hunk, r.primary().line)
 			}
 		}
 	}
@@ -1062,10 +1062,10 @@ func TestDiffViewSearchHighlightsMatchedCellsOnly(t *testing.T) {
 	// Row layout for twoHunkFile: file header(0), hunk header(1),
 	// " line1"(2), "-old2"(3), "+new2"(4) — the only line "new2" matches.
 	row := dv.rows[4]
-	if row.kind != rowKindLine || row.line != 2 {
+	if row.kind != rowKindLine || row.primary().line != 2 {
 		t.Fatalf("rows[4] = %+v, want the +new2 line (hunk 0, line index 2)", row)
 	}
-	gw := SpanWidth(row.gutter)
+	gw := SpanWidth(row.primary().gutter)
 
 	x, y, _, _ := dv.GetRect()
 	for i := range 4 { // "new2" is 4 runes wide
@@ -1122,10 +1122,10 @@ func TestDiffViewSearchCurrentHighlightsOnlyTheCurrentMatch(t *testing.T) {
 	// Row layout for repeatedMatchFile: file header(0), hunk header(1),
 	// "+foo bar foo"(2).
 	row := dv.rows[2]
-	if row.kind != rowKindLine || row.hunk != 0 || row.line != 0 {
+	if row.kind != rowKindLine || row.hunk != 0 || row.primary().line != 0 {
 		t.Fatalf("rows[2] = %+v, want the +foo bar foo line (hunk 0, line index 0)", row)
 	}
-	gw := SpanWidth(row.gutter)
+	gw := SpanWidth(row.primary().gutter)
 	x, y, _, _ := dv.GetRect()
 
 	matchFg, _, _ := theme.SearchMatch.Decompose()
@@ -1498,7 +1498,7 @@ func TestDiffViewCursorRowIsFramedAndKeepsKindTint(t *testing.T) {
 	screen := newTestScreen(t, 60, 20)
 	dv.Draw(screen)
 	// Cursor starts on the first selectable row; move to the "+new2" line.
-	for dv.rows[dv.selectable[dv.cursor]].lineKind != diff.Add {
+	for dv.rows[dv.selectable[dv.cursor]].primary().kind != diff.Add {
 		dv.MoveBy(1)
 	}
 	dv.Draw(screen)
@@ -1507,7 +1507,7 @@ func TestDiffViewCursorRowIsFramedAndKeepsKindTint(t *testing.T) {
 	for i := 0; i < dv.selectable[dv.cursor]; i++ {
 		y += dv.rows[i].lineCount()
 	}
-	gw := SpanWidth(dv.rows[dv.selectable[dv.cursor]].gutter)
+	gw := SpanWidth(dv.rows[dv.selectable[dv.cursor]].primary().gutter)
 	_, addBG, _ := theme.DiffLineStyle(diff.Add, false).Decompose()
 
 	for _, x := range []int{0, 59} {
@@ -1538,7 +1538,7 @@ func TestDiffViewTintSpansReservedColumns(t *testing.T) {
 
 	y, found := 0, false
 	for i, row := range dv.rows {
-		if row.kind == rowKindLine && row.lineKind == diff.Add && i != dv.selectable[dv.cursor] {
+		if row.kind == rowKindLine && row.primary().kind == diff.Add && i != dv.selectable[dv.cursor] {
 			found = true
 			break
 		}
