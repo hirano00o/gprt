@@ -16,7 +16,7 @@ var descriptions = map[Action]string{
 	ActionListHalfUp:           "Move up half a page",
 	ActionListPageDown:         "Move down a page",
 	ActionListPageUp:           "Move up a page",
-	ActionListFilter:           "Filter the PR list",
+	ActionListFilter:           "Filter the PR list (see Filter below)",
 	ActionListOpen:             "Open the selected item",
 	ActionListNewPR:            "Create a pull request",
 	ActionGlobalFocusLeft:      "Focus the previous pane",

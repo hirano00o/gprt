@@ -54,7 +54,7 @@ go build ./cmd/gprt
 gprt
 ```
 
-The list on the left shows your pull requests. Move with `j`/`k`, open one with `Enter` (the list hides to give it the full width; `Ctrl-w h` brings it back), and switch between the **PR** tab and the **Files** tab with `gt`/`gT`. Press `?` at any time for the key reference, `:` for commands, and `q` to quit.
+The list on the left shows your pull requests. Move with `j`/`k`, open one with `Enter` (the list hides to give it the full width; `Ctrl-w h` brings it back), and switch between the **PR** tab and the **Files** tab with `gt`/`gT`. Press `?` at any time for the key reference, `:` for commands, and `q` to quit. The filter syntax (`repo:`, `author:`, …), every `:` command, and the keys inside dialogs and forms are described in [docs/USAGE.md](docs/USAGE.md).
 
 | Flag | Effect |
 |------|--------|
@@ -106,7 +106,7 @@ All keys below except the editor's own can be remapped. The full reference, incl
 | `Ctrl-w o` | Show or hide the PR list |
 | `o` | Open the current item in the browser |
 | `R` | Reload, ignoring the cache |
-| `:` | Command line: `:merge`, `:close`, `:reopen`, `:ready`, `:reload`, `:messages`, `:help`, `:q` |
+| `:` | Command line: `:merge`, `:close`, `:reopen`, `:ready`, `:reload`, `:messages`, `:help`, `:q` / `:quit`; `Up` / `Down` recall history ([details](docs/USAGE.md#commands)) |
 | `?` | Help (`/` inside it searches the binding list, `n` / `N` cycle matches) |
 | `q`, `Ctrl-c` | Close the open dialog, or quit |
 
@@ -115,7 +115,7 @@ All keys below except the editor's own can be remapped. The full reference, incl
 | Key | Action |
 |-----|--------|
 | `Enter`, `l` | Open the pull request and hide the list (`Ctrl-w h` or `Ctrl-w o` shows it again) |
-| `/` | Filter the list (`Esc` clears) |
+| `/` | Filter the list as you type, with `repo:`, `author:`, `reviewer:`, `label:`, `state:` or free text (`Enter` keeps, `Esc` clears; [syntax](docs/USAGE.md#filtering-the-list)) |
 | `n` | Create a pull request |
 
 ### PR tab
@@ -135,6 +135,8 @@ All keys below except the editor's own can be remapped. The full reference, incl
 | Key | Action |
 |-----|--------|
 | `Enter`, `l` | Open the file under the cursor (in the tree) |
+| `h` | Collapse the directory, or go to its parent (in the tree; fixed) |
+| `K` / `J` | Go to the parent / the last child (in the tree; fixed) |
 | `Enter` | On a collapsed region (`⋯ N lines hidden ⋯`), expand it |
 | `Ctrl-w t` | Show or hide the file tree |
 | `V` | Select lines for a range comment (`V` again or `Esc` cancels) |

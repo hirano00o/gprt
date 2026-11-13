@@ -1,6 +1,6 @@
 # Keybindings
 
-Reference for gprt's default keybindings. This is the source for the in-app `?` help screen.
+Reference for gprt's default keybindings. The in-app `?` help screen is generated from the keymap itself (effective bindings and `keys.Action.Description()`), followed by hand-maintained sections for the list filter, `:` commands, and the fixed Files tree keys (`helpStaticLines` in `internal/ui/overlay.go`). The list filter syntax, the `:` commands, and the dialog and form keys are described for users in [USAGE.md](USAGE.md).
 
 ## Status
 
@@ -110,7 +110,7 @@ Entered via `global.command` (`:`), these exist only as typed commands, never as
 | `:quit` | Quit (alias of `:q`) | Done (M1a) |
 | `:reload` | Discard cached data and re-fetch every section (same as `R`) | Done (M1a) |
 
-An unrecognized command shows an error toast instead of doing nothing silently.
+An unrecognized command shows an error toast instead of doing nothing silently. In the command line, `Up` / `Down` recall earlier commands (`App.historyPrev` / `historyNext`) and `Esc` cancels.
 
 ## Vim editor keys (composer, fixed — not remappable)
 
