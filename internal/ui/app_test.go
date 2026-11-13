@@ -131,6 +131,7 @@ type fakeGitHub struct {
 
 	viewerRepositories      []model.RepositorySummary
 	viewerRepositoriesErr   error
+	viewerRepositoriesBlock chan struct{}
 	createPullRequestCalls  []createPullRequestCall
 	createPullRequestErr    error
 	createPullRequestResult model.PullRequest
@@ -1015,7 +1016,27 @@ func (f *fakeGitHub) SetViewerRepositoriesError(err error) {
 	f.viewerRepositoriesErr = err
 }
 
-func (f *fakeGitHub) ViewerRepositories(context.Context, int) ([]model.RepositorySummary, model.RateLimit, error) {
+// SetViewerRepositoriesBlock arms (or, passed nil, disarms) a gate every
+// subsequent ViewerRepositories call waits on before returning — used to
+// hold the create form's repository list "in flight" so a test controls
+// exactly when it resolves.
+func (f *fakeGitHub) SetViewerRepositoriesBlock(ch chan struct{}) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.viewerRepositoriesBlock = ch
+}
+
+func (f *fakeGitHub) ViewerRepositories(ctx context.Context, _ int) ([]model.RepositorySummary, model.RateLimit, error) {
+	f.mu.Lock()
+	block := f.viewerRepositoriesBlock
+	f.mu.Unlock()
+	if block != nil {
+		select {
+		case <-block:
+		case <-ctx.Done():
+			return nil, model.RateLimit{}, ctx.Err()
+		}
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.viewerRepositoriesErr != nil {

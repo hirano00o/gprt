@@ -326,7 +326,9 @@ func (a *App) editFormReviewersButtonText() string {
 // rule: a timer callback only ever dispatches into a store call). Its own
 // callback, delivered already on the UI goroutine, updates
 // editFormBranchSuggestions/editFormBranchLastQuery and re-invokes
-// InputField.Autocomplete() to refresh the popup with the new results.
+// InputField.Autocomplete() to refresh the popup with the new results —
+// unless the field lost focus or the user closed the drop-down with Esc
+// since the search started (refreshAutocompleteIfWanted).
 //
 // editFormBranchLastQuery guards against that very re-invocation:
 // InputField.Autocomplete() unconditionally calls this same function again
@@ -345,6 +347,7 @@ func (a *App) editFormBranchAutocomplete(text string) []string {
 		a.editFormBranchTimer.Stop()
 	}
 	repo := a.editFormRepo
+	dismissals := a.editFormBranchDismissals
 	a.editFormBranchTimer = time.AfterFunc(editFormBranchDebounce, func() {
 		a.app.QueueUpdateDraw(func() {
 			a.deps.Store.SearchBranches(repo, text, func(branches []model.Branch, err error) {
@@ -357,7 +360,7 @@ func (a *App) editFormBranchAutocomplete(text string) []string {
 				}
 				a.editFormBranchSuggestions = names
 				a.editFormBranchLastQuery = text
-				a.editFormBaseField.Autocomplete()
+				refreshAutocompleteIfWanted(a.app, a.editFormBaseField, dismissals == a.editFormBranchDismissals)
 			})
 		})
 	})
@@ -633,6 +636,7 @@ func (a *App) routeEditFormKey(ev *tcell.EventKey, normalized []keys.Key) *tcell
 		if isEscKey(k) {
 			if suggesting {
 				a.editFormBaseSuggesting = false
+				a.editFormBranchDismissals++
 				return ev
 			}
 			a.cancelEditForm()

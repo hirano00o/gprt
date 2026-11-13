@@ -84,6 +84,19 @@ func wrapFormAutocomplete(shown *bool, fn func(text string) []string) func(strin
 	}
 }
 
+// refreshAutocompleteIfWanted re-runs field's autocomplete for suggestions
+// that arrived asynchronously, but only while field has focus and wanted
+// holds (the caller's own "the user has not dismissed this drop-down since"
+// check). InputField.Autocomplete() would otherwise reopen a drop-down the
+// user closed with Esc, so the next Tab moves through its candidates
+// instead of to the next field, or build one on a field without focus that
+// then reappears, untracked by the router, when focus returns.
+func refreshAutocompleteIfWanted(app *tview.Application, field *tview.InputField, wanted bool) {
+	if wanted && app.GetFocus() == field {
+		field.Autocomplete()
+	}
+}
+
 // wireFormAutocomplete registers fn as field's own SetAutocompleteFunc
 // (wrapped by wrapFormAutocomplete so *shown tracks it) and pairs it with
 // a SetAutocompletedFunc callback, the one hook that can tell a genuine

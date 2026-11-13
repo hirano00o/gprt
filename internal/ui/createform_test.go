@@ -1116,6 +1116,83 @@ func TestCreateFormArrowKeysMoveBetweenTitleAndDraft(t *testing.T) {
 	}
 }
 
+// TestCreateFormRepoListArrivingAfterEscKeepsDropDownClosed: the viewer's
+// repositories resolving after the user already dismissed the Repository
+// drop-down with Esc must not reopen it, or the next Tab would move through
+// the reappeared candidates instead of to the Head field.
+func TestCreateFormRepoListArrivingAfterEscKeepsDropDownClosed(t *testing.T) {
+	app, _, fake, _ := newTestApp(t, nil)
+	repo := model.RepoRef{Host: "github.com", Owner: "acme", Name: "widgets"}
+	fake.SetViewerRepositories([]model.RepositorySummary{{Ref: repo, ID: "R_1", DefaultBranch: "main"}})
+	block := make(chan struct{})
+	fake.SetViewerRepositoriesBlock(block)
+
+	openCreateFormDismissingRepoAutocomplete(t, app)
+	close(block)
+	waitFor(t, app.app, func() bool { return app.deps.Store.ViewerRepositories() != nil })
+
+	sendSpecial(app.app, tcell.KeyTab)
+	if item, _ := formFocusIndex(app.app, app.createForm); item != 1 {
+		t.Fatalf("focused form item after Tab = %d, want 1 (Head)", item)
+	}
+}
+
+// TestCreateFormHeadResultsAfterEscKeepDropDownClosed: a branch search
+// still in flight when the user dismisses the Head drop-down with Esc must
+// not reopen it when it resolves, or the next Tab would move through the
+// candidates instead of to the Base field.
+func TestCreateFormHeadResultsAfterEscKeepDropDownClosed(t *testing.T) {
+	old := createFormBranchDebounce
+	createFormBranchDebounce = 5 * time.Millisecond
+	t.Cleanup(func() { createFormBranchDebounce = old })
+
+	app, _, fake, _ := newTestApp(t, nil)
+	repo := model.RepoRef{Host: "github.com", Owner: "acme", Name: "widgets"}
+	fake.SetViewerRepositories([]model.RepositorySummary{{Ref: repo, ID: "R_1", DefaultBranch: "main"}})
+	fake.SetBranches("f", []model.Branch{{Name: "feature"}})
+	fake.SetBranches("fx", []model.Branch{{Name: "fix"}})
+
+	openCreateFormDismissingRepoAutocomplete(t, app)
+	act(app.app, func() { app.createFormRepoField.SetText("acme/widgets") })
+	sendSpecial(app.app, tcell.KeyTab)
+	waitFor(t, app.app, func() bool { return app.app.GetFocus() == app.createFormHeadField })
+
+	sendRune(app.app, 'f')
+	waitFor(t, app.app, func() bool { return app.createFormHeadSuggesting })
+	block := make(chan struct{})
+	fake.SetBranchesBlock(block)
+	sendRune(app.app, 'x') // "fx" stays blocked, whether or not its debounce fired yet
+	sendSpecial(app.app, tcell.KeyEsc)
+	close(block)
+	waitFor(t, app.app, func() bool { return app.createFormHeadLastQuery == "fx" })
+
+	sendSpecial(app.app, tcell.KeyTab)
+	if got := query(app.app, func() bool { return app.app.GetFocus() == app.createFormBaseField }); !got {
+		t.Fatal("Tab after dismissing the Head drop-down must move focus to the Base field")
+	}
+}
+
+// TestCreateFormRepoListArrivingWhileShownRefreshesDropDown: while the
+// Repository drop-down still shows the "(loading repositories…)"
+// placeholder, the list resolving replaces it with the real candidates.
+func TestCreateFormRepoListArrivingWhileShownRefreshesDropDown(t *testing.T) {
+	app, _, fake, _ := newTestApp(t, nil)
+	repo := model.RepoRef{Host: "github.com", Owner: "acme", Name: "widgets"}
+	fake.SetViewerRepositories([]model.RepositorySummary{{Ref: repo, ID: "R_1", DefaultBranch: "main"}})
+	block := make(chan struct{})
+	fake.SetViewerRepositoriesBlock(block)
+
+	sendRune(app.app, 'n')
+	waitFor(t, app.app, func() bool { return app.createForm != nil })
+	close(block)
+	waitFor(t, app.app, func() bool { return app.deps.Store.ViewerRepositories() != nil })
+
+	sendSpecial(app.app, tcell.KeyEnter) // selects the highlighted candidate
+	if got := query(app.app, func() string { return app.createFormRepoField.GetText() }); got != "acme/widgets" {
+		t.Fatalf("repo field text after Enter = %q, want the refreshed candidate %q", got, "acme/widgets")
+	}
+}
+
 // TestCreateFormCtrlIMovesToTheNextField: a CSI-u terminal reports Ctrl-I as
 // KeyCtrlI, where a legacy one sends Tab, and the form only reacts to KeyTab.
 func TestCreateFormCtrlIMovesToTheNextField(t *testing.T) {
