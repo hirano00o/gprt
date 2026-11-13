@@ -40,6 +40,7 @@ var descriptions = map[Action]string{
 	ActionDiffFoldAll:          "Fold all threads",
 	ActionDiffScrollLeft:       "Scroll left",
 	ActionDiffScrollRight:      "Scroll right",
+	ActionDiffToggleWrap:       "Toggle line wrapping",
 	ActionDiffNextThread:       "Jump to the next thread",
 	ActionDiffPrevThread:       "Jump to the previous thread",
 	ActionDiffNextFile:         "Jump to the next file",

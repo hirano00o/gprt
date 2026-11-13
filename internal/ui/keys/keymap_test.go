@@ -312,3 +312,42 @@ func TestAllActionsContainsDiffSearch(t *testing.T) {
 		}
 	}
 }
+
+func TestKeymapDisplaySequence(t *testing.T) {
+	tests := []struct {
+		name, seq, want string
+	}{
+		{"default", "", "w"},
+		{"multi-key", "zw", "zw"},
+		{"special key first", "<Space>w", "<Space>w"},
+		{"alias shown normalised", "<C-i>", "<Tab>"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			km := Defaults()
+			if tc.seq != "" {
+				var err error
+				km, err = Merge(km, map[string]string{string(ActionDiffToggleWrap): tc.seq})
+				if err != nil {
+					t.Fatalf("Merge: %v", err)
+				}
+			}
+			got, ok := km.DisplaySequence(ContextDiff, ActionDiffToggleWrap)
+			if !ok || got != tc.want {
+				t.Errorf("DisplaySequence = %q, %v; want %q, true (no NUL separators)", got, ok, tc.want)
+			}
+		})
+	}
+	if _, ok := Defaults().DisplaySequence(ContextList, ActionDiffToggleWrap); ok {
+		t.Error("DisplaySequence found a diff action in the list context")
+	}
+}
+
+func TestMergeNewDefaultKeyConflictsLoudly(t *testing.T) {
+	// An override colliding with a default (here diff.toggle_wrap's "w") is
+	// reported, not silently resolved in either's favour.
+	_, err := Merge(Defaults(), map[string]string{"diff.comment": "w"})
+	if err == nil || !strings.Contains(err.Error(), `"w"`) {
+		t.Errorf("Merge error = %v, want one naming the conflicting \"w\"", err)
+	}
+}

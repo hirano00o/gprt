@@ -177,6 +177,24 @@ host: github.example.com
 	if got.List.State != def.List.State {
 		t.Errorf("List.State = %q, want default %q", got.List.State, def.List.State)
 	}
+	if got.Diff.Wrap != def.Diff.Wrap {
+		t.Errorf("Diff.Wrap = %v, want default %v", got.Diff.Wrap, def.Diff.Wrap)
+	}
+}
+
+func TestLoad_DiffWrap(t *testing.T) {
+	path := writeConfigFile(t, `
+diff:
+  wrap: true
+`)
+
+	got, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if !got.Diff.Wrap {
+		t.Error("Diff.Wrap = false, want true")
+	}
 }
 
 func TestLoad_UnknownKeyRejected(t *testing.T) {

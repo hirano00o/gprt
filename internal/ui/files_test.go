@@ -12,6 +12,7 @@ import (
 	"github.com/rivo/tview"
 
 	"github.com/hirano00o/gprt/internal/browser"
+	"github.com/hirano00o/gprt/internal/config"
 	"github.com/hirano00o/gprt/internal/gh"
 	"github.com/hirano00o/gprt/internal/model"
 	"github.com/hirano00o/gprt/internal/store"
@@ -130,7 +131,14 @@ func fixtureFilesPR(ref model.PRRef) model.PullRequest {
 // waits for its first page of files to load.
 func openFilesTabForFixture(t *testing.T) (*App, *fakeGitHub, tcell.SimulationScreen, model.PRRef) {
 	t.Helper()
-	app, _, fake, screen := newTestApp(t, nil)
+	return openFilesTabForFixtureWith(t, nil, testAppOpts{})
+}
+
+// openFilesTabForFixtureWith is openFilesTabForFixture with key overrides and
+// app options.
+func openFilesTabForFixtureWith(t *testing.T, overrides map[string]string, opts testAppOpts) (*App, *fakeGitHub, tcell.SimulationScreen, model.PRRef) {
+	t.Helper()
+	app, _, fake, screen := newTestAppWith(t, overrides, opts)
 	ref := fixtureRef(1)
 	fake.SetPRResult(ref, gh.DetailResult{PR: fixtureFilesPR(ref)})
 	fake.SetFilesPages(ref, fixtureFilesPages())
@@ -995,6 +1003,63 @@ func TestFilesTabHorizontalScroll(t *testing.T) {
 	waitFor(t, app.app, func() bool { return app.diffView.HOffset() == 0 })
 }
 
+func TestFilesTabWTogglesWrap(t *testing.T) {
+	app, _, screen, _ := openFilesTabForFixture(t)
+	waitFor(t, app.app, func() bool {
+		app.app.ForceDraw()
+		return containsSubstring(diffText(app, screen), "@@ -1,4 +1,5 @@")
+	})
+	focusDiffView(t, app)
+
+	sendRune(app.app, 'w')
+	waitFor(t, app.app, func() bool { return app.diffView.Wrap() })
+
+	// With wrapping on, "zl" must neither scroll nor store an offset, and
+	// says why.
+	sendRune(app.app, 'z')
+	sendRune(app.app, 'l')
+	waitFor(t, app.app, func() bool { return containsSubstring(app.statusBar.toast, "while wrapping") })
+
+	sendRune(app.app, 'w')
+	waitFor(t, app.app, func() bool { return !app.diffView.Wrap() })
+	if got := query(app.app, func() int { return app.diffView.HOffset() }); got != 0 {
+		t.Errorf("HOffset() = %d after unwrapping, want 0: zl while wrapped must not store an offset", got)
+	}
+}
+
+func TestFilesTabWrapScrollToastNamesTheRemappedKey(t *testing.T) {
+	tests := []struct {
+		name, seq string
+		keys      []rune
+		scroll    rune // second key of zl/zh: both directions must toast
+		want      string
+	}{
+		{"single key", "W", []rune{'W'}, 'l', "(W to unwrap)"},
+		{"multi key", "zw", []rune{'z', 'w'}, 'h', "(zw to unwrap)"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			app, _, _, _ := openFilesTabForFixtureWith(t, map[string]string{"diff.toggle_wrap": tc.seq}, testAppOpts{})
+			focusDiffView(t, app)
+
+			for _, r := range tc.keys {
+				sendRune(app.app, r)
+			}
+			waitFor(t, app.app, func() bool { return app.diffView.Wrap() })
+			sendRune(app.app, 'z')
+			sendRune(app.app, tc.scroll)
+			waitFor(t, app.app, func() bool { return containsSubstring(app.statusBar.toast, tc.want) })
+		})
+	}
+}
+
+func TestFilesTabOpensWrappedWhenConfigured(t *testing.T) {
+	app, _, _, _ := openFilesTabForFixtureWith(t, nil, testAppOpts{config: func(c *config.Config) { c.Diff.Wrap = true }})
+	if got := query(app.app, func() bool { return app.diffView.Wrap() }); !got {
+		t.Error("diff.wrap: true did not start the diff view wrapped")
+	}
+}
+
 func TestFilesTabCtrlWtHidesTree(t *testing.T) {
 	app, _, _, _ := openFilesTabForFixture(t)
 
@@ -1074,7 +1139,7 @@ func TestFilesTabDiffHintReflectsTreeVisibility(t *testing.T) {
 	sendRune(app.app, 'l')
 	waitFor(t, app.app, func() bool { return app.app.GetFocus() == app.diffView })
 
-	const expandedWant = "j/k move  V select  za fold  ]c/[c thread  ]f/[f file  zh/zl scroll  o browser  Ctrl-w h tree  Ctrl-w t hide tree  gt/Ctrl-l next tab  ? help  q quit"
+	const expandedWant = "j/k move  V select  za fold  ]c/[c thread  ]f/[f file  zh/zl scroll  w wrap  o browser  Ctrl-w h tree  Ctrl-w t hide tree  gt/Ctrl-l next tab  ? help  q quit"
 	expandedHint := query(app.app, func() string { return app.statusBar.hint })
 	if expandedHint != expandedWant {
 		t.Fatalf("hint with the tree visible = %q, want %q", expandedHint, expandedWant)
@@ -1084,7 +1149,7 @@ func TestFilesTabDiffHintReflectsTreeVisibility(t *testing.T) {
 	sendRune(app.app, 't')
 	waitFor(t, app.app, func() bool { return !app.treeExpanded })
 
-	const hiddenWant = "j/k move  V select  za fold  ]c/[c thread  ]f/[f file  zh/zl scroll  o browser  Ctrl-w t show tree  Ctrl-w h list  gt/Ctrl-l next tab  ? help  q quit"
+	const hiddenWant = "j/k move  V select  za fold  ]c/[c thread  ]f/[f file  zh/zl scroll  w wrap  o browser  Ctrl-w t show tree  Ctrl-w h list  gt/Ctrl-l next tab  ? help  q quit"
 	hiddenHint := query(app.app, func() string { return app.statusBar.hint })
 	if hiddenHint != hiddenWant {
 		t.Errorf("hint with the tree hidden = %q, want %q", hiddenHint, hiddenWant)
