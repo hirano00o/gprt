@@ -126,15 +126,18 @@ const (
 // is as tall as its tallest half.
 type diffHalf struct {
 	// line indexes DiffFile.Hunks[row.hunk].Lines (never OldNo/NewNo, which
-	// are not unique per line); -1 marks a blank column that anchors no line.
+	// are not unique per line).
 	line    int
 	kind    diff.LineKind
 	gutter  []Span
 	content [][]Span
+	// truncated reports that text past the last content line was dropped
+	// at rebuild (see maxWrapLines).
+	truncated bool
 }
 
-// diffRow is one row of DiffView's rebuilt content. Only rowKindLine and
-// rowKindThreadHeader are selectable. rowKindLine rows carry their
+// diffRow is one row of DiffView's rebuilt content. Only rowKindLine,
+// rowKindThreadHeader and rowKindGap are selectable. rowKindLine rows carry their
 // columns in halves; every other kind uses the generic, possibly-multi-line
 // lines field instead.
 type diffRow struct {
@@ -185,6 +188,16 @@ func (r diffRow) lineCount() int {
 		return n
 	}
 	return len(r.lines)
+}
+
+// displayLines is how many screen lines r takes in a pane height lines tall:
+// lineCount, except a line row never exceeds the pane (see drawLineRow's
+// ellipsis), since the view cannot scroll inside a row.
+func (r diffRow) displayLines(height int) int {
+	if r.kind == rowKindLine {
+		return min(r.lineCount(), max(height, 1))
+	}
+	return r.lineCount()
 }
 
 // diffRowKey identifies a selectable row's logical identity, stable across
@@ -251,6 +264,10 @@ type DiffView struct {
 
 	hOffset    int
 	maxHOffset int
+
+	// wrap soft-wraps long diff lines onto continuation display lines
+	// instead of truncating them; see SetWrap.
+	wrap bool
 
 	// resetCursor tells the next rebuild to skip its usual by-identity
 	// cursor restore (diffRowKey) entirely, set by SetFile when the file's
@@ -531,20 +548,20 @@ func (dv *DiffView) MoveBottom() { dv.setCursor(len(dv.selectable) - 1) }
 // matching widget.ListView.MoveHalfPage's own semantics.
 func (dv *DiffView) MoveHalfPage(dir int) {
 	_, _, _, height := dv.GetInnerRect()
-	dv.moveByDisplayLines(dir, height/2)
+	dv.moveByDisplayLines(dir, height/2, height)
 }
 
 // MovePage moves the cursor by a full page instead of half; otherwise
 // identical to MoveHalfPage.
 func (dv *DiffView) MovePage(dir int) {
 	_, _, _, height := dv.GetInnerRect()
-	dv.moveByDisplayLines(dir, height)
+	dv.moveByDisplayLines(dir, height, height)
 }
 
 // moveByDisplayLines is MoveHalfPage/MovePage's shared walk: it moves the
 // cursor by however many selectable rows together span roughly target
-// display lines.
-func (dv *DiffView) moveByDisplayLines(dir, target int) {
+// display lines in a pane height lines tall.
+func (dv *DiffView) moveByDisplayLines(dir, target, height int) {
 	if len(dv.selectable) == 0 {
 		return
 	}
@@ -564,7 +581,7 @@ func (dv *DiffView) moveByDisplayLines(dir, target int) {
 		if idx < 0 || idx >= len(dv.rows) {
 			break
 		}
-		lines += dv.rows[idx].lineCount()
+		lines += dv.rows[idx].displayLines(height)
 		if dv.rows[idx].selectable() {
 			steps++
 		}
@@ -724,16 +741,48 @@ func (dv *DiffView) CursorGap() (gapStart int, ok bool) {
 	return row.gapStart, true
 }
 
+// SetWrap turns soft-wrapping of long diff lines on or off. While on, a line
+// wider than its content width (the pane less its own gutter) is chopped
+// into several display lines instead of truncated, and one taller than the
+// pane is capped at the pane height with a trailing "…". Horizontal scrolling
+// is suspended while on; turning wrap off restores the earlier position.
+func (dv *DiffView) SetWrap(wrap bool) {
+	dv.wrap = wrap
+	dv.lastWidth = -1
+}
+
+// ToggleWrap flips SetWrap's state.
+func (dv *DiffView) ToggleWrap() {
+	dv.SetWrap(!dv.wrap)
+}
+
+// Wrap reports whether soft-wrapping is on.
+func (dv *DiffView) Wrap() bool {
+	return dv.wrap
+}
+
 // ScrollHorizontal adjusts the diff content's horizontal scroll position by
 // delta cells (zh/zl), clamped to [0, the longest line's overflow past the
-// last-drawn content width].
-func (dv *DiffView) ScrollHorizontal(delta int) {
+// last-drawn content width]. While wrapping scrolling is suspended: it
+// changes nothing (the stored position is kept for when wrapping is turned
+// off) and reports false.
+func (dv *DiffView) ScrollHorizontal(delta int) bool {
+	if dv.wrap {
+		return false
+	}
 	dv.hOffset = clamp(dv.hOffset+delta, 0, dv.maxHOffset)
+	return true
 }
 
 // HOffset returns the diff content's current horizontal scroll position, in
-// cells (0 when not scrolled).
-func (dv *DiffView) HOffset() int { return dv.hOffset }
+// cells (0 when not scrolled, and always 0 while wrapping, though the
+// scrolled position is remembered and returns once wrapping is turned off).
+func (dv *DiffView) HOffset() int {
+	if dv.wrap {
+		return 0
+	}
+	return dv.hOffset
+}
 
 // ensureVisible adjusts offset so the cursor's row is fully within the
 // view's current height, matching widget.ListView.ensureVisible.
@@ -755,7 +804,7 @@ func (dv *DiffView) ensureVisible() {
 	for dv.offset < cursorRow {
 		lines := 0
 		for i := dv.offset; i <= cursorRow; i++ {
-			lines += dv.rows[i].lineCount()
+			lines += dv.rows[i].displayLines(height)
 		}
 		if lines <= height {
 			return
@@ -774,6 +823,9 @@ func (dv *DiffView) Draw(screen tcell.Screen) {
 		dv.rebuild(width)
 		dv.lastWidth = width
 	}
+	// Rows are clamped to the pane height at draw time, so a height change
+	// needs no rebuild, only the cursor row kept in view.
+	dv.ensureVisible()
 	if width <= 0 || height <= 0 {
 		return
 	}
@@ -794,13 +846,13 @@ func (dv *DiffView) Draw(screen tcell.Screen) {
 		bgStyle := theme.DiffLineStyle(half.kind, isSelectedRow)
 		_, bg, _ := bgStyle.Decompose()
 
-		n := row.lineCount()
+		n := row.displayLines(height)
 		for pl := 0; pl < n && line < y+height; pl++ {
 			for cx := fx; cx < fx+fullWidth; cx++ {
 				screen.SetContent(cx, line, ' ', nil, bgStyle)
 			}
 			if row.kind == rowKindLine {
-				dv.drawLineRow(screen, x, line, width, row, bg)
+				dv.drawLineRow(screen, x, line, width, height, row, pl, bg)
 			} else if pl < len(row.lines) {
 				DrawSpans(screen, x, line, width, withBackground(row.lines[pl], bg))
 			}
@@ -812,24 +864,34 @@ func (dv *DiffView) Draw(screen tcell.Screen) {
 	}
 }
 
-// drawLineRow draws one rowKindLine row: its gutter (never scrolled), then
-// its content with the horizontal-scroll offset applied, with a "‹" marker
-// when scrolled.
-func (dv *DiffView) drawLineRow(screen tcell.Screen, x, y, width int, row diffRow, bg tcell.Color) {
+// drawLineRow draws physical line pl of one rowKindLine row: on the first
+// line its gutter (never scrolled), then the half's content line pl with the
+// horizontal-scroll offset applied, with a "‹" marker when scrolled.
+// Continuation lines (pl > 0) leave the gutter blank on the row background,
+// and a half with fewer lines than pl draws nothing. When the row is cut
+// short (to the pane height, or at rebuild) its last drawn line ends with a
+// muted "…".
+func (dv *DiffView) drawLineRow(screen tcell.Screen, x, y, width, height int, row diffRow, pl int, bg tcell.Color) {
 	half := row.primary()
+	if pl >= len(half.content) {
+		return
+	}
 	gutterSpans := withBackground(half.gutter, bg)
 	gw := SpanWidth(half.gutter)
 	if gw > width {
 		gw = width
 	}
-	DrawSpans(screen, x, y, gw, gutterSpans)
+	if pl == 0 {
+		DrawSpans(screen, x, y, gw, gutterSpans)
+	}
 	if gw >= width {
 		return
 	}
 
 	contentX := x + gw
 	contentWidth := width - gw
-	if dv.hOffset > 0 {
+	hOffset := dv.HOffset()
+	if hOffset > 0 {
 		markerStyle := theme.Muted.Background(bg)
 		screen.SetContent(contentX, y, '‹', nil, markerStyle)
 		contentX++
@@ -838,7 +900,30 @@ func (dv *DiffView) drawLineRow(screen tcell.Screen, x, y, width int, row diffRo
 	if contentWidth <= 0 {
 		return
 	}
-	DrawSpansOffset(screen, contentX, y, contentWidth, dv.hOffset, withBackground(half.content[0], bg))
+	DrawSpansOffset(screen, contentX, y, contentWidth, hOffset, withBackground(half.content[pl], bg))
+	if shown := row.displayLines(height); pl == shown-1 && (len(half.content) > shown || half.truncated) {
+		drawCutEllipsis(screen, contentX+contentWidth-1, y, half.content[pl], contentWidth, bg)
+	}
+}
+
+// drawCutEllipsis draws "…" in the content's last cell, x. The line starts at
+// x-(width-1); if a double-width rune of it covers x, its left cell is
+// blanked so no half rune is left beside the ellipsis.
+func drawCutEllipsis(screen tcell.Screen, x, y int, line []Span, width int, bg tcell.Color) {
+	col := 0
+scan:
+	for _, s := range line {
+		for _, c := range spanCells(s) {
+			if col >= width-1 {
+				break scan
+			}
+			if c.width == 2 && col+1 == width-1 {
+				screen.SetContent(x-1, y, ' ', nil, theme.Muted.Background(bg))
+			}
+			col += c.width
+		}
+	}
+	screen.SetContent(x, y, ellipsisRune, nil, theme.Muted.Background(bg))
 }
 
 // rebuild recomputes every row of the current file at width, preserving the
@@ -867,8 +952,17 @@ func (dv *DiffView) rebuild(width int) {
 			dv.selectable = append(dv.selectable, i)
 		}
 	}
-	dv.maxHOffset = maxHOffsetFor(b.longestContent, b.contentWidth)
-	dv.hOffset = clamp(dv.hOffset, 0, dv.maxHOffset)
+	// The gutter is the same width for every line of a file bar a wider draft
+	// marker, so one sample line's gutter (blank draft column included)
+	// stands in for all of them here.
+	contentWidth := max(width-SpanWidth(gutterSpansFor(diff.Line{}, b.gutterWidth, "")), 1)
+	dv.maxHOffset = maxHOffsetFor(b.longestContent, contentWidth)
+	// While wrapping hOffset is neither applied (see HOffset) nor
+	// clamped: maxHOffset follows the pane, and a resize while wrapped must
+	// not lose the position that turning wrap off brings back.
+	if !dv.wrap {
+		dv.hOffset = clamp(dv.hOffset, 0, dv.maxHOffset)
+	}
 
 	dv.cursor = clamp(oldCursor, 0, len(dv.selectable)-1)
 	if hadSelection {
@@ -880,7 +974,6 @@ func (dv *DiffView) rebuild(width int) {
 		}
 	}
 	dv.applyPendingCursor()
-	dv.ensureVisible()
 	dv.refreshLineTracking()
 }
 
@@ -975,18 +1068,11 @@ type diffBuilder struct {
 	rows           []diffRow
 	gutterWidth    int
 	longestContent int
-
-	// contentWidth is the display width left for a diff line's content once
-	// its gutter is subtracted, never less than 1. The gutter is the same
-	// width for every line of a file, so one sample line's gutter (blank
-	// draft column included) stands in for all of them.
-	contentWidth int
 }
 
 func (b *diffBuilder) build() {
 	f := b.dv.file
 	b.gutterWidth = gutterDigitWidth(f.Hunks)
-	b.contentWidth = max(b.width-SpanWidth(gutterSpansFor(diff.Line{}, b.gutterWidth, "")), 1)
 
 	b.rows = append(b.rows, b.fileHeaderRow(f))
 
@@ -1144,16 +1230,36 @@ func (b *diffBuilder) lineHalf(f DiffFile, hunkIdx, lineIdx int, l diff.Line) di
 			content = b.dv.highlightSearchRanges(content, f.Path, hunkIdx, lineIdx, l.Text, ranges)
 		}
 	}
-	if w := SpanWidth(content); w > b.longestContent {
+	w := SpanWidth(content)
+	if w > b.longestContent {
 		b.longestContent = w
 	}
+	gutter := gutterSpansFor(l, b.gutterWidth, draftMark)
+	lines := [][]Span{content}
+	truncated := false
+	if b.dv.wrap {
+		// A drafted line's marker can make its gutter wider than the others',
+		// so each line wraps at its own width.
+		// Below 2 cells a wide rune would not fit its line at all.
+		if cw := b.width - SpanWidth(gutter); cw >= 2 && w > cw {
+			lines, truncated = chopSpansLimit(content, cw, maxWrapLines)
+		}
+	}
 	return diffHalf{
-		line:    lineIdx,
-		kind:    l.Kind,
-		gutter:  gutterSpansFor(l, b.gutterWidth, draftMark),
-		content: [][]Span{content},
+		line:      lineIdx,
+		kind:      l.Kind,
+		gutter:    gutter,
+		content:   lines,
+		truncated: truncated,
 	}
 }
+
+// maxWrapLines bounds how many display lines a wrapped line is chopped into
+// at rebuild, so a huge minified line costs only cell allocation and chunking
+// for that many lines (SpanWidth and the search regexp still scan all of it).
+// What keeps a row reachable is the pane height clamp in displayLines, not
+// this.
+const maxWrapLines = 200
 
 // highlightSearchRanges applies theme.SearchMatch to every range in ranges
 // (as returned by dv.searchRE.FindAllStringIndex against text, the line's

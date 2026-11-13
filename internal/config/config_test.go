@@ -37,6 +37,9 @@ func TestDefault(t *testing.T) {
 	if got.List.State != want.List.State {
 		t.Errorf("List.State = %q, want %q", got.List.State, want.List.State)
 	}
+	if got.Diff.Wrap {
+		t.Error("Diff.Wrap = true, want false by default")
+	}
 	if len(got.List.Sections) != 0 {
 		t.Errorf("List.Sections = %v, want empty", got.List.Sections)
 	}

@@ -74,8 +74,9 @@ The vim editor's own keys (listed at the bottom of this document) are **fixed** 
 | `za` | diff | fold the thread under the cursor | `diff.fold` | Done (M2) |
 | `zR` | diff | unfold all threads | `diff.unfold_all` | Done (M2) |
 | `zM` | diff | fold all threads | `diff.fold_all` | Done (M2) |
-| `zh` | diff | scroll left | `diff.scroll_left` | Done (M2) |
-| `zl` | diff | scroll right | `diff.scroll_right` | Done (M2) |
+| `zh` | diff | scroll left (while wrapping, toasts the key bound to `diff.toggle_wrap` instead) | `diff.scroll_left` | Done (M2) |
+| `zl` | diff | scroll right (while wrapping, toasts the key bound to `diff.toggle_wrap` instead) | `diff.scroll_right` | Done (M2) |
+| `w` | diff | toggle line wrapping | `diff.toggle_wrap` | Done |
 | `]c` | diff | jump to the next thread, crossing into the next file that has one once the current file runs out; toasts `last comment` at the very end | `diff.next_thread` | Done |
 | `[c` | diff | jump to the previous thread, crossing into the previous file that has one once the current file runs out; toasts `first comment` at the very start | `diff.prev_thread` | Done |
 | `]f` | diff | jump to the next file | `diff.next_file` | Done (M2) |

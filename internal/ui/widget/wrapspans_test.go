@@ -107,3 +107,50 @@ func TestWrapSpans_NonPositiveWidthReturnsNil(t *testing.T) {
 		t.Errorf("WrapSpans(width 0) = %+v, want nil", got)
 	}
 }
+
+func TestChopSpansLimit(t *testing.T) {
+	tests := []struct {
+		name      string
+		text      string
+		width     int
+		maxLines  int
+		want      []string
+		truncated bool
+	}{
+		{"empty is one empty line", "", 4, 3, []string{""}, false},
+		{"fits in fewer lines", "ab", 4, 3, []string{"ab"}, false},
+		{"exactly maxLines full lines", "abcdefgh", 4, 2, []string{"abcd", "efgh"}, false},
+		{"one cell over", "abcdefghi", 4, 2, []string{"abcd", "efgh"}, true},
+		{"far over stops early", repeatChar('x', 1000), 4, 2, []string{"xxxx", "xxxx"}, true},
+		{"wide rune moves to the next line", "abcあd", 4, 2, []string{"abc", "あd"}, false},
+		{"wide rune line cut by the limit", "abcあd", 4, 1, []string{"abc"}, true},
+		{"unlimited", "abcdefghij", 3, 0, []string{"abc", "def", "ghi", "j"}, false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, truncated := chopSpansLimit([]Span{{Text: tc.text}}, tc.width, tc.maxLines)
+			if !reflect.DeepEqual(linesText(got), tc.want) || truncated != tc.truncated {
+				t.Errorf("chopSpansLimit = %q, %v; want %q, %v", linesText(got), truncated, tc.want, tc.truncated)
+			}
+		})
+	}
+}
+
+func TestAppendSpanCellsStopsOnceTheBudgetIsExceeded(t *testing.T) {
+	huge := Span{Text: repeatChar('x', 1_000_000)}
+	cells, used, stopped := appendSpanCells(nil, huge, 0, 10)
+	if !stopped || used != 11 || len(cells) != 11 {
+		t.Errorf("got %d cells, used %d, stopped %v; want 11, 11, true", len(cells), used, stopped)
+	}
+	cells, _, stopped = appendSpanCells(nil, Span{Text: "abc"}, 0, 0)
+	if stopped || len(cells) != 3 {
+		t.Errorf("unbounded: got %d cells, stopped %v; want 3, false", len(cells), stopped)
+	}
+}
+
+func TestChopSpansLimitOnASingleHugeSpan(t *testing.T) {
+	lines, truncated := chopSpansLimit([]Span{{Text: repeatChar('x', 1_000_000)}}, 20, 3)
+	if !truncated || len(lines) != 3 {
+		t.Errorf("got %d lines, truncated %v; want 3, true", len(lines), truncated)
+	}
+}

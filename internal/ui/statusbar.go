@@ -110,9 +110,9 @@ func (a *App) hintForFocus() string {
 		return "j/k move  h/l collapse/expand  Enter/l open  Ctrl-w t hide tree  Ctrl-w l diff  gt/Ctrl-l next tab  ? help  q quit"
 	case a.diffView:
 		if a.treeExpanded {
-			return "j/k move  V select  za fold  ]c/[c thread  ]f/[f file  zh/zl scroll  o browser  Ctrl-w h tree  Ctrl-w t hide tree  gt/Ctrl-l next tab  ? help  q quit"
+			return "j/k move  V select  za fold  ]c/[c thread  ]f/[f file  zh/zl scroll  w wrap  o browser  Ctrl-w h tree  Ctrl-w t hide tree  gt/Ctrl-l next tab  ? help  q quit"
 		}
-		return "j/k move  V select  za fold  ]c/[c thread  ]f/[f file  zh/zl scroll  o browser  Ctrl-w t show tree  Ctrl-w h list  gt/Ctrl-l next tab  ? help  q quit"
+		return "j/k move  V select  za fold  ]c/[c thread  ]f/[f file  zh/zl scroll  w wrap  o browser  Ctrl-w t show tree  Ctrl-w h list  gt/Ctrl-l next tab  ? help  q quit"
 	case a.filterInput:
 		return "type to filter  Enter keep  Esc clear"
 	case a.cmdLine:

@@ -53,8 +53,10 @@ func rowText(r diffRow, li int) string {
 	var sb []rune
 	var spans []Span
 	switch {
-	case r.kind == rowKindLine:
+	case r.kind == rowKindLine && li == 0:
 		spans = append(append([]Span{}, r.primary().gutter...), r.primary().content[0]...)
+	case r.kind == rowKindLine && li < len(r.primary().content):
+		spans = r.primary().content[li]
 	case li < len(r.lines):
 		spans = r.lines[li]
 	}
@@ -659,11 +661,11 @@ func TestDiffViewClampsHOffsetAfterSetFileToAShorterFile(t *testing.T) {
 }
 
 // TestDiffViewMaxHOffsetReachesTheLastColumnOfTheLongestLine guards against
-// an off-by-one in rebuild's maxHOffset computation: contentWidthFor(width,
-// gutterWidth) is the content width available when hOffset == 0 (no "‹"
+// an off-by-one in rebuild's maxHOffset computation: the content width (pane less gutter)
+// is the content width available when hOffset == 0 (no "‹"
 // marker drawn yet), but drawLineRow spends one of those cells on the "‹"
 // marker as soon as hOffset > 0, so the content actually visible while
-// scrolled is one cell narrower than contentWidthFor's own return value.
+// scrolled is one cell narrower than that content width.
 // Without accounting for that, scrolling all the way to maxHOffset always
 // leaves the longest line's very last column just out of view.
 func TestDiffViewMaxHOffsetReachesTheLastColumnOfTheLongestLine(t *testing.T) {
@@ -954,6 +956,39 @@ func TestDiffViewJumpToLineMovesCursorOnceTheLineExists(t *testing.T) {
 	}
 	if line.NewNo != 2 {
 		t.Errorf("cursor line NewNo = %d, want 2 (the anchor JumpToLine was given)", line.NewNo)
+	}
+}
+
+// TestDiffViewJumpToLineScrollsTheTargetOnScreen guards that a jump resolved
+// inside rebuild (the "t"/"p" dialogs, search n/N) also scrolls the view to
+// it: Draw, not rebuild, is what brings the cursor row into view.
+func TestDiffViewJumpToLineScrollsTheTargetOnScreen(t *testing.T) {
+	var sb strings.Builder
+	sb.WriteString("@@ -1,0 +1,50 @@\n")
+	for i := 1; i <= 50; i++ {
+		fmt.Fprintf(&sb, "+added line %d\n", i)
+	}
+	hunks, err := diff.Parse(sb.String())
+	if err != nil {
+		t.Fatalf("diff.Parse: %v", err)
+	}
+	dv := NewDiffView()
+	dv.SetFile(DiffFile{Path: "pkg/long.go", Status: model.FileStatusAdded, HasPatch: true, Hunks: hunks})
+	dv.JumpToLine(model.DiffSideRight, 45)
+
+	dv.SetRect(0, 0, 60, 10)
+	screen := newTestScreen(t, 60, 10)
+	dv.Draw(screen)
+
+	var text strings.Builder
+	for y := range 10 {
+		for x := range 60 {
+			text.WriteRune(cellRune(screen, x, y))
+		}
+		text.WriteByte('\n')
+	}
+	if !strings.Contains(text.String(), "added line 45") {
+		t.Errorf("JumpToLine target is not on screen after Draw; screen:\n%s", text.String())
 	}
 }
 
@@ -1555,5 +1590,473 @@ func TestDiffViewTintSpansReservedColumns(t *testing.T) {
 		if _, bg, _ := cellStyle(screen, x, y).Decompose(); bg != addBG {
 			t.Errorf("edge cell (%d,%d) background = %v, want the Add tint %v", x, y, bg, addBG)
 		}
+	}
+}
+
+// wrapDiffView returns a DiffView showing one added line holding text,
+// drawn at w x h with wrapping on, with the cursor on that line. Its row is
+// rows[2] (file header, hunk header, line).
+func wrapDiffView(t *testing.T, text string, w, h int) (*DiffView, tcell.SimulationScreen) {
+	t.Helper()
+	hunks, err := diff.Parse("@@ -1,1 +1,1 @@\n+" + text + "\n")
+	if err != nil {
+		t.Fatalf("diff.Parse: %v", err)
+	}
+	dv := NewDiffView()
+	dv.SetWrap(true)
+	dv.SetFile(DiffFile{Path: "f.go", HasPatch: true, Hunks: hunks})
+	dv.SetRect(0, 0, w, h)
+	screen := newTestScreen(t, w, h)
+	dv.Draw(screen)
+	return dv, screen
+}
+
+// screenLine returns the runes of screen row y.
+func screenLine(screen tcell.Screen, w, y int) string {
+	rs := make([]rune, 0, w)
+	for x := range w {
+		rs = append(rs, cellRune(screen, x, y))
+	}
+	return string(rs)
+}
+
+func wrapLongText() string {
+	var sb strings.Builder
+	for i := range 100 {
+		sb.WriteByte(byte('a' + i%26))
+	}
+	return sb.String()
+}
+
+func TestDiffViewWrapChopsLongLineIntoContinuationRows(t *testing.T) {
+	text := wrapLongText()
+	dv, screen := wrapDiffView(t, text, 30, 12)
+	row := dv.rows[2]
+	if row.kind != rowKindLine || row.lineCount() < 2 {
+		t.Fatalf("row = kind %v lineCount %d, want a line row spanning several display lines", row.kind, row.lineCount())
+	}
+	gw := SpanWidth(row.primary().gutter)
+	var joined strings.Builder
+	for i, ln := range row.primary().content {
+		for _, s := range ln {
+			joined.WriteString(s.Text)
+		}
+		if i == 0 {
+			continue
+		}
+		got := []rune(screenLine(screen, 30, 2+i))
+		blank := string(got[1 : 1+gw])
+		if strings.TrimSpace(blank) != "" {
+			t.Errorf("continuation %d gutter = %q, want blank", i, blank)
+		}
+		want := ""
+		for _, s := range ln {
+			want += s.Text
+		}
+		if !strings.HasPrefix(string(got[1+gw:]), want) {
+			t.Errorf("continuation %d = %q, want it to start with %q", i, string(got[1+gw:]), want)
+		}
+	}
+	if joined.String() != text {
+		t.Errorf("content across lines = %q, want %q", joined.String(), text)
+	}
+}
+
+func TestDiffViewWrapDisablesHorizontalScroll(t *testing.T) {
+	dv, screen := wrapDiffView(t, wrapLongText(), 30, 12)
+	if dv.ScrollHorizontal(10) {
+		t.Error("ScrollHorizontal reported success while wrapping")
+	}
+	dv.Draw(screen)
+	if dv.HOffset() != 0 {
+		t.Errorf("HOffset = %d, want 0 while wrapping", dv.HOffset())
+	}
+	for y := range 12 {
+		if strings.ContainsRune(screenLine(screen, 30, y), '‹') {
+			t.Errorf("line %d shows the scroll marker while wrapping", y)
+		}
+	}
+}
+
+func TestDiffViewWrapOffStillEllipsisAndScrolls(t *testing.T) {
+	dv, screen := wrapDiffView(t, wrapLongText(), 30, 12)
+	dv.ToggleWrap()
+	if dv.Wrap() {
+		t.Fatal("ToggleWrap left wrap on")
+	}
+	dv.Draw(screen)
+	if got := dv.rows[2].lineCount(); got != 1 {
+		t.Errorf("lineCount = %d, want 1 with wrap off", got)
+	}
+	if !strings.ContainsRune(screenLine(screen, 30, 2), '…') {
+		t.Error("truncated line shows no ellipsis with wrap off")
+	}
+	dv.ScrollHorizontal(10)
+	if dv.HOffset() == 0 {
+		t.Error("ScrollHorizontal did nothing with wrap off")
+	}
+}
+
+func TestDiffViewWrapFrameOnEveryDisplayLine(t *testing.T) {
+	dv, screen := wrapDiffView(t, wrapLongText(), 30, 12)
+	for dv.rows[dv.selectable[dv.cursor]].kind != rowKindLine {
+		dv.MoveBy(1)
+	}
+	dv.Draw(screen)
+	n := dv.rows[2].lineCount()
+	if n < 2 {
+		t.Fatalf("lineCount = %d, want >= 2", n)
+	}
+	for i := range n {
+		if got := cellRune(screen, 0, 2+i); got != '┃' {
+			t.Errorf("display line %d frame = %q, want '┃'", i, got)
+		}
+	}
+}
+
+// TestDiffViewWrapSelectionTintsEveryDisplayLine guards that a V selection
+// on a wrapped line tints every display line of it, not just the first.
+func TestDiffViewWrapSelectionTintsEveryDisplayLine(t *testing.T) {
+	dv, screen := wrapDiffView(t, wrapLongText(), 30, 12)
+	for dv.rows[dv.selectable[dv.cursor]].kind != rowKindLine {
+		dv.MoveBy(1)
+	}
+	dv.StartVisual()
+	dv.Draw(screen)
+	n := dv.rows[2].lineCount()
+	if n < 2 {
+		t.Fatalf("lineCount = %d, want >= 2", n)
+	}
+	_, want, _ := theme.DiffLineStyle(diff.Add, true).Decompose()
+	for i := range n {
+		if _, bg, _ := cellStyle(screen, 15, 2+i).Decompose(); bg != want {
+			t.Errorf("display line %d background = %v, want the selection tint %v", i, bg, want)
+		}
+	}
+}
+
+func TestDiffViewWrapSearchMatchAcrossBoundary(t *testing.T) {
+	text := wrapLongText()
+	hunks, err := diff.Parse("@@ -1,1 +1,1 @@\n+" + text + "\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dv := NewDiffView()
+	dv.SetWrap(true)
+	dv.SetFile(DiffFile{Path: "f.go", HasPatch: true, Hunks: hunks})
+	dv.SetRect(0, 0, 30, 12)
+	screen := newTestScreen(t, 30, 12)
+	dv.Draw(screen) // learn the content width
+	cw := len(dv.rows[2].primary().content[0][0].Text)
+	// Match 2 cells on each side of the first wrap point.
+	dv.SetSearch(regexp.MustCompile(regexp.QuoteMeta(text[cw-2 : cw+2])))
+	dv.Draw(screen)
+
+	gw := SpanWidth(dv.rows[2].primary().gutter)
+	for _, c := range []struct{ y, x int }{{2, 1 + gw + cw - 2}, {2, 1 + gw + cw - 1}, {3, 1 + gw}, {3, 1 + gw + 1}} {
+		if _, _, attr := cellStyle(screen, c.x, c.y).Decompose(); attr&tcell.AttrReverse == 0 {
+			t.Errorf("cell (%d,%d) not Reverse", c.x, c.y)
+		}
+	}
+	if _, _, attr := cellStyle(screen, 1+gw+2, 3).Decompose(); attr&tcell.AttrReverse != 0 {
+		t.Error("cell after the match is Reverse")
+	}
+}
+
+func TestDiffViewWrapWideRuneAtBoundary(t *testing.T) {
+	dv, _ := wrapDiffView(t, "x", 30, 12)
+	contentWidth := dv.lastWidth - SpanWidth(dv.rows[2].primary().gutter)
+
+	text := repeatChar('a', contentWidth-1) + "あ" + repeatChar('b', 5)
+	dv2, _ := wrapDiffView(t, text, 30, 12)
+	lines := dv2.rows[2].primary().content
+	if len(lines) != 2 {
+		t.Fatalf("got %d display lines, want 2", len(lines))
+	}
+	for i, ln := range lines {
+		if w := SpanWidth(ln); w > contentWidth {
+			t.Errorf("line %d width %d exceeds content width %d", i, w, contentWidth)
+		}
+	}
+	if !strings.HasPrefix(spansText(lines[1]), "あ") {
+		t.Errorf("second line = %q, want it to start with the wide rune", spansText(lines[1]))
+	}
+}
+
+func TestDiffViewToggleWrapKeepsCursor(t *testing.T) {
+	dv, screen := wrapDiffView(t, wrapLongText(), 30, 12)
+	for dv.rows[dv.selectable[dv.cursor]].kind != rowKindLine {
+		dv.MoveBy(1)
+	}
+	before, _ := dv.CursorLine()
+	dv.ToggleWrap()
+	dv.Draw(screen)
+	after, ok := dv.CursorLine()
+	if !ok || after != before {
+		t.Errorf("cursor line = %+v, want %+v", after, before)
+	}
+	dv.ToggleWrap()
+	dv.Draw(screen)
+	if again, _ := dv.CursorLine(); again != before {
+		t.Errorf("cursor line = %+v after toggling back, want %+v", again, before)
+	}
+}
+
+func TestDiffViewMoveHalfPageCountsWrappedLines(t *testing.T) {
+	patch := "@@ -1,6 +1,6 @@\n"
+	for range 6 {
+		patch += " " + repeatChar('q', 100) + "\n"
+	}
+	hunks, err := diff.Parse(patch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dv := NewDiffView()
+	dv.SetWrap(true)
+	dv.SetFile(DiffFile{Path: "f.go", HasPatch: true, Hunks: hunks})
+	drawn(t, dv, 30, 12) // half a page = 6 display lines; each line is ~4 tall
+	dv.MoveTop()
+	dv.MoveHalfPage(1)
+	l, ok := dv.CursorLine()
+	if !ok || l.NewNo > 3 {
+		t.Errorf("MoveHalfPage(1) landed on line %d, want within the first 3 (wrapped rows are tall)", l.NewNo)
+	}
+	if l.NewNo == 1 {
+		t.Errorf("MoveHalfPage(1) did not move")
+	}
+}
+
+func TestDiffViewWrapNarrowPaneDoesNotWrap(t *testing.T) {
+	// The gutter alone fills the pane, leaving no cell for content.
+	dv, _ := wrapDiffView(t, wrapLongText(), 9, 12)
+	if n := dv.rows[2].lineCount(); n != 1 {
+		t.Errorf("lineCount = %d, want 1 when no content cell is left", n)
+	}
+}
+
+func TestDiffViewWrapUsesEachLinesOwnGutterWidth(t *testing.T) {
+	hunks, err := diff.Parse("@@ -1,1 +1,1 @@\n+" + repeatChar('m', 100) + "\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dv := NewDiffView()
+	dv.SetWrap(true)
+	dv.SetFile(DiffFile{
+		Path: "f.go", HasPatch: true, Hunks: hunks,
+		DraftMarker: "😀", DraftLines: map[DraftAnchor]bool{{Hunk: 0, Line: 0}: true},
+	})
+	dv.SetRect(0, 0, 40, 30)
+	dv.Draw(newTestScreen(t, 40, 30))
+	row := dv.rows[2]
+	cw := 38 - SpanWidth(row.primary().gutter)
+	var joined strings.Builder
+	for i, l := range row.primary().content {
+		if SpanWidth(l) > cw {
+			t.Errorf("line %d width %d exceeds %d", i, SpanWidth(l), cw)
+		}
+		joined.WriteString(spansText(l))
+	}
+	if joined.String() != repeatChar('m', 100) {
+		t.Errorf("wrapped text %q lost or gained cells (stray ellipsis?)", joined.String())
+	}
+}
+
+func TestDiffViewWrapToggleKeepsHorizontalScroll(t *testing.T) {
+	dv, screen := wrapDiffView(t, wrapLongText(), 30, 12)
+	dv.SetWrap(false)
+	dv.Draw(screen)
+	dv.ScrollHorizontal(7)
+	if dv.HOffset() != 7 {
+		t.Fatalf("HOffset = %d, want 7", dv.HOffset())
+	}
+	dv.SetWrap(true)
+	dv.Draw(screen)
+	if dv.HOffset() != 0 {
+		t.Errorf("HOffset = %d while wrapping, want 0", dv.HOffset())
+	}
+	dv.SetWrap(false)
+	dv.Draw(screen)
+	if dv.HOffset() != 7 {
+		t.Errorf("HOffset = %d after wrap off, want the earlier 7", dv.HOffset())
+	}
+}
+
+// rowsPtr identifies the current rows slice: rebuild replaces it.
+func rowsPtr(dv *DiffView) *diffRow { return &dv.rows[0] }
+
+func TestDiffViewWrapKeepsHorizontalScrollAcrossAResize(t *testing.T) {
+	dv, screen := wrapDiffView(t, wrapLongText(), 30, 12)
+	dv.SetWrap(false)
+	dv.Draw(screen)
+	dv.ScrollHorizontal(7)
+	dv.SetWrap(true)
+	dv.SetRect(0, 0, 200, 12) // maxHOffset would be 0 here
+	dv.Draw(newTestScreen(t, 200, 12))
+	dv.SetRect(0, 0, 30, 12)
+	dv.Draw(screen)
+	dv.SetWrap(false)
+	dv.Draw(screen)
+	if dv.HOffset() != 7 {
+		t.Errorf("HOffset = %d, want the saved 7", dv.HOffset())
+	}
+}
+
+func TestDiffViewWrapDoesNotWrapAOneCellContentWidth(t *testing.T) {
+	probe, _ := wrapDiffView(t, "x", 30, 12)
+	gw := SpanWidth(probe.rows[2].primary().gutter)
+	dv, _ := wrapDiffView(t, strings.Repeat("あ", 10), gw+3, 12) // inner width = pane - 2
+	if n := dv.rows[2].lineCount(); n != 1 {
+		t.Errorf("lineCount = %d, want 1: a wide rune cannot fit a 1-cell line", n)
+	}
+}
+
+func TestDiffViewHeightShrinkKeepsTheCursorRowInView(t *testing.T) {
+	patch := "@@ -1,31 +1,31 @@\n"
+	for range 30 {
+		patch += " c\n"
+	}
+	patch += " " + repeatChar('z', 60) + "\n" // wraps to 3 display lines at width 30
+	hunks, err := diff.Parse(patch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dv := NewDiffView()
+	dv.SetWrap(true)
+	dv.SetFile(DiffFile{Path: "f.go", HasPatch: true, Hunks: hunks})
+	dv.SetRect(0, 0, 30, 20)
+	dv.Draw(newTestScreen(t, 30, 20))
+	dv.MoveBottom()
+	dv.Draw(newTestScreen(t, 30, 20))
+
+	dv.SetRect(0, 0, 30, 10)
+	screen := newTestScreen(t, 30, 10)
+	dv.Draw(screen)
+	zs := 0
+	for y := range 10 {
+		zs += strings.Count(screenLine(screen, 30, y), "z")
+	}
+	if zs != 60 {
+		t.Errorf("%d of 60 cells of the cursor row are on screen after the pane shrank", zs)
+	}
+}
+
+func TestDiffViewWrapRowCappedAtPaneHeight(t *testing.T) {
+	dv, screen := wrapDiffView(t, repeatChar('z', 5000), 30, 12)
+	if got := dv.rows[2].displayLines(12); got != 12 {
+		t.Fatalf("displayLines = %d, want 12 (the pane height)", got)
+	}
+	x, y := 28, 11 // last content cell of the last display line; the capped row sits at the top
+	if got := cellRune(screen, x, y); got != '…' {
+		t.Errorf("last visible content cell = %q, want '…'", got)
+	}
+	if _, _, attr := cellStyle(screen, x, y).Decompose(); attr&tcell.AttrReverse != 0 {
+		t.Error("ellipsis drawn Reverse")
+	}
+}
+
+func TestDiffViewWrapCapFollowsPaneHeightWithoutARebuild(t *testing.T) {
+	text := repeatChar('k', 12*20)
+	dv, screen := wrapDiffView(t, text, 30, 5)
+	if got := dv.rows[2].displayLines(5); got != 5 {
+		t.Fatalf("displayLines = %d, want 5", got)
+	}
+	if got := cellRune(screen, 28, 4); got != '…' {
+		t.Errorf("last visible content cell = %q, want '…'", got)
+	}
+
+	before := rowsPtr(dv)
+	dv.SetRect(0, 0, 30, 40)
+	screen = newTestScreen(t, 30, 40)
+	dv.Draw(screen)
+	if rowsPtr(dv) != before {
+		t.Error("a height change rebuilt the rows")
+	}
+	ks := 0
+	for y := range 40 {
+		ks += strings.Count(screenLine(screen, 30, y), "k")
+	}
+	if ks != len(text) {
+		t.Errorf("%d of %d cells on screen after growing the pane", ks, len(text))
+	}
+}
+
+func TestDiffViewWrapCapEllipsisNeverTakesASearchStyle(t *testing.T) {
+	tests := []struct {
+		name, text, pattern string
+	}{
+		{"match in the hidden tail", strings.Repeat("あ", 40) + "MATCH", "MATCH"},
+		{"last visible cell is a match", strings.Repeat("あ", 40) + "MATCH", "あ"},
+		{"ascii match", repeatChar('x', 200), "x"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			hunks, err := diff.Parse("@@ -1,1 +1,1 @@\n+" + tc.text + "\n")
+			if err != nil {
+				t.Fatal(err)
+			}
+			dv := NewDiffView()
+			dv.SetWrap(true)
+			dv.SetSearch(regexp.MustCompile(tc.pattern))
+			dv.SetFile(DiffFile{Path: "f.go", HasPatch: true, Hunks: hunks})
+			dv.SetRect(0, 0, 30, 2)
+			screen := newTestScreen(t, 30, 2)
+			dv.Draw(screen)
+			if got := cellRune(screen, 28, 1); got != '…' {
+				t.Fatalf("last visible content cell = %q, want '…'", got)
+			}
+			fg, _, attr := cellStyle(screen, 28, 1).Decompose()
+			wantFg, _, _ := theme.Muted.Decompose()
+			if attr&tcell.AttrReverse != 0 || fg != wantFg {
+				t.Errorf("ellipsis style fg %v attr %v, want theme.Muted without Reverse", fg, attr)
+			}
+		})
+	}
+}
+
+func TestDiffViewWrapEllipsisOverAWideRuneBlanksItsLeftHalf(t *testing.T) {
+	// Pane width 30 gives an odd content width (the last cell is spare) and
+	// 31 an even one (the last cell is a wide rune's right half).
+	for _, w := range []int{30, 31} {
+		_, screen := wrapDiffView(t, strings.Repeat("あ", 300), w, 2)
+		if got := cellRune(screen, w-2, 1); got != '…' {
+			t.Errorf("w=%d: last content cell = %q, want '…'", w, got)
+		}
+		if w == 31 {
+			if got := cellRune(screen, w-3, 1); got != ' ' {
+				t.Errorf("w=%d: cell left of the ellipsis = %q, want a blank (no half rune)", w, got)
+			}
+		}
+	}
+}
+
+func TestDiffViewDisplayLinesClampsOnlyLineRows(t *testing.T) {
+	dv, _ := wrapDiffView(t, "abc", 30, 12)
+	if got := dv.rows[2].displayLines(1); got != 1 {
+		t.Errorf("displayLines = %d, want 1", got)
+	}
+	if got := dv.rows[0].displayLines(1); got != dv.rows[0].lineCount() {
+		t.Errorf("a non-line row must not be clamped: %d vs %d", got, dv.rows[0].lineCount())
+	}
+}
+
+func TestDiffViewWrapTruncatedAtMaxWrapLinesEndsInAMutedEllipsis(t *testing.T) {
+	// Wide enough that 250 display lines of 20+ cells need ~5000+ cells; the
+	// pane is taller than maxWrapLines so only the rebuild-time cut applies.
+	h := maxWrapLines + 10
+	dv, screen := wrapDiffView(t, repeatChar('q', 20*(maxWrapLines+50)), 30, h)
+	half := dv.rows[2].primary()
+	if len(half.content) != maxWrapLines || !half.truncated {
+		t.Fatalf("got %d lines, truncated %v; want %d, true", len(half.content), half.truncated, maxWrapLines)
+	}
+	y := 2 + maxWrapLines - 1 // the row starts below the file and hunk headers
+	if got := cellRune(screen, 28, y); got != '…' {
+		t.Errorf("last content cell of line %d = %q, want '…'", maxWrapLines, got)
+	}
+	if got := cellRune(screen, 28, y+1); got == '…' {
+		t.Error("an ellipsis was drawn past the last kept line")
+	}
+	fg, _, _ := cellStyle(screen, 28, y).Decompose()
+	if wantFg, _, _ := theme.Muted.Decompose(); fg != wantFg {
+		t.Errorf("ellipsis fg %v, want Muted %v", fg, wantFg)
 	}
 }

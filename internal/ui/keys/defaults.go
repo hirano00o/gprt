@@ -129,6 +129,7 @@ var defaultTable = []defaultEntry{
 	{[]Context{ContextDiff}, "zM", ActionDiffFoldAll},
 	{[]Context{ContextDiff}, "zh", ActionDiffScrollLeft},
 	{[]Context{ContextDiff}, "zl", ActionDiffScrollRight},
+	{[]Context{ContextDiff}, "w", ActionDiffToggleWrap},
 	{[]Context{ContextDiff}, "]c", ActionDiffNextThread},
 	{[]Context{ContextDiff}, "[c", ActionDiffPrevThread},
 	{[]Context{ContextDiff}, "]f", ActionDiffNextFile},
