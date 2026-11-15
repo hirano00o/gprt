@@ -9,7 +9,7 @@ A terminal UI for GitHub pull requests. Browse, review, comment, and merge witho
 - **One list for all your pull requests** across repositories: review requests (yours and your teams'), your own PRs, PRs you are involved in, and any custom search you add. Filter with `/`, switch between open, closed, and merged.
 - **PR view** with the description, labels, reviewers, CI checks, and the full conversation timeline. Descriptions and comments are rendered as GitHub Flavored Markdown (headings, lists, tables, highlighted code blocks, links).
 - **Inline images**: an image that stands alone on its line in a description or comment is drawn in the terminal with the kitty graphics protocol (kitty, Ghostty). Anywhere else, and in other terminals, it stays a `[image: alt]` placeholder.
-- **Files view** with a file tree and a syntax-highlighted diff. Review threads appear inline and can be folded.
+- **Files view** with a file tree and a syntax-highlighted diff that marks the changed words within modified lines. Review threads appear inline and can be folded.
 - **Reviewing**: comment on a line, a range, or a whole file; reply; resolve threads; post a comment right away or build up a pending review and submit it as Approve, Request changes, or Comment.
 - **Reactions** and `@`-mention completion with the repository's users.
 - **Editing and lifecycle**: edit a PR's title, description, base, labels, reviewers, and draft state; create pull requests from the TUI; merge, close, reopen, and mark a draft ready for review through `:merge`, `:close`, `:reopen`, `:ready`, each behind a confirmation.

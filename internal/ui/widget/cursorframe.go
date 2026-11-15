@@ -40,3 +40,19 @@ func withBackground(spans []Span, bg tcell.Color) []Span {
 	}
 	return out
 }
+
+// withBackgroundKeepingWords is withBackground except that spans carrying a
+// word-emphasis background (theme.IsDiffWordBg) keep it, so the changed
+// words of a modified line survive the row's own background (kind tint or
+// selection).
+func withBackgroundKeepingWords(spans []Span, bg tcell.Color) []Span {
+	out := make([]Span, len(spans))
+	for i, s := range spans {
+		if _, spanBG, _ := s.Style.Decompose(); theme.IsDiffWordBg(spanBG) {
+			out[i] = s
+			continue
+		}
+		out[i] = Span{Text: s.Text, Style: s.Style.Background(bg)}
+	}
+	return out
+}

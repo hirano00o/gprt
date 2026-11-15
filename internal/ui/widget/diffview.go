@@ -291,6 +291,18 @@ type DiffView struct {
 	pendingThreadID   string
 	pendingThreadEdge int
 
+	// wordRanges holds, per hunk, the changed-word byte ranges by line index
+	// (diff.IntraLineRanges). They depend only on file.Hunks, so SetFile
+	// computes them once instead of every rebuild (n/N, folds, jumps and
+	// resizes all rebuild).
+	wordRanges []map[int][][]int
+	// wordHunks identifies the hunks wordRanges was computed for: the first
+	// element's address and the length. A refresh passing the same slice
+	// (highlight completion, thread or draft changes) reuses wordRanges;
+	// diff.ExpandGap always builds new hunks.
+	wordHunks    *diff.Hunk
+	wordHunksLen int
+
 	// searchRE is the currently active "/" search's compiled pattern (see
 	// SetSearch/ClearSearch), or nil when no search is active. Applied at
 	// rebuild time only (lineHalf, once per rebuild), not per Draw — the
@@ -453,12 +465,33 @@ func (dv *DiffView) SetFile(f DiffFile) {
 		dv.resetCursor = true
 	}
 	dv.file = f
+	dv.updateWordRanges(f.Hunks)
 	for _, t := range f.Threads {
 		if _, ok := dv.folded[t.ID]; !ok {
 			dv.folded[t.ID] = t.IsResolved
 		}
 	}
 	dv.lastWidth = -1
+}
+
+// updateWordRanges recomputes wordRanges for a non-empty hunks unless it is
+// the slice they were last computed for.
+func (dv *DiffView) updateWordRanges(hunks []diff.Hunk) {
+	if len(hunks) == 0 {
+		// A loading or error placeholder renders no line rows, so the cached
+		// ranges are never read meanwhile; keeping them lets the same hunks
+		// returning afterwards reuse them.
+		return
+	}
+	if &hunks[0] == dv.wordHunks && len(hunks) == dv.wordHunksLen {
+		return
+	}
+	budget := wordBudget
+	dv.wordRanges = make([]map[int][][]int, len(hunks))
+	for i, h := range hunks {
+		dv.wordRanges[i] = diff.IntraLineRanges(h.Lines, &budget)
+	}
+	dv.wordHunks, dv.wordHunksLen = &hunks[0], len(hunks)
 }
 
 // SetImageSource installs the factory that supplies, for the review comment
@@ -900,7 +933,7 @@ func (dv *DiffView) drawLineRow(screen tcell.Screen, x, y, width, height int, ro
 	if contentWidth <= 0 {
 		return
 	}
-	DrawSpansOffset(screen, contentX, y, contentWidth, hOffset, withBackground(half.content[pl], bg))
+	DrawSpansOffset(screen, contentX, y, contentWidth, hOffset, withBackgroundKeepingWords(half.content[pl], bg))
 	if shown := row.displayLines(height); pl == shown-1 && (len(half.content) > shown || half.truncated) {
 		drawCutEllipsis(screen, contentX+contentWidth-1, y, half.content[pl], contentWidth, bg)
 	}
@@ -908,22 +941,29 @@ func (dv *DiffView) drawLineRow(screen tcell.Screen, x, y, width, height int, ro
 
 // drawCutEllipsis draws "…" in the content's last cell, x. The line starts at
 // x-(width-1); if a double-width rune of it covers x, its left cell is
-// blanked so no half rune is left beside the ellipsis.
+// blanked so no half rune is left beside the ellipsis. The "…" replaces a
+// cell of the line, so when that cell is inside an emphasised word both the
+// "…" and a blanked half keep the word's background instead of bg.
 func drawCutEllipsis(screen tcell.Screen, x, y int, line []Span, width int, bg tcell.Color) {
 	col := 0
+	cellBG := bg
 scan:
 	for _, s := range line {
 		for _, c := range spanCells(s) {
-			if col >= width-1 {
+			if col+c.width > width-1 {
+				// This cell covers the last column.
+				if _, spanBG, _ := s.Style.Decompose(); theme.IsDiffWordBg(spanBG) {
+					cellBG = spanBG
+				}
+				if c.width == 2 && col+1 == width-1 {
+					screen.SetContent(x-1, y, ' ', nil, theme.Muted.Background(cellBG))
+				}
 				break scan
-			}
-			if c.width == 2 && col+1 == width-1 {
-				screen.SetContent(x-1, y, ' ', nil, theme.Muted.Background(bg))
 			}
 			col += c.width
 		}
 	}
-	screen.SetContent(x, y, ellipsisRune, nil, theme.Muted.Background(bg))
+	screen.SetContent(x, y, ellipsisRune, nil, theme.Muted.Background(cellBG))
 }
 
 // rebuild recomputes every row of the current file at width, preserving the
@@ -1069,6 +1109,11 @@ type diffBuilder struct {
 	gutterWidth    int
 	longestContent int
 }
+
+// wordBudget caps the total work diff.IntraLineRanges may spend in one
+// SetFile, in units of one per input byte tokenised plus one per DP cell, so
+// a file with thousands of changed lines cannot stall the UI goroutine.
+const wordBudget = 2_000_000
 
 func (b *diffBuilder) build() {
 	f := b.dv.file
@@ -1225,6 +1270,13 @@ func (b *diffBuilder) lineHalf(f DiffFile, hunkIdx, lineIdx int, l diff.Line) di
 		draftMark = f.DraftMarker
 	}
 	content := contentSpansFor(f, hunkIdx, lineIdx, l)
+	if ranges := b.dv.wordRanges[hunkIdx][lineIdx]; len(ranges) > 0 {
+		// Before the search highlight, which then replaces a matched piece's
+		// whole style and so leaves search looking the same with or without
+		// emphasis.
+		wordBG, _ := theme.DiffWordBg(l.Kind)
+		content = restyleRanges(content, l.Text, ranges, func(s tcell.Style) tcell.Style { return s.Background(wordBG) })
+	}
 	if b.dv.searchRE != nil {
 		if ranges := b.dv.searchRE.FindAllStringIndex(l.Text, -1); len(ranges) > 0 {
 			content = b.dv.highlightSearchRanges(content, f.Path, hunkIdx, lineIdx, l.Text, ranges)
