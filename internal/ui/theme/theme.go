@@ -53,7 +53,7 @@ var (
 	// so a link reads as one even without colour.
 	Link = tcell.StyleDefault.Foreground(colorAccent).Background(colorBg).Underline(true)
 	// SearchMatch highlights a "/" search hit in the diff. Reverse, not a
-	// Background colour: widget.DiffView.drawLineRow overwrites every span's
+	// Background colour: widget.DiffView.drawHalf overwrites every span's
 	// background, except word-emphasis ones, with the row's own background
 	// (add/del/selection tinting), which would erase a background colour set
 	// here;

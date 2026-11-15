@@ -237,7 +237,7 @@ func (a *App) routePendingKey(_ *tcell.EventKey, normalized []keys.Key) *tcell.E
 // right target/draftKey is given) and, for a line/range/file draft, also
 // opens its file in the Files tab and arranges for the diff cursor to land
 // on its anchor once that file's data is available (widget.DiffView's own
-// JumpToLine — see its doc comment for why the target survives a rebuild
+// JumpToAnchor (JumpToLine plus the draft's own side) — see JumpToLine's doc comment for why the target survives a rebuild
 // that runs before the data has arrived).
 func (a *App) openPendingListEntry() {
 	idx := a.pendingListView.GetCurrentItem()
@@ -271,7 +271,7 @@ func (a *App) openDraftFromList(d drafts.Draft) bool {
 	case drafts.KindComment:
 		if path, side, start, line, ok := parseLineAnchor(d.Key.Anchor); ok {
 			a.openFilesTabAndFile(path)
-			a.diffView.JumpToLine(side, line)
+			a.diffView.JumpToAnchor(side, line)
 			a.openLineOrRangeComposer(path, diff.Range{StartSide: side, Side: side, StartLine: start, Line: line})
 			return true
 		}

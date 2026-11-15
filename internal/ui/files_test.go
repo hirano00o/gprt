@@ -13,10 +13,13 @@ import (
 
 	"github.com/hirano00o/gprt/internal/browser"
 	"github.com/hirano00o/gprt/internal/config"
+	"github.com/hirano00o/gprt/internal/diff"
+	"github.com/hirano00o/gprt/internal/drafts"
 	"github.com/hirano00o/gprt/internal/gh"
 	"github.com/hirano00o/gprt/internal/model"
 	"github.com/hirano00o/gprt/internal/store"
 	"github.com/hirano00o/gprt/internal/ui/theme"
+	"github.com/hirano00o/gprt/internal/ui/widget"
 )
 
 // exampleGoPatch is a 2-hunk patch for a small Go file: an added comment
@@ -886,9 +889,9 @@ func TestFilesTabEscInVisualModeAlsoResetsSequencerPendingPrefix(t *testing.T) {
 	sendSpecial(app.app, tcell.KeyEsc)
 	waitFor(t, app.app, func() bool { return !app.diffView.InVisual() })
 
-	// "l" alone is bound to nothing in ContextDiff (list.open only binds it
-	// in ContextList/ContextFiles); with the bug, the surviving "z"
-	// combines with it into "zl" (diff.scroll_right) instead.
+	// "l" alone is diff.cursor_right in ContextDiff, which never scrolls;
+	// with the bug, the surviving "z" combines with it into "zl"
+	// (diff.scroll_right) instead.
 	sendRune(app.app, 'l')
 
 	if got := query(app.app, func() int { return app.diffView.HOffset() }); got != 0 {
@@ -1060,6 +1063,239 @@ func TestFilesTabOpensWrappedWhenConfigured(t *testing.T) {
 	}
 }
 
+func TestFilesTabOpensSplitWhenConfigured(t *testing.T) {
+	app, _, _, _ := openFilesTabForFixtureWith(t, nil, testAppOpts{config: func(c *config.Config) { c.Diff.Layout = "split" }})
+	if got := query(app.app, func() bool { return app.diffView.Split() }); !got {
+		t.Error("diff.layout: split did not open the diff view split")
+	}
+}
+
+// TestFilesTabSplitKeys covers s (toggle) and h/l (old/new column) on
+// pkg/example.go's last row, which pairs the deleted oldCall() with the
+// added newCall().
+func TestFilesTabSplitKeys(t *testing.T) {
+	app, _, _, _ := openFilesTabForFixture(t)
+	focusDiffView(t, app)
+	act(app.app, func() { moveToLastDiffLine(app) })
+
+	sendRune(app.app, 's')
+	waitFor(t, app.app, func() bool { return app.diffView.Split() })
+	// waitFor's predicate already runs on the UI goroutine, so it must not
+	// go through query.
+	kind := func() diff.LineKind {
+		l, _ := app.diffView.CursorLine()
+		return l.Kind
+	}
+	if got := query(app.app, kind); got != diff.Add {
+		t.Errorf("cursor line kind = %v, want Add (the new column is the default)", got)
+	}
+	sendRune(app.app, 'h')
+	waitFor(t, app.app, func() bool { return kind() == diff.Del })
+	sendRune(app.app, 'l')
+	waitFor(t, app.app, func() bool { return kind() == diff.Add })
+
+	sendRune(app.app, 's')
+	waitFor(t, app.app, func() bool { return !app.diffView.Split() })
+}
+
+func TestFilesTabCommentOnTheOldColumnAnchorsLeft(t *testing.T) {
+	app, _, _, ref := openFilesTabForFixture(t)
+	focusDiffView(t, app)
+	act(app.app, func() { moveToLastDiffLine(app) })
+	sendRune(app.app, 's')
+	waitFor(t, app.app, func() bool { return app.diffView.Split() })
+	sendRune(app.app, 'h')
+
+	sendRune(app.app, 'c')
+	waitFor(t, app.app, func() bool { return composerOpen(app) })
+	want := drafts.Key{PR: ref.Key(), Kind: drafts.KindComment, Anchor: "pkg/example.go:LEFT:10"}
+	if got := query(app.app, func() drafts.Key { return app.composerTarget.draftKey }); got != want {
+		t.Errorf("composer draft key = %+v, want %+v", got, want)
+	}
+}
+
+// moveDiffCursorTo moves the diff cursor down from the top to the first line
+// whose text contains text.
+func moveDiffCursorTo(app *App, text string) {
+	app.diffView.MoveTop()
+	for range 40 {
+		if l, ok := app.diffView.CursorLine(); ok && strings.Contains(l.Text, text) {
+			return
+		}
+		app.diffView.MoveBy(1)
+	}
+}
+
+// TestFilesTabSplitCommentAnchorsToTheColumnNotTheKind covers a context line,
+// which exists on both sides: in split, "c" with the cursor in the old column
+// anchors LEFT with the old number (unified would say RIGHT:3).
+func TestFilesTabSplitCommentAnchorsToTheColumnNotTheKind(t *testing.T) {
+	app, _, _, ref := openFilesTabForFixture(t)
+	focusDiffView(t, app)
+	sendRune(app.app, 's')
+	waitFor(t, app.app, func() bool { return app.diffView.Split() })
+	act(app.app, func() { moveDiffCursorTo(app, "func Example") })
+	sendRune(app.app, 'h')
+
+	sendRune(app.app, 'c')
+	waitFor(t, app.app, func() bool { return composerOpen(app) })
+	want := drafts.Key{PR: ref.Key(), Kind: drafts.KindComment, Anchor: "pkg/example.go:LEFT:2"}
+	if got := query(app.app, func() drafts.Key { return app.composerTarget.draftKey }); got != want {
+		t.Errorf("composer draft key = %+v, want %+v", got, want)
+	}
+}
+
+// TestFilesTabSplitRangeAcrossContextAndDelsAnchorsLeft covers a visual range
+// from a context line over deleted lines in the old column: a one-sided range
+// in split, where unified refuses it as mixed.
+func TestFilesTabSplitRangeAcrossContextAndDelsAnchorsLeft(t *testing.T) {
+	const patch = "@@ -1,4 +1,1 @@\n ctx\n-d1\n-d2\n-d3\n"
+	pr := func(ref model.PRRef) model.PullRequest {
+		p := fixtureFilesPR(ref)
+		p.ReviewThreads = nil
+		return p
+	}
+	app, _, _ := openFilesTabForPR(t, pr, func(f *fakeGitHub) {
+		f.SetFilesPages(fixtureRef(1), []gh.FilesResult{{Files: []model.ChangedFile{
+			{Path: "pkg/example.go", Status: model.FileStatusModified, Deletions: 3, HasPatch: true, Patch: patch},
+		}}})
+	})
+	focusDiffView(t, app)
+	sendRune(app.app, 's')
+	waitFor(t, app.app, func() bool { return app.diffView.Split() })
+	act(app.app, func() { moveDiffCursorTo(app, "ctx") })
+	sendRune(app.app, 'h')
+	sendRune(app.app, 'V')
+	waitFor(t, app.app, func() bool { return app.diffView.InVisual() })
+	sendRune(app.app, 'j')
+	sendRune(app.app, 'j')
+	waitFor(t, app.app, func() bool {
+		s, ok := app.diffView.Selection()
+		return ok && len(s) == 3
+	})
+
+	sendRune(app.app, 'c')
+	waitFor(t, app.app, func() bool { return composerOpen(app) })
+	ref := fixtureRef(1)
+	want := drafts.Key{PR: ref.Key(), Kind: drafts.KindComment, Anchor: "pkg/example.go:LEFT:1-3"}
+	if got := query(app.app, func() drafts.Key { return app.composerTarget.draftKey }); got != want {
+		t.Errorf("composer draft key = %+v, want %+v", got, want)
+	}
+	if got := query(app.app, func() string { return app.statusBar.toast }); containsSubstring(got, "one side") {
+		t.Errorf("toast = %q, want no one-side refusal", got)
+	}
+}
+
+// TestFilesTabSplitToastsWhenThePaneIsTooNarrow covers "s" on a pane below
+// the split layout's minimum width: the layout is requested but not shown.
+func TestFilesTabSplitToastsWhenThePaneIsTooNarrow(t *testing.T) {
+	app, _, screen, _ := openFilesTabForFixture(t)
+	screen.SetSize(60, 30) // a 30-column tree leaves a pane too narrow for two columns
+	focusDiffView(t, app)
+	sendRune(app.app, 's')
+	waitFor(t, app.app, func() bool { return containsSubstring(app.statusBar.toast, "too narrow for split") })
+}
+
+// TestFilesTabDraftMarkerKnowsItsSide covers draftLinesForFile keying a
+// saved draft by the side of its anchor, so the split layout can mark only
+// that column.
+func TestFilesTabDraftMarkerKnowsItsSide(t *testing.T) {
+	app, _, _, ref := openFilesTabForFixture(t)
+	key := drafts.Key{PR: ref.Key(), Kind: drafts.KindComment, Anchor: "pkg/example.go:LEFT:10"}
+	if err := app.deps.Drafts.Save(key, "x"); err != nil {
+		t.Fatalf("Drafts.Save: %v", err)
+	}
+	entry, _ := app.deps.Store.FileByPath("pkg/example.go")
+	got := query(app.app, func() map[widget.DraftAnchor]bool { return app.draftLinesForFile(entry.Hunks, "pkg/example.go") })
+	want := widget.DraftAnchor{Hunk: 1, Line: 0, Side: model.DiffSideLeft}
+	if len(got) != 1 || !got[want] {
+		t.Errorf("draftLinesForFile = %v, want only %+v", got, want)
+	}
+}
+
+// TestFilesTabDiffHintMentionsSideKeysOnlyInSplit guards the "h/l side" hint
+// appearing exactly while the split layout is requested, even before the
+// next Draw shows it or on a pane too narrow to.
+func TestFilesTabDiffHintMentionsSideKeysOnlyInSplit(t *testing.T) {
+	app, _, _, _ := openFilesTabForFixture(t)
+	focusDiffView(t, app)
+	if hint := query(app.app, func() string { return app.statusBar.hint }); containsSubstring(hint, "h/l side") {
+		t.Errorf("unified hint %q mentions h/l side", hint)
+	}
+	sendRune(app.app, 's')
+	waitFor(t, app.app, func() bool { return containsSubstring(app.statusBar.hint, "s split  h/l side  o browser") })
+	sendRune(app.app, 's')
+	waitFor(t, app.app, func() bool { return !containsSubstring(app.statusBar.hint, "h/l side") })
+}
+
+func TestFilesTabDiffHintMentionsSideKeysWhenSplitIsRequestedButNarrow(t *testing.T) {
+	app, _, screen, _ := openFilesTabForFixture(t)
+	screen.SetSize(60, 30)
+	focusDiffView(t, app)
+	sendRune(app.app, 's')
+	waitFor(t, app.app, func() bool { return containsSubstring(app.statusBar.toast, "too narrow for split") })
+	if hint := query(app.app, func() string { return app.statusBar.hint }); !containsSubstring(hint, "h/l side") {
+		t.Errorf("hint %q lacks h/l side while split is requested", hint)
+	}
+}
+
+// TestPendingListOpensAContextLineDraftInItsOwnColumn covers a LEFT draft on a
+// context line (made in split): opening it from the pending list leaves the
+// cursor in the left column, so its side stays LEFT.
+func TestPendingListOpensAContextLineDraftInItsOwnColumn(t *testing.T) {
+	app, _, ref := openFilesTabWithReviewThreads(t)
+	sendRune(app.app, 's')
+	waitFor(t, app.app, func() bool { return app.diffView.Split() })
+	key := drafts.Key{PR: ref.Key(), Kind: drafts.KindComment, Anchor: "pkg/example.go:LEFT:2"} // "func Example() {"
+	if err := app.deps.Drafts.Save(key, "left draft"); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	sendRune(app.app, 'p')
+	waitFor(t, app.app, func() bool { return app.overlay == "pending" })
+	act(app.app, func() {
+		for i, e := range app.pendingListEntries {
+			if e.isDraft && e.draft.Key == key {
+				app.pendingListView.SetCurrentItem(i)
+			}
+		}
+	})
+	sendSpecial(app.app, tcell.KeyEnter)
+	waitFor(t, app.app, func() bool { return composerOpen(app) })
+
+	type got struct {
+		text     string
+		side     model.DiffSide
+		explicit bool
+	}
+	g := query(app.app, func() got {
+		l, _ := app.diffView.CursorLine()
+		side, explicit := app.diffView.CommentSide()
+		return got{l.Text, side, explicit}
+	})
+	if !containsSubstring(g.text, "func Example") || g.side != model.DiffSideLeft || !g.explicit {
+		t.Errorf("cursor = %+v, want func Example in the LEFT column", g)
+	}
+}
+
+// TestRangeAnchorToast covers the toast wording for each reason a side-aware
+// range anchor can be refused.
+func TestRangeAnchorToast(t *testing.T) {
+	tests := []struct {
+		err  error
+		want string
+	}{
+		{diff.ErrTooFewLines, "select at least two lines"},
+		{diff.ErrWrongSide, "select lines on one side only"},
+		{diff.ErrMixedSides, "select lines on one side only"},
+	}
+	for _, tc := range tests {
+		if got := rangeAnchorToast(tc.err); got != tc.want {
+			t.Errorf("rangeAnchorToast(%v) = %q, want %q", tc.err, got, tc.want)
+		}
+	}
+}
+
 func TestFilesTabCtrlWtHidesTree(t *testing.T) {
 	app, _, _, _ := openFilesTabForFixture(t)
 
@@ -1139,7 +1375,7 @@ func TestFilesTabDiffHintReflectsTreeVisibility(t *testing.T) {
 	sendRune(app.app, 'l')
 	waitFor(t, app.app, func() bool { return app.app.GetFocus() == app.diffView })
 
-	const expandedWant = "j/k move  V select  za fold  ]c/[c thread  ]f/[f file  zh/zl scroll  w wrap  o browser  Ctrl-w h tree  Ctrl-w t hide tree  gt/Ctrl-l next tab  ? help  q quit"
+	const expandedWant = "j/k move  V select  za fold  ]c/[c thread  ]f/[f file  zh/zl scroll  w wrap  s split  o browser  Ctrl-w h tree  Ctrl-w t hide tree  gt/Ctrl-l next tab  ? help  q quit"
 	expandedHint := query(app.app, func() string { return app.statusBar.hint })
 	if expandedHint != expandedWant {
 		t.Fatalf("hint with the tree visible = %q, want %q", expandedHint, expandedWant)
@@ -1149,7 +1385,7 @@ func TestFilesTabDiffHintReflectsTreeVisibility(t *testing.T) {
 	sendRune(app.app, 't')
 	waitFor(t, app.app, func() bool { return !app.treeExpanded })
 
-	const hiddenWant = "j/k move  V select  za fold  ]c/[c thread  ]f/[f file  zh/zl scroll  w wrap  o browser  Ctrl-w t show tree  Ctrl-w h list  gt/Ctrl-l next tab  ? help  q quit"
+	const hiddenWant = "j/k move  V select  za fold  ]c/[c thread  ]f/[f file  zh/zl scroll  w wrap  s split  o browser  Ctrl-w t show tree  Ctrl-w h list  gt/Ctrl-l next tab  ? help  q quit"
 	hiddenHint := query(app.app, func() string { return app.statusBar.hint })
 	if hiddenHint != hiddenWant {
 		t.Errorf("hint with the tree hidden = %q, want %q", hiddenHint, hiddenWant)

@@ -1,6 +1,7 @@
 package keys
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -293,6 +294,31 @@ func TestDefaultsResolvesDiffSearchInDiffAndFilesContexts(t *testing.T) {
 		}
 		if action, kind := km.Lookup(ctx, mustParse("N")); kind != Exact || action != ActionDiffSearchPrev {
 			t.Errorf("Lookup(%v, N) = (%q, %v), want (%q, Exact)", ctx, action, kind, ActionDiffSearchPrev)
+		}
+	}
+}
+
+// TestDefaultsResolvesSplitKeysInDiffContextOnly covers "s" (diff.toggle_split)
+// and "h"/"l" (diff.cursor_left/diff.cursor_right): diff-only, so the list's
+// own "l" (list.open) is untouched.
+func TestDefaultsResolvesSplitKeysInDiffContextOnly(t *testing.T) {
+	km := Defaults()
+	for key, want := range map[string]Action{
+		"s": ActionDiffToggleSplit,
+		"h": ActionDiffCursorLeft,
+		"l": ActionDiffCursorRight,
+	} {
+		if action, kind := km.Lookup(ContextDiff, mustParse(key)); kind != Exact || action != want {
+			t.Errorf("Lookup(diff, %s) = (%q, %v), want (%q, Exact)", key, action, kind, want)
+		}
+		if action, _ := km.Lookup(ContextList, mustParse(key)); action == want {
+			t.Errorf("Lookup(list, %s) = %q, want it unbound in the list", key, action)
+		}
+	}
+	all := AllActions()
+	for _, want := range []Action{ActionDiffToggleSplit, ActionDiffCursorLeft, ActionDiffCursorRight} {
+		if !slices.Contains(all, want) {
+			t.Errorf("AllActions() does not contain %q", want)
 		}
 	}
 }

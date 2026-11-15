@@ -615,7 +615,7 @@ func TestDiffViewSetFileToADifferentPathResetsCursorSelectionAndScroll(t *testin
 // stale hOffset surviving a SetFile to a file whose longest line is
 // shorter than the scroll position reached on the previous file: without
 // re-clamping hOffset inside rebuild (ScrollHorizontal is the only other
-// place that clamps it, and it is not called by SetFile), drawLineRow
+// place that clamps it, and it is not called by SetFile), drawHalf
 // would skip past all of the new, shorter content and render every
 // content cell blank.
 func TestDiffViewClampsHOffsetAfterSetFileToAShorterFile(t *testing.T) {
@@ -665,7 +665,7 @@ func TestDiffViewClampsHOffsetAfterSetFileToAShorterFile(t *testing.T) {
 // TestDiffViewMaxHOffsetReachesTheLastColumnOfTheLongestLine guards against
 // an off-by-one in rebuild's maxHOffset computation: the content width (pane less gutter)
 // is the content width available when hOffset == 0 (no "‹"
-// marker drawn yet), but drawLineRow spends one of those cells on the "‹"
+// marker drawn yet), but drawHalf spends one of those cells on the "‹"
 // marker as soon as hOffset > 0, so the content actually visible while
 // scrolled is one cell narrower than that content width.
 // Without accounting for that, scrolling all the way to maxHOffset always
@@ -909,7 +909,7 @@ func TestDiffViewCommentReactionLineBoldsViewerReaction(t *testing.T) {
 func TestDiffViewDraftMarkerRendersInGutter(t *testing.T) {
 	f := twoHunkFile(t)
 	f.DraftMarker = "M"
-	f.DraftLines = map[DraftAnchor]bool{{Hunk: 0, Line: 1}: true} // the "-old2" line
+	f.DraftLines = map[DraftAnchor]bool{{Hunk: 0, Line: 1, Side: model.DiffSideLeft}: true} // the "-old2" line
 	dv := NewDiffView()
 	dv.SetFile(f)
 	drawn(t, dv, 60, 30)
@@ -1845,7 +1845,7 @@ func TestDiffViewWrapUsesEachLinesOwnGutterWidth(t *testing.T) {
 	dv.SetWrap(true)
 	dv.SetFile(DiffFile{
 		Path: "f.go", HasPatch: true, Hunks: hunks,
-		DraftMarker: "😀", DraftLines: map[DraftAnchor]bool{{Hunk: 0, Line: 0}: true},
+		DraftMarker: "😀", DraftLines: map[DraftAnchor]bool{{Hunk: 0, Line: 0, Side: model.DiffSideRight}: true},
 	})
 	dv.SetRect(0, 0, 40, 30)
 	dv.Draw(newTestScreen(t, 40, 30))

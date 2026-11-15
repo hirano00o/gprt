@@ -7,6 +7,7 @@ import (
 	"github.com/rivo/tview"
 
 	"github.com/hirano00o/gprt/internal/gh"
+	"github.com/hirano00o/gprt/internal/model"
 )
 
 func TestSmartcase(t *testing.T) {
@@ -321,4 +322,40 @@ func TestDiffSearchNextStepsToSecondMatchOnSameLine(t *testing.T) {
 	if second.end != 96 {
 		t.Errorf("second match = %+v, want end=96 (%q in %q)", second, "so", "somewhere")
 	}
+}
+
+// TestDiffSearchNextDuringSplitVisualReachesTheMatchOnTheOtherSide covers n
+// while a left-pinned selection sits on a row whose right half holds the
+// current match: CursorLine says the left line, so the step must start from
+// the match itself or it would find the same one again.
+func TestDiffSearchNextDuringSplitVisualReachesTheMatchOnTheOtherSide(t *testing.T) {
+	const patch = "@@ -1,2 +1,2 @@\n-xa\n-xb\n+yc\n+yd\n"
+	pr := func(ref model.PRRef) model.PullRequest {
+		p := fixtureFilesPR(ref)
+		p.ReviewThreads = nil
+		return p
+	}
+	app, _, _ := openFilesTabForPR(t, pr, func(f *fakeGitHub) {
+		f.SetFilesPages(fixtureRef(1), []gh.FilesResult{{Files: []model.ChangedFile{
+			{Path: "pkg/example.go", Status: model.FileStatusModified, Additions: 2, Deletions: 2, HasPatch: true, Patch: patch},
+		}}})
+	})
+	focusDiffViewForTest(t, app)
+
+	sendRune(app.app, '/')
+	waitFor(t, app.app, func() bool { return app.app.GetFocus() == app.searchInput })
+	typeString(app, "y")
+	sendSpecial(app.app, tcell.KeyEnter)
+	waitFor(t, app.app, func() bool { return len(app.searchMatches) == 2 })
+
+	sendRune(app.app, 's')
+	waitFor(t, app.app, func() bool { return app.diffView.Split() })
+	sendRune(app.app, 'h')
+	act(app.app, func() { moveDiffCursorTo(app, "xa") })
+	sendRune(app.app, 'V')
+	waitFor(t, app.app, func() bool { return app.diffView.InVisual() })
+	act(app.app, func() { app.searchIdx = 0 }) // the current match "yc" shares the cursor's row
+
+	sendRune(app.app, 'n')
+	waitFor(t, app.app, func() bool { return app.searchIdx == 1 })
 }

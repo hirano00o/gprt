@@ -76,6 +76,11 @@ type DiffFile struct {
 // has a saved comment draft, for DiffFile.DraftLines.
 type DraftAnchor struct {
 	Hunk, Line int
+	// Side is the side of the diff the draft's anchor names. The split
+	// layout marks only the column on that side, so a draft on a context
+	// line shows once; the unified layout marks a line only for the side
+	// diff.Anchor derives from its kind (Del LEFT, else RIGHT).
+	Side model.DiffSide
 }
 
 // FileStatusGlyph returns the single-character glyph DiffView's file header
@@ -118,7 +123,8 @@ const (
 )
 
 // diffHalf is one column of a rowKindLine row: the whole row in the unified
-// layout (the only one so far). It keeps the gutter (line numbers + marker,
+// layout, the old or the new side in the split layout (line -1 marks a blank
+// half facing a line that has no counterpart). It keeps the gutter (line numbers + marker,
 // never horizontally scrolled) and the content (syntax spans, scrolled by
 // hOffset) separate so Draw can apply the horizontal-scroll offset to the
 // content only. content holds one []Span per display line, so a half can
@@ -147,7 +153,8 @@ type diffRow struct {
 	// within the hunk is halves[i].line), and is otherwise unused (zero).
 	hunk int
 
-	// halves is a rowKindLine row's columns: always exactly one for now.
+	// halves is a rowKindLine row's columns: one in the unified layout, two
+	// (old, new) in the split layout.
 	halves []diffHalf
 
 	// threadID identifies a rowKindThreadHeader row's thread, for
@@ -165,13 +172,103 @@ type diffRow struct {
 	lines [][]Span
 }
 
-// primary returns r's only half (the unified layout has no other), or the
+// primary returns r's first half (its only one in the unified layout), or the
 // zero diffHalf for kinds that have none.
 func (r diffRow) primary() diffHalf {
 	if len(r.halves) == 0 {
 		return diffHalf{}
 	}
 	return r.halves[0]
+}
+
+// isSplit reports whether r is a two-column (split layout) line row.
+func (r diffRow) isSplit() bool { return len(r.halves) == 2 }
+
+// halfOfLine returns the index of r's half showing line, or -1.
+func (r diffRow) halfOfLine(line int) int {
+	if line < 0 {
+		return -1
+	}
+	for i, h := range r.halves {
+		if h.line == line {
+			return i
+		}
+	}
+	return -1
+}
+
+// sideIdx is the index of side's half in a split row.
+func sideIdx(side model.DiffSide) int {
+	if side == model.DiffSideLeft {
+		return 0
+	}
+	return 1
+}
+
+// sideOf is the side of the half at index i of a split row (sideIdx's
+// inverse).
+func sideOf(i int) model.DiffSide {
+	if i == 0 {
+		return model.DiffSideLeft
+	}
+	return model.DiffSideRight
+}
+
+// pinnedBlank reports whether r is a split row with nothing on the side the
+// open selection is pinned to.
+func (dv *DiffView) pinnedBlank(r diffRow) bool {
+	return dv.inVisual && r.isSplit() && r.halves[sideIdx(dv.visualSide)].line < 0
+}
+
+// activeIdx returns the index of the half of r the cursor is in: the
+// preferred side's, or the other one when the preferred is blank. While a
+// selection is open the side it started on is the preference.
+func (dv *DiffView) activeIdx(r diffRow) int {
+	if !r.isSplit() {
+		return 0
+	}
+	pref := dv.cursorSide
+	if dv.inVisual {
+		pref = dv.visualSide
+	}
+	i := sideIdx(pref)
+	if r.halves[i].line < 0 {
+		return 1 - i
+	}
+	return i
+}
+
+// frameIdx is the half of r the cursor bars go around: while selecting, the
+// pinned side even when it is blank on this row (the selection continues
+// through such rows), else the active half.
+func (dv *DiffView) frameIdx(r diffRow) int {
+	if dv.inVisual && r.isSplit() {
+		return sideIdx(dv.visualSide)
+	}
+	return dv.activeIdx(r)
+}
+
+// activeHalf is r's half at activeIdx, or a blank half for a row without any.
+func (dv *DiffView) activeHalf(r diffRow) diffHalf {
+	if len(r.halves) == 0 {
+		return diffHalf{line: -1}
+	}
+	return r.halves[dv.activeIdx(r)]
+}
+
+// adoptSide makes the side of r's half showing line the preferred cursor
+// side when that line is an Add or a Del. A Context line shows on both sides,
+// so the user's own choice stays.
+func (dv *DiffView) adoptSide(r diffRow, line int) {
+	if r.kind != rowKindLine {
+		return
+	}
+	if dv.inVisual {
+		return // the selection locks the side
+	}
+	if i := r.halfOfLine(line); i >= 0 && r.halves[i].kind != diff.Context {
+		dv.cursorSide, _ = diff.Anchor(diff.Line{Kind: r.halves[i].kind})
+	}
 }
 
 func (r diffRow) selectable() bool {
@@ -191,7 +288,7 @@ func (r diffRow) lineCount() int {
 }
 
 // displayLines is how many screen lines r takes in a pane height lines tall:
-// lineCount, except a line row never exceeds the pane (see drawLineRow's
+// lineCount, except a line row never exceeds the pane (see drawHalf's
 // ellipsis), since the view cannot scroll inside a row.
 func (r diffRow) displayLines(height int) int {
 	if r.kind == rowKindLine {
@@ -222,14 +319,31 @@ type diffRowKey struct {
 	gapStart int
 }
 
-func keyForRow(r diffRow) diffRowKey {
+// keyForRow is r's identity; a line row is identified by the half the cursor
+// is in.
+func (dv *DiffView) keyForRow(r diffRow) diffRowKey {
 	switch r.kind {
 	case rowKindThreadHeader:
 		return diffRowKey{isThread: true, threadID: r.threadID}
 	case rowKindGap:
 		return diffRowKey{isGap: true, gapStart: r.gapStart}
 	default:
-		return diffRowKey{hunk: r.hunk, line: r.primary().line}
+		return diffRowKey{hunk: r.hunk, line: dv.activeHalf(r).line}
+	}
+}
+
+// rowMatchesKey reports whether r is the row k identifies: for a line row,
+// one with a half showing k's line, in whichever layout.
+func rowMatchesKey(r diffRow, k diffRowKey) bool {
+	switch r.kind {
+	case rowKindThreadHeader:
+		return k.isThread && k.threadID == r.threadID
+	case rowKindGap:
+		return k.isGap && k.gapStart == r.gapStart
+	case rowKindLine:
+		return !k.isThread && !k.isGap && r.hunk == k.hunk && r.halfOfLine(k.line) >= 0
+	default:
+		return false
 	}
 }
 
@@ -265,6 +379,22 @@ type DiffView struct {
 	hOffset    int
 	maxHOffset int
 
+	// split is the requested layout (SetSplit); splitActive is the one the
+	// rows were last built in, which falls back to unified on a pane too
+	// narrow for two columns (see splitFits).
+	split, splitActive bool
+	// drawWidth is the inner width of the last Draw, for SplitShown.
+	drawWidth int
+	// gutterDigits is gutterDigitWidth of the file's hunks, set by SetFile.
+	gutterDigits int
+	// cursorSide is the preferred half of a split row (SetCursorSide);
+	// visualSide is the side the open selection is pinned to.
+	cursorSide, visualSide model.DiffSide
+	// reanchor/reanchorLines ask the next Draw to restore the cursor row's
+	// screen position after a layout switch changed the row count.
+	reanchor      bool
+	reanchorLines int
+
 	// wrap soft-wraps long diff lines onto continuation display lines
 	// instead of truncating them; see SetWrap.
 	wrap bool
@@ -280,6 +410,9 @@ type DiffView struct {
 	pendingCursorSet  bool
 	pendingCursorSide model.DiffSide
 	pendingCursorLine int
+	// pendingCursorAdopt makes the jump also set the cursor side from
+	// pendingCursorSide (JumpToAnchor).
+	pendingCursorAdopt bool
 
 	// pendingThreadSet/ID/Edge are JumpToLine's own counterpart for a
 	// thread-header target — see JumpToThread/JumpToThreadEdge. Only one of
@@ -389,13 +522,24 @@ func (dv *DiffView) HasSearch() bool {
 // anchor once its file has loaded), and is dropped once loading finishes —
 // found or not, so a target that never resolves (an outdated draft whose
 // line no longer exists) does not keep retrying on every future,
-// unrelated rebuild.
+// unrelated rebuild. The cursor side is only adopted for an Add/Del target
+// (its kind says the side); see JumpToAnchor for a deliberate side.
 func (dv *DiffView) JumpToLine(side model.DiffSide, line int) {
 	dv.pendingCursorSet = true
 	dv.pendingCursorSide = side
 	dv.pendingCursorLine = line
+	dv.pendingCursorAdopt = false
 	dv.pendingThreadSet = false // only one pending target at a time
 	dv.lastWidth = -1
+}
+
+// JumpToAnchor is JumpToLine for an anchor whose side is a deliberate choice
+// (a saved draft's): when the line is a Context one, which shows on both
+// sides of the split layout, the cursor also moves to side's column. JumpToLine
+// leaves that choice alone, since a search match carries no side of its own.
+func (dv *DiffView) JumpToAnchor(side model.DiffSide, line int) {
+	dv.JumpToLine(side, line)
+	dv.pendingCursorAdopt = true
 }
 
 // JumpToThread arranges for the cursor to land on the thread-header row for
@@ -435,11 +579,13 @@ func (dv *DiffView) JumpToThreadEdge(dir int) {
 // NewDiffView creates an empty DiffView.
 func NewDiffView() *DiffView {
 	return &DiffView{
-		Box:         tview.NewBox(),
-		folded:      map[string]bool{},
-		lastWidth:   -1,
-		curLineHunk: -1,
-		curLineLine: -1,
+		Box:          tview.NewBox(),
+		folded:       map[string]bool{},
+		lastWidth:    -1,
+		curLineHunk:  -1,
+		curLineLine:  -1,
+		cursorSide:   model.DiffSideRight,
+		gutterDigits: 1,
 	}
 }
 
@@ -450,7 +596,8 @@ func NewDiffView() *DiffView {
 // the map (from an earlier SetFile, possibly for the same file re-rendered
 // after highlighting completed) keeps whatever the user last chose.
 func (dv *DiffView) SetFile(f DiffFile) {
-	if f.Path != dv.file.Path {
+	pathChanged := f.Path != dv.file.Path
+	if pathChanged {
 		// A cursor/selection position is only ever meaningful relative to
 		// the file it was set on: diffRowKey is positional (hunk/line
 		// indices, or a thread ID), so restoring it by identity against a
@@ -465,6 +612,14 @@ func (dv *DiffView) SetFile(f DiffFile) {
 		dv.resetCursor = true
 	}
 	dv.file = f
+	switch {
+	case len(f.Hunks) > 0:
+		dv.gutterDigits = gutterDigitWidth(f.Hunks)
+	case pathChanged:
+		dv.gutterDigits = 1
+	}
+	// else: a placeholder (Loading) for the same file keeps the width, like
+	// wordRanges, so it cannot flip the drawn layout and end a selection.
 	dv.updateWordRanges(f.Hunks)
 	for _, t := range f.Threads {
 		if _, ok := dv.folded[t.ID]; !ok {
@@ -562,19 +717,65 @@ func (dv *DiffView) setCursor(i int) {
 }
 
 func (dv *DiffView) refreshLineTracking() {
-	if row, ok := dv.currentRow(); ok && row.kind == rowKindLine {
-		dv.curLineHunk, dv.curLineLine = row.hunk, row.primary().line
+	row, ok := dv.currentRow()
+	if !ok || row.kind != rowKindLine {
+		return
+	}
+	if dv.pinnedBlank(row) {
+		return // nothing on the selection's side to extend it to
+	}
+	if h := dv.activeHalf(row); h.line >= 0 {
+		dv.curLineHunk, dv.curLineLine = row.hunk, h.line
 	}
 }
 
-// MoveBy moves the cursor by n selectable rows (negative moves up).
-func (dv *DiffView) MoveBy(n int) { dv.setCursor(dv.cursor + n) }
+// MoveBy moves the cursor by n selectable rows (negative moves up). While a
+// side-pinned selection is open, rows with nothing on the pinned side are not
+// stops: the cursor goes on past them, or stays when none is left.
+func (dv *DiffView) MoveBy(n int) {
+	if !dv.inVisual || !dv.splitActive {
+		dv.setCursor(dv.cursor + n)
+		return
+	}
+	dir := 1
+	if n < 0 {
+		dir, n = -1, -n
+	}
+	pos := dv.cursor
+	for ; n > 0; n-- {
+		next, ok := dv.stopFrom(pos+dir, dir)
+		if !ok {
+			break
+		}
+		pos = next
+	}
+	dv.setCursor(pos)
+}
+
+// stopFrom returns the first selectable index from i (inclusive) going in dir
+// that is a valid stop for the open selection.
+func (dv *DiffView) stopFrom(i, dir int) (int, bool) {
+	for ; i >= 0 && i < len(dv.selectable); i += dir {
+		if !dv.pinnedBlank(dv.rows[dv.selectable[i]]) {
+			return i, true
+		}
+	}
+	return 0, false
+}
 
 // MoveTop moves the cursor to the first selectable row.
-func (dv *DiffView) MoveTop() { dv.setCursor(0) }
+func (dv *DiffView) MoveTop() {
+	if i, ok := dv.stopFrom(0, 1); ok {
+		dv.setCursor(i)
+	}
+}
 
 // MoveBottom moves the cursor to the last selectable row.
-func (dv *DiffView) MoveBottom() { dv.setCursor(len(dv.selectable) - 1) }
+func (dv *DiffView) MoveBottom() {
+	if i, ok := dv.stopFrom(len(dv.selectable)-1, -1); ok {
+		dv.setCursor(i)
+	}
+}
 
 // MoveHalfPage moves the cursor by however many selectable rows together
 // span roughly half of the view's visible height in display lines,
@@ -615,7 +816,8 @@ func (dv *DiffView) moveByDisplayLines(dir, target, height int) {
 			break
 		}
 		lines += dv.rows[idx].displayLines(height)
-		if dv.rows[idx].selectable() {
+		// Only rows MoveBy would stop on count as steps: it skips the rest.
+		if dv.rows[idx].selectable() && !dv.pinnedBlank(dv.rows[idx]) {
 			steps++
 		}
 	}
@@ -665,8 +867,13 @@ func (dv *DiffView) StartVisual() {
 	if !ok || row.kind != rowKindLine {
 		return
 	}
+	h := dv.activeHalf(row)
+	dv.visualSide = model.DiffSideRight
+	if row.isSplit() {
+		dv.visualSide = sideOf(dv.activeIdx(row))
+	}
 	dv.inVisual = true
-	dv.visualAnchorHunk, dv.visualAnchorLine = row.hunk, row.primary().line
+	dv.visualAnchorHunk, dv.visualAnchorLine = row.hunk, h.line
 }
 
 // EndVisual cancels an active visual selection (Esc).
@@ -689,7 +896,19 @@ func (dv *DiffView) Selection() ([]diff.Line, bool) {
 	if !ok {
 		return nil, false
 	}
-	return dv.file.Hunks[hunk].Lines[lo : hi+1], true
+	lines := dv.file.Hunks[hunk].Lines[lo : hi+1]
+	if !dv.splitActive {
+		return lines, true
+	}
+	// A split selection is pinned to one side: the other side's lines are
+	// not part of it even though they sit between its ends.
+	out := make([]diff.Line, 0, len(lines))
+	for _, l := range lines {
+		if diff.OnSide(l, dv.visualSide) {
+			out = append(out, l)
+		}
+	}
+	return out, true
 }
 
 // selectionRange computes the active visual selection's anchor hunk index
@@ -741,7 +960,7 @@ func (dv *DiffView) CursorLine() (diff.Line, bool) {
 		return diff.Line{}, false
 	}
 	h := dv.file.Hunks[row.hunk]
-	li := row.primary().line
+	li := dv.activeHalf(row).line
 	if li < 0 || li >= len(h.Lines) {
 		return diff.Line{}, false
 	}
@@ -792,6 +1011,84 @@ func (dv *DiffView) ToggleWrap() {
 // Wrap reports whether soft-wrapping is on.
 func (dv *DiffView) Wrap() bool {
 	return dv.wrap
+}
+
+// SetSplit selects the side-by-side (true) or the unified (false) layout. The
+// split layout is only used while each half is wide enough (splitFits); Split
+// still reports the requested value and SplitShown the layout drawn. When the
+// drawn layout does change, the next rebuild ends visual mode (a selection is
+// pinned to one side only in split) and keeps the cursor row at its screen
+// position (see reanchor); when it does not, neither happens.
+func (dv *DiffView) SetSplit(split bool) {
+	if split == dv.split {
+		return
+	}
+	dv.split = split
+	dv.lastWidth = -1
+}
+
+// SplitShown reports whether the split layout is what is drawn: requested and
+// wide enough for the last drawn width.
+func (dv *DiffView) SplitShown() bool {
+	return dv.split && splitFits(dv.drawWidth, dv.gutterDigits)
+}
+
+// CommentSide reports which side of the diff a comment on the cursor line (or
+// the open selection) belongs to when that is the column the user is in, not
+// the line's kind: explicit is true only while the split layout is shown (a
+// context line shows on both sides, so its kind does not say which). The side
+// is the selection's pinned one while selecting, else the cursor's half.
+func (dv *DiffView) CommentSide() (side model.DiffSide, explicit bool) {
+	if !dv.splitActive {
+		return model.DiffSideRight, false
+	}
+	if dv.inVisual {
+		return dv.visualSide, true
+	}
+	if row, ok := dv.currentRow(); ok && row.kind == rowKindLine {
+		return sideOf(dv.activeIdx(row)), true
+	}
+	return dv.cursorSide, true
+}
+
+// ToggleSplit flips SetSplit's state.
+func (dv *DiffView) ToggleSplit() { dv.SetSplit(!dv.split) }
+
+// Split reports whether the split layout is requested.
+func (dv *DiffView) Split() bool { return dv.split }
+
+// SetCursorSide sets which half of a split row the cursor is in (the old side
+// for left, the new for right); on a row whose half on that side is blank the
+// other half is used. Ignored while a selection is open, which is pinned to
+// the side it started on. In the unified layout it only records the
+// preference.
+func (dv *DiffView) SetCursorSide(side model.DiffSide) {
+	if dv.inVisual {
+		return
+	}
+	if dv.searchCurrentSet && side != dv.cursorSide {
+		dv.lastWidth = -1 // the current match's column on a context row follows
+	}
+	dv.cursorSide = side
+	dv.refreshLineTracking()
+}
+
+// reanchorOffset scrolls so the cursor row sits reanchorLines display lines
+// below the top, as far as whole rows allow.
+func (dv *DiffView) reanchorOffset(height int) {
+	if len(dv.selectable) == 0 {
+		return
+	}
+	off, lines := dv.selectable[dv.cursor], 0
+	for off > 0 {
+		n := dv.rows[off-1].displayLines(height)
+		if lines+n > dv.reanchorLines {
+			break
+		}
+		lines += n
+		off--
+	}
+	dv.offset = off
 }
 
 // ScrollHorizontal adjusts the diff content's horizontal scroll position by
@@ -852,9 +1149,14 @@ func (dv *DiffView) Draw(screen tcell.Screen) {
 	dv.DrawForSubclass(screen, dv)
 	fx, y, fullWidth, height := dv.GetInnerRect()
 	x, width := frameInset(fx, fullWidth)
+	dv.drawWidth = width
 	if width != dv.lastWidth {
 		dv.rebuild(width)
 		dv.lastWidth = width
+	}
+	if dv.reanchor {
+		dv.reanchor = false
+		dv.reanchorOffset(height)
 	}
 	// Rows are clamped to the pane height at draw time, so a height change
 	// needs no rebuild, only the cursor row kept in view.
@@ -868,24 +1170,40 @@ func (dv *DiffView) Draw(screen tcell.Screen) {
 		cursorRowIdx = dv.selectable[dv.cursor]
 	}
 	selHunk, selLo, selHi, hasSel := dv.selectionRange()
+	// half is h's index in row. A selection is one-sided in split, so only its
+	// pinned column is tinted, a context row's other half included.
+	selected := func(row diffRow, h diffHalf, half int) bool {
+		if !hasSel || row.kind != rowKindLine || row.hunk != selHunk || h.line < selLo || h.line > selHi {
+			return false
+		}
+		return !row.isSplit() || sideOf(half) == dv.visualSide
+	}
 
 	line := y
 	for i := dv.offset; i < len(dv.rows) && line < y+height; i++ {
 		row := dv.rows[i]
 		isCursorRow := i == cursorRowIdx
-		half := row.primary()
-		isSelectedRow := hasSel && row.kind == rowKindLine && row.hunk == selHunk && half.line >= selLo && half.line <= selHi
-
-		bgStyle := theme.DiffLineStyle(half.kind, isSelectedRow)
-		_, bg, _ := bgStyle.Decompose()
 
 		n := row.displayLines(height)
+		if row.isSplit() {
+			active := dv.frameIdx(row)
+			sel := [2]bool{selected(row, row.halves[0], 0), selected(row, row.halves[1], 1)}
+			for pl := 0; pl < n && line < y+height; pl++ {
+				dv.drawSplitLine(screen, fx, line, fullWidth, n, row, pl, sel, isCursorRow, active)
+				line++
+			}
+			continue
+		}
+
+		half := row.primary()
+		bgStyle := theme.DiffLineStyle(half.kind, selected(row, half, 0))
+		_, bg, _ := bgStyle.Decompose()
 		for pl := 0; pl < n && line < y+height; pl++ {
 			for cx := fx; cx < fx+fullWidth; cx++ {
 				screen.SetContent(cx, line, ' ', nil, bgStyle)
 			}
 			if row.kind == rowKindLine {
-				dv.drawLineRow(screen, x, line, width, height, row, pl, bg)
+				dv.drawHalf(screen, x, line, width, n, half, pl, bg)
 			} else if pl < len(row.lines) {
 				DrawSpans(screen, x, line, width, withBackground(row.lines[pl], bg))
 			}
@@ -897,15 +1215,61 @@ func (dv *DiffView) Draw(screen tcell.Screen) {
 	}
 }
 
-// drawLineRow draws physical line pl of one rowKindLine row: on the first
-// line its gutter (never scrolled), then the half's content line pl with the
+// halfBackground is the background style of one half of a line row: a blank
+// half takes the filler, any other the tint of its line kind.
+func halfBackground(h diffHalf, selected bool) tcell.Style {
+	if h.line < 0 {
+		return theme.Base.Background(theme.DiffFillerBg)
+	}
+	return theme.DiffLineStyle(h.kind, selected)
+}
+
+// drawSplitLine draws physical line pl (of n) of a split row: the old half,
+// the "│" separator, the new half, each half on its own background. The
+// cursor bars go around the active half only: its outer reserved column and
+// the separator column.
+func (dv *DiffView) drawSplitLine(screen tcell.Screen, fx, y, fullWidth, n int, row diffRow, pl int, selected [2]bool, cursor bool, active int) {
+	x, width := frameInset(fx, fullWidth)
+	leftW, rightW := splitWidths(width)
+	sepX := x + leftW
+
+	var styles [2]tcell.Style
+	for i, h := range row.halves {
+		styles[i] = halfBackground(h, selected[i])
+	}
+	for cx := fx; cx < fx+fullWidth; cx++ {
+		st := styles[1]
+		if cx < sepX {
+			st = styles[0]
+		}
+		screen.SetContent(cx, y, ' ', nil, st)
+	}
+	screen.SetContent(sepX, y, '│', nil, theme.Muted)
+
+	_, leftBG, _ := styles[0].Decompose()
+	_, rightBG, _ := styles[1].Decompose()
+	dv.drawHalf(screen, x, y, leftW, n, row.halves[0], pl, leftBG)
+	dv.drawHalf(screen, sepX+1, y, rightW, n, row.halves[1], pl, rightBG)
+
+	if cursor {
+		_, bg, _ := styles[active].Decompose()
+		if active == 0 {
+			drawCursorBars(screen, fx, sepX, y, bg)
+		} else {
+			drawCursorBars(screen, sepX, fx+fullWidth-1, y, bg)
+		}
+	}
+}
+
+// drawHalf draws physical line pl of one half (width cells wide at x) of a
+// rowKindLine row shown on shown display lines: on the first line its gutter
+// (never scrolled), then the half's content line pl with the
 // horizontal-scroll offset applied, with a "‹" marker when scrolled.
 // Continuation lines (pl > 0) leave the gutter blank on the row background,
 // and a half with fewer lines than pl draws nothing. When the row is cut
 // short (to the pane height, or at rebuild) its last drawn line ends with a
 // muted "…".
-func (dv *DiffView) drawLineRow(screen tcell.Screen, x, y, width, height int, row diffRow, pl int, bg tcell.Color) {
-	half := row.primary()
+func (dv *DiffView) drawHalf(screen tcell.Screen, x, y, width, shown int, half diffHalf, pl int, bg tcell.Color) {
 	if pl >= len(half.content) {
 		return
 	}
@@ -934,7 +1298,7 @@ func (dv *DiffView) drawLineRow(screen tcell.Screen, x, y, width, height int, ro
 		return
 	}
 	DrawSpansOffset(screen, contentX, y, contentWidth, hOffset, withBackgroundKeepingWords(half.content[pl], bg))
-	if shown := row.displayLines(height); pl == shown-1 && (len(half.content) > shown || half.truncated) {
+	if pl == shown-1 && (len(half.content) > shown || half.truncated) {
 		drawCutEllipsis(screen, contentX+contentWidth-1, y, half.content[pl], contentWidth, bg)
 	}
 }
@@ -977,25 +1341,42 @@ func (dv *DiffView) rebuild(width int) {
 	var oldKey diffRowKey
 	hadSelection := len(dv.selectable) > 0 && !dv.resetCursor
 	if hadSelection {
-		oldKey = keyForRow(dv.rows[dv.selectable[dv.cursor]])
+		oldKey = dv.keyForRow(dv.rows[dv.selectable[dv.cursor]])
 	}
 	oldCursor := dv.cursor
 	dv.resetCursor = false
 
-	b := &diffBuilder{dv: dv, width: width}
-	b.build()
-
-	dv.rows = b.rows
-	dv.selectable = dv.selectable[:0]
-	for i, r := range dv.rows {
-		if r.selectable() {
-			dv.selectable = append(dv.selectable, i)
-		}
+	digits := dv.gutterDigits
+	split := dv.split && splitFits(width, digits)
+	layoutChanged := split != dv.splitActive
+	if layoutChanged {
+		// A selection is only side-pinned in the split layout, so it ends with
+		// the layout, whether by SetSplit or a resize across the fallback.
+		dv.EndVisual()
 	}
+	dv.splitActive = split
+
+	if layoutChanged && hadSelection {
+		// The row count differs between layouts: keep the cursor row on its
+		// screen line, however the layout came to change.
+		_, _, _, height := dv.GetInnerRect()
+		lines := 0
+		for i := dv.offset; i < dv.selectable[oldCursor]; i++ {
+			lines += dv.rows[i].displayLines(height)
+		}
+		dv.reanchor, dv.reanchorLines = true, lines
+	}
+
+	b := dv.buildRows(width, split, digits, dv.cursorColumn())
 	// The gutter is the same width for every line of a file bar a wider draft
 	// marker, so one sample line's gutter (blank draft column included)
 	// stands in for all of them here.
-	contentWidth := max(width-SpanWidth(gutterSpansFor(diff.Line{}, b.gutterWidth, "")), 1)
+	// In the split layout the narrower (left) half bounds the scroll.
+	contentWidth := max(width-SpanWidth(gutterSpansFor(diff.Line{}, digits, "")), 1)
+	if split {
+		left, _ := splitWidths(width)
+		contentWidth = max(left-splitGutterWidth(digits), 1)
+	}
 	dv.maxHOffset = maxHOffsetFor(b.longestContent, contentWidth)
 	// While wrapping hOffset is neither applied (see HOffset) nor
 	// clamped: maxHOffset follows the pane, and a resize while wrapped must
@@ -1007,14 +1388,73 @@ func (dv *DiffView) rebuild(width int) {
 	dv.cursor = clamp(oldCursor, 0, len(dv.selectable)-1)
 	if hadSelection {
 		for i, idx := range dv.selectable {
-			if keyForRow(dv.rows[idx]) == oldKey {
+			if rowMatchesKey(dv.rows[idx], oldKey) {
 				dv.cursor = i
+				if layoutChanged {
+					dv.adoptSide(dv.rows[idx], oldKey.line)
+				}
 				break
 			}
 		}
 	}
 	dv.applyPendingCursor()
+	dv.leavePinnedBlank()
 	dv.refreshLineTracking()
+	// The current match on a context row was styled in the column the cursor
+	// had before it resolved (a jump or a restore can change it). Build once
+	// more rather than restyle the spans: the rows are identical otherwise,
+	// and this happens only when such a match exists and the column differs.
+	if b.currentOnContext {
+		if col := dv.cursorColumn(); col != b.currentSide {
+			dv.buildRows(width, split, digits, col)
+		}
+	}
+}
+
+// buildRows rebuilds dv.rows and dv.selectable for the layout, returning the
+// builder (for its longest content and current-match bookkeeping).
+func (dv *DiffView) buildRows(width int, split bool, digits int, currentSide model.DiffSide) *diffBuilder {
+	b := &diffBuilder{dv: dv, width: width, split: split, gutterWidth: digits, currentSide: currentSide}
+	b.build()
+	dv.rows = b.rows
+	dv.selectable = dv.selectable[:0]
+	for i, r := range dv.rows {
+		if r.selectable() {
+			dv.selectable = append(dv.selectable, i)
+		}
+	}
+	return b
+}
+
+// cursorColumn is the column the cursor is drawn in: its row's frame half in
+// the split layout, else the preferred side.
+func (dv *DiffView) cursorColumn() model.DiffSide {
+	if row, ok := dv.currentRow(); ok && row.isSplit() {
+		return sideOf(dv.frameIdx(row))
+	}
+	return dv.cursorSide
+}
+
+// CursorRowHasLine reports whether the cursor's row shows line (an index into
+// hunk's lines) in either of its halves, which CursorLine alone cannot say on
+// a split row: it reports the one half the cursor is in.
+func (dv *DiffView) CursorRowHasLine(hunk, line int) bool {
+	row, ok := dv.currentRow()
+	return ok && row.kind == rowKindLine && row.hunk == hunk && row.halfOfLine(line) >= 0
+}
+
+// leavePinnedBlank moves a cursor a jump left on a row with nothing on the
+// selection's pinned side to the nearest row MoveBy could stop on (forward
+// first), so the cursor, its frame and the selection's end agree.
+func (dv *DiffView) leavePinnedBlank() {
+	if len(dv.selectable) == 0 || !dv.pinnedBlank(dv.rows[dv.selectable[dv.cursor]]) {
+		return
+	}
+	if i, ok := dv.stopFrom(dv.cursor+1, 1); ok {
+		dv.cursor = i
+	} else if i, ok := dv.stopFrom(dv.cursor-1, -1); ok {
+		dv.cursor = i
+	}
 }
 
 // applyPendingCursor resolves a JumpToLine or JumpToThread/JumpToThreadEdge
@@ -1038,8 +1478,15 @@ func (dv *DiffView) applyPendingLineCursor() {
 	if hi, li, ok := diff.LocateLine(dv.file.Hunks, dv.pendingCursorSide, dv.pendingCursorLine); ok {
 		for i, idx := range dv.selectable {
 			r := dv.rows[idx]
-			if r.kind == rowKindLine && r.hunk == hi && r.primary().line == li {
+			if r.kind == rowKindLine && r.hunk == hi && r.halfOfLine(li) >= 0 {
 				dv.cursor = i
+				switch {
+				case dv.inVisual:
+				case dv.pendingCursorAdopt:
+					dv.cursorSide = dv.pendingCursorSide
+				default:
+					dv.adoptSide(r, li)
+				}
 				dv.pendingCursorSet = false
 				break
 			}
@@ -1086,7 +1533,7 @@ func (dv *DiffView) applyPendingThreadCursor() {
 }
 
 // maxHOffsetFor returns the furthest hOffset that still leaves at least one
-// content column on screen: drawLineRow only ever spends a cell on the "‹"
+// content column on screen: drawHalf only ever spends a cell on the "‹"
 // marker once hOffset > 0, so the content actually visible while scrolled is
 // contentWidth-1 cells wide, one narrower than the unscrolled (hOffset == 0)
 // case contentWidth itself describes. Without
@@ -1104,6 +1551,14 @@ func maxHOffsetFor(longestContent, contentWidth int) int {
 type diffBuilder struct {
 	dv    *DiffView
 	width int
+	// split builds two-half line rows (see splitFits for when it may).
+	split bool
+	// currentSide is the column the search's current match is styled in on a
+	// split context row (the cursor's, see cursorColumn); currentOnContext
+	// records that the build had such a match, so rebuild knows whether a
+	// column that turned out different needs another pass.
+	currentSide      model.DiffSide
+	currentOnContext bool
 
 	rows           []diffRow
 	gutterWidth    int
@@ -1117,7 +1572,6 @@ const wordBudget = 2_000_000
 
 func (b *diffBuilder) build() {
 	f := b.dv.file
-	b.gutterWidth = gutterDigitWidth(f.Hunks)
 
 	b.rows = append(b.rows, b.fileHeaderRow(f))
 
@@ -1155,8 +1609,15 @@ func (b *diffBuilder) build() {
 				}
 			}
 			b.rows = append(b.rows, b.hunkHeaderRow(h))
+			if b.split {
+				b.appendSplitLines(f, hi, h, inline)
+				continue
+			}
 			for li, l := range h.Lines {
-				b.rows = append(b.rows, diffRow{kind: rowKindLine, hunk: hi, halves: []diffHalf{b.lineHalf(f, hi, li, l)}})
+				side, _ := diff.Anchor(l)
+				gutter := gutterSpansFor(l, b.gutterWidth, b.draftMark(f, hi, li, side))
+				c := b.contentFor(f, hi, li, l)
+				b.rows = append(b.rows, diffRow{kind: rowKindLine, hunk: hi, halves: []diffHalf{b.lineHalf(f, hi, li, l, c, true, gutter, b.width)}})
 				for _, t := range inline[hunkLineKey{hi, li}] {
 					b.appendThread(t)
 				}
@@ -1191,6 +1652,58 @@ func (b *diffBuilder) appendGapRow(gapStart, gapCount int) {
 		gapCount: gapCount,
 		lines:    [][]Span{{{Text: text, Style: theme.Muted}}},
 	})
+}
+
+// appendSplitLines appends hunk hi's lines as side-by-side rows, each followed
+// by the threads anchored to its old line then its new one (once, for a
+// context line that faces itself).
+func (b *diffBuilder) appendSplitLines(f DiffFile, hi int, h diff.Hunk, inline map[hunkLineKey][]model.ReviewThread) {
+	leftW, rightW := splitWidths(b.width)
+	for _, p := range diff.SideBySide(h.Lines) {
+		var left, right diffHalf
+		if p.Left == p.Right {
+			// A context line: one content for both halves, the search's current
+			// match styled in the cursor's column only.
+			c := b.contentFor(f, hi, p.Left, h.Lines[p.Left])
+			onLeft := b.currentSide == model.DiffSideLeft
+			if b.dv.searchCurrentSet && b.dv.searchCurrentPath == f.Path &&
+				b.dv.searchCurrentHunk == hi && b.dv.searchCurrentLine == p.Left {
+				b.currentOnContext = true
+			}
+			left = b.splitHalf(f, hi, h, p.Left, c, onLeft, leftW, model.DiffSideLeft)
+			right = b.splitHalf(f, hi, h, p.Right, c, !onLeft, rightW, model.DiffSideRight)
+		} else {
+			left = b.splitHalfOf(f, hi, h, p.Left, leftW, model.DiffSideLeft)
+			right = b.splitHalfOf(f, hi, h, p.Right, rightW, model.DiffSideRight)
+		}
+		b.rows = append(b.rows, diffRow{kind: rowKindLine, hunk: hi, halves: []diffHalf{left, right}})
+		anchors := []int{p.Left}
+		if p.Right != p.Left {
+			anchors = append(anchors, p.Right)
+		}
+		for _, li := range anchors {
+			for _, t := range inline[hunkLineKey{hi, li}] {
+				b.appendThread(t)
+			}
+		}
+	}
+}
+
+// splitHalfOf is splitHalf building the content of line li itself, or a blank
+// half for li == -1.
+func (b *diffBuilder) splitHalfOf(f DiffFile, hi int, h diff.Hunk, li, width int, side model.DiffSide) diffHalf {
+	if li < 0 {
+		return diffHalf{line: -1}
+	}
+	return b.splitHalf(f, hi, h, li, b.contentFor(f, hi, li, h.Lines[li]), true, width, side)
+}
+
+// splitHalf builds line li of h (li >= 0) as the side half, width cells wide,
+// from its prebuilt content c.
+func (b *diffBuilder) splitHalf(f DiffFile, hi int, h diff.Hunk, li int, c lineContent, current bool, width int, side model.DiffSide) diffHalf {
+	l := h.Lines[li]
+	gutter := splitGutterSpans(l, diff.NumberOn(l, side), b.gutterWidth, b.draftMark(f, hi, li, side))
+	return b.lineHalf(f, hi, li, l, c, current, gutter, width)
 }
 
 type hunkLineKey struct{ hunk, line int }
@@ -1261,14 +1774,27 @@ func (b *diffBuilder) hunkHeaderRow(h diff.Hunk) diffRow {
 	return diffRow{kind: rowKindHunkHeader, lines: [][]Span{{{Text: text, Style: theme.Muted}}}}
 }
 
-// lineHalf builds the gutter and content of line lineIdx of hunk hunkIdx,
-// folding in its search highlight and draft marker, and tracks the longest
-// content seen for maxHOffsetFor.
-func (b *diffBuilder) lineHalf(f DiffFile, hunkIdx, lineIdx int, l diff.Line) diffHalf {
-	draftMark := ""
-	if f.DraftLines[DraftAnchor{Hunk: hunkIdx, Line: lineIdx}] {
-		draftMark = f.DraftMarker
+// draftMark is the draft-gutter glyph for line lineIdx of hunk hunkIdx, or "".
+// side is the side the draft must be on: the column in the split layout, in
+// the unified one the side "c" would anchor the line to (diff.Anchor), so a
+// draft that "c" could not reopen there shows no marker.
+func (b *diffBuilder) draftMark(f DiffFile, hunkIdx, lineIdx int, side model.DiffSide) string {
+	if f.DraftLines[DraftAnchor{Hunk: hunkIdx, Line: lineIdx, Side: side}] {
+		return f.DraftMarker
 	}
+	return ""
+}
+
+// lineContent is a line's content spans (syntax and word emphasis) before the
+// search highlight, with the search matches in its text. A context line shows
+// on both sides of the split layout, so both halves share one.
+type lineContent struct {
+	spans   []Span
+	matches [][]int
+}
+
+// contentFor builds line lineIdx of hunk hunkIdx's lineContent.
+func (b *diffBuilder) contentFor(f DiffFile, hunkIdx, lineIdx int, l diff.Line) lineContent {
 	content := contentSpansFor(f, hunkIdx, lineIdx, l)
 	if ranges := b.dv.wordRanges[hunkIdx][lineIdx]; len(ranges) > 0 {
 		// Before the search highlight, which then replaces a matched piece's
@@ -1277,23 +1803,37 @@ func (b *diffBuilder) lineHalf(f DiffFile, hunkIdx, lineIdx int, l diff.Line) di
 		wordBG, _ := theme.DiffWordBg(l.Kind)
 		content = restyleRanges(content, l.Text, ranges, func(s tcell.Style) tcell.Style { return s.Background(wordBG) })
 	}
+	var matches [][]int
 	if b.dv.searchRE != nil {
-		if ranges := b.dv.searchRE.FindAllStringIndex(l.Text, -1); len(ranges) > 0 {
-			content = b.dv.highlightSearchRanges(content, f.Path, hunkIdx, lineIdx, l.Text, ranges)
-		}
+		matches = b.dv.searchRE.FindAllStringIndex(l.Text, -1)
+	}
+	return lineContent{spans: content, matches: matches}
+}
+
+// lineHalf builds the half of line lineIdx of hunk hunkIdx that is width
+// cells wide and starts with gutter, folding in the search highlight of c
+// (the current match is styled only when current), and tracks the longest
+// content seen for maxHOffsetFor.
+func (b *diffBuilder) lineHalf(f DiffFile, hunkIdx, lineIdx int, l diff.Line, c lineContent, current bool, gutter []Span, width int) diffHalf {
+	content := c.spans
+	switch {
+	case len(c.matches) == 0:
+	case current:
+		content = b.dv.highlightSearchRanges(content, f.Path, hunkIdx, lineIdx, l.Text, c.matches)
+	default:
+		content = highlightRanges(content, l.Text, c.matches, theme.SearchMatch)
 	}
 	w := SpanWidth(content)
 	if w > b.longestContent {
 		b.longestContent = w
 	}
-	gutter := gutterSpansFor(l, b.gutterWidth, draftMark)
 	lines := [][]Span{content}
 	truncated := false
 	if b.dv.wrap {
 		// A drafted line's marker can make its gutter wider than the others',
 		// so each line wraps at its own width.
 		// Below 2 cells a wide rune would not fit its line at all.
-		if cw := b.width - SpanWidth(gutter); cw >= 2 && w > cw {
+		if cw := width - SpanWidth(gutter); cw >= 2 && w > cw {
 			lines, truncated = chopSpansLimit(content, cw, maxWrapLines)
 		}
 	}
@@ -1353,18 +1893,7 @@ func gutterSpansFor(l diff.Line, width int, draftMark string) []Span {
 	oldStr := blankOrNumber(l.Kind != diff.Add, l.OldNo, width)
 	newStr := blankOrNumber(l.Kind != diff.Del, l.NewNo, width)
 
-	marker, markerStyle := " ", theme.Base
-	switch l.Kind {
-	case diff.Add:
-		marker, markerStyle = "+", theme.Success
-	case diff.Del:
-		marker, markerStyle = "-", theme.Error
-	}
-
-	draftCol := " "
-	if draftMark != "" {
-		draftCol = draftMark
-	}
+	marker, markerStyle := markerFor(l.Kind)
 
 	return []Span{
 		{Text: oldStr, Style: theme.Muted},
@@ -1372,9 +1901,65 @@ func gutterSpansFor(l diff.Line, width int, draftMark string) []Span {
 		{Text: newStr, Style: theme.Muted},
 		{Text: " ", Style: theme.Muted},
 		{Text: marker, Style: markerStyle},
-		{Text: draftCol, Style: theme.Accent},
+		{Text: draftColumn(draftMark), Style: theme.Accent},
 		{Text: " ", Style: theme.Base},
 	}
+}
+
+// splitGutterSpans renders a split half's "number marker draft-mark " gutter:
+// no, the one line number the half shows (old on the left, new on the
+// right), right-aligned to width digits.
+func splitGutterSpans(l diff.Line, no, width int, draftMark string) []Span {
+	marker, markerStyle := markerFor(l.Kind)
+	return []Span{
+		{Text: blankOrNumber(true, no, width), Style: theme.Muted},
+		{Text: " ", Style: theme.Muted},
+		{Text: marker, Style: markerStyle},
+		{Text: draftColumn(draftMark), Style: theme.Accent},
+		{Text: " ", Style: theme.Base},
+	}
+}
+
+func markerFor(k diff.LineKind) (string, tcell.Style) {
+	switch k {
+	case diff.Add:
+		return "+", theme.Success
+	case diff.Del:
+		return "-", theme.Error
+	case diff.Context:
+	}
+	return " ", theme.Base
+}
+
+func draftColumn(mark string) string {
+	if mark == "" {
+		return " "
+	}
+	return mark
+}
+
+// minSplitContent is the least content width of a split half. Below it the
+// layout falls back to unified: lines would be cut to a few characters, and
+// the file tree already takes 30 columns of a typical terminal.
+const minSplitContent = 12
+
+// splitWidths divides an inner width into the old and new halves around the
+// one-column separator; the new half gets the odd column.
+func splitWidths(width int) (left, right int) {
+	left = (width - 1) / 2
+	return left, width - 1 - left
+}
+
+// splitGutterWidth is a split half's gutter width for digits-wide numbers.
+func splitGutterWidth(digits int) int {
+	return SpanWidth(splitGutterSpans(diff.Line{}, 0, digits, ""))
+}
+
+// splitFits reports whether both halves of an inner width keep minSplitContent
+// columns for content.
+func splitFits(width, digits int) bool {
+	left, _ := splitWidths(width)
+	return left-splitGutterWidth(digits) >= minSplitContent
 }
 
 func blankOrNumber(present bool, n, width int) string {

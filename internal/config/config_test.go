@@ -40,6 +40,9 @@ func TestDefault(t *testing.T) {
 	if got.Diff.Wrap {
 		t.Error("Diff.Wrap = true, want false by default")
 	}
+	if got.Diff.Layout != "unified" {
+		t.Errorf("Diff.Layout = %q, want %q by default", got.Diff.Layout, "unified")
+	}
 	if len(got.List.Sections) != 0 {
 		t.Errorf("List.Sections = %v, want empty", got.List.Sections)
 	}

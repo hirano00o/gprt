@@ -46,6 +46,9 @@ type DiffConfig struct {
 	// Wrap soft-wraps long diff lines instead of truncating them. It is the
 	// initial state; the w key toggles it at runtime.
 	Wrap bool `yaml:"wrap"`
+	// Layout is the initial diff layout: "unified" or "split" (side by
+	// side). The s key toggles it at runtime.
+	Layout string `yaml:"layout"`
 }
 
 // ListConfig configures the pull request list view.
@@ -76,6 +79,9 @@ func Default() Config {
 		TabWidth:        4,
 		List: ListConfig{
 			State: "open",
+		},
+		Diff: DiffConfig{
+			Layout: "unified",
 		},
 	}
 }

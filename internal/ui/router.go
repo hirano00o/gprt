@@ -4,6 +4,7 @@ import (
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 
+	"github.com/hirano00o/gprt/internal/model"
 	"github.com/hirano00o/gprt/internal/ui/editor"
 	"github.com/hirano00o/gprt/internal/ui/keys"
 	"github.com/hirano00o/gprt/internal/ui/theme"
@@ -515,6 +516,15 @@ func (a *App) dispatch(action keys.Action, count int) {
 		}
 	case keys.ActionDiffToggleWrap:
 		a.diffView.ToggleWrap()
+	case keys.ActionDiffToggleSplit:
+		a.diffView.ToggleSplit()
+		if a.diffView.Split() && !a.diffView.SplitShown() {
+			a.showToast("pane too narrow for split view", theme.Warning)
+		}
+	case keys.ActionDiffCursorLeft:
+		a.diffView.SetCursorSide(model.DiffSideLeft)
+	case keys.ActionDiffCursorRight:
+		a.diffView.SetCursorSide(model.DiffSideRight)
 	case keys.ActionDiffNextThread:
 		if !a.diffView.NextThread() {
 			a.stepThread(1)

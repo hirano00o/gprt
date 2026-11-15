@@ -45,6 +45,9 @@ const (
 	ActionDiffScrollLeft       Action = "diff.scroll_left"
 	ActionDiffScrollRight      Action = "diff.scroll_right"
 	ActionDiffToggleWrap       Action = "diff.toggle_wrap"
+	ActionDiffToggleSplit      Action = "diff.toggle_split"
+	ActionDiffCursorLeft       Action = "diff.cursor_left"
+	ActionDiffCursorRight      Action = "diff.cursor_right"
 	ActionDiffNextThread       Action = "diff.next_thread"
 	ActionDiffPrevThread       Action = "diff.prev_thread"
 	ActionDiffNextFile         Action = "diff.next_file"
@@ -79,6 +82,7 @@ func AllActions() []Action {
 		ActionDiffVisual, ActionDiffComment, ActionDiffCommentFile,
 		ActionDiffFold, ActionDiffUnfoldAll, ActionDiffFoldAll,
 		ActionDiffScrollLeft, ActionDiffScrollRight, ActionDiffToggleWrap,
+		ActionDiffToggleSplit, ActionDiffCursorLeft, ActionDiffCursorRight,
 		ActionDiffNextThread, ActionDiffPrevThread, ActionDiffNextFile, ActionDiffPrevFile,
 		ActionDiffSearch, ActionDiffSearchNext, ActionDiffSearchPrev, ActionDiffExpand,
 		ActionThreadReply, ActionThreadToggleResolved,

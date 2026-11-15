@@ -55,6 +55,7 @@ func (a *App) buildFilesTab() {
 	a.diffView = widget.NewDiffView()
 	a.diffView.SetImageSource(a.images.sources())
 	a.diffView.SetWrap(a.deps.Config.Diff.Wrap)
+	a.diffView.SetSplit(a.deps.Config.Diff.Layout == "split")
 
 	a.filesFlex = tview.NewFlex().SetDirection(tview.FlexColumn)
 	a.layoutFilesPanes()
@@ -431,6 +432,10 @@ func (a *App) refreshCurrentFile() {
 // draft for path is saved or deleted (composer.go's
 // refreshDraftGutterIfNeeded), never per Draw. A range draft's marker sits
 // on its own end line (Line), matching parseLineAnchor's own convention.
+// Keys carry the anchor's Side: the split layout marks only that column, and
+// the unified layout only a line whose kind-derived side (diff.Anchor) it is,
+// since a draft on the other side of a context line could not be reopened
+// there by "c".
 func (a *App) draftLinesForFile(hunks []diff.Hunk, path string) map[widget.DraftAnchor]bool {
 	if a.deps.Drafts == nil {
 		return nil
@@ -460,7 +465,7 @@ func (a *App) draftLinesForFile(hunks []diff.Hunk, path string) map[widget.Draft
 		if !ok {
 			continue
 		}
-		marks[widget.DraftAnchor{Hunk: hi, Line: li}] = true
+		marks[widget.DraftAnchor{Hunk: hi, Line: li, Side: side}] = true
 	}
 	return marks
 }

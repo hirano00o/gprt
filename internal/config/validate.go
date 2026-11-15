@@ -21,7 +21,9 @@ var (
 	// validImageProtocols also accepts "" (see Validate): a config built
 	// without Default() has no reason to spell out the default.
 	validImageProtocols = map[string]bool{"": true, "auto": true, "kitty": true, "none": true}
-	validListStates     = map[string]bool{"open": true, "closed": true, "merged": true, "all": true}
+	// validDiffLayouts also accepts "" (unified), like validImageProtocols.
+	validDiffLayouts = map[string]bool{"": true, "unified": true, "split": true}
+	validListStates  = map[string]bool{"open": true, "closed": true, "merged": true, "all": true}
 )
 
 // Validate checks the configuration for internal consistency: enum values,
@@ -52,6 +54,9 @@ func (c Config) Validate() error {
 	}
 	if !validImageProtocols[c.ImageProtocol] {
 		errs = append(errs, fmt.Errorf("image_protocol: must be \"auto\", \"kitty\", or \"none\", got %q", c.ImageProtocol))
+	}
+	if !validDiffLayouts[c.Diff.Layout] {
+		errs = append(errs, fmt.Errorf("diff.layout: must be \"unified\" or \"split\", got %q", c.Diff.Layout))
 	}
 	if !validListStates[c.List.State] {
 		errs = append(errs, fmt.Errorf("list.state: must be one of \"open\", \"closed\", \"merged\", \"all\", got %q", c.List.State))

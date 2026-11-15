@@ -77,6 +77,7 @@ image_protocol: auto      # auto | kitty | none; draw images with the kitty grap
 tab_width: 4
 diff:
   wrap: false             # true wraps long diff lines instead of truncating them (toggle with w)
+  layout: unified         # unified | split (side by side); toggle with s
 list:
   state: open             # open | closed | merged | all
   sections:               # extra search sections, appended to the built-in ones
@@ -153,6 +154,8 @@ keys:                     # remap any action (vim notation); see docs/KEYBINDING
 | `]f` / `[f` | 次 / 前のファイル |
 | `zh` / `zl` | 水平スクロール |
 | `w` | 長い行の折り返し表示を切り替え |
+| `s` | 左右分割(split)表示と通常表示を切り替え |
+| `h` / `l` | 左右分割表示で、カーソルを左(旧)/ 右(新)の列へ移動 |
 | `/` | 変更のあった全ファイルを横断して差分を検索(正規表現、smartcase。`Enter` で実行、`Esc` で入力を取り消し / ハイライトを解除) |
 | `n` / `N` | 次 / 前の検索結果へ移動(端まで行くとトーストを出して先頭 / 末尾へ折り返す) |
 

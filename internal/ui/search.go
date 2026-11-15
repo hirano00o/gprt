@@ -178,7 +178,12 @@ func (a *App) currentSearchPos(entries []store.FileEntry) searchPos {
 
 	hunk, line := -1, -1
 	if file >= 0 {
-		if l, ok := a.diffView.CursorLine(); ok {
+		// In the split layout the cursor's row can show the current match in
+		// its other half; CursorLine reports only the cursor's own half, and
+		// stepping from that would find the same match again.
+		if m, ok := a.currentSearchMatch(); ok && a.diffView.CursorRowHasLine(m.hunk, m.line) {
+			hunk, line = m.hunk, m.line
+		} else if l, ok := a.diffView.CursorLine(); ok {
 			side, no := diff.Anchor(l)
 			if hi, li, ok := diff.LocateLine(entries[file].Hunks, side, no); ok {
 				hunk, line = hi, li
@@ -194,6 +199,16 @@ func (a *App) currentSearchPos(entries []store.FileEntry) searchPos {
 		}
 	}
 	return searchPos{file: file, hunk: hunk, line: line, col: col}
+}
+
+// currentSearchMatch is the match the last n/N/search jump landed on, if it is
+// still in the file shown.
+func (a *App) currentSearchMatch() (searchMatch, bool) {
+	if a.searchIdx < 0 || a.searchIdx >= len(a.searchMatches) {
+		return searchMatch{}, false
+	}
+	m := a.searchMatches[a.searchIdx]
+	return m, m.path == a.currentFilePath
 }
 
 // nextSearchMatchIndex finds the first match strictly after pos (dir > 0)

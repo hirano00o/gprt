@@ -77,6 +77,9 @@ The vim editor's own keys (listed at the bottom of this document) are **fixed** 
 | `zh` | diff | scroll left (while wrapping, toasts the key bound to `diff.toggle_wrap` instead) | `diff.scroll_left` | Done (M2) |
 | `zl` | diff | scroll right (while wrapping, toasts the key bound to `diff.toggle_wrap` instead) | `diff.scroll_right` | Done (M2) |
 | `w` | diff | toggle line wrapping | `diff.toggle_wrap` | Done |
+| `s` | diff | toggle the side-by-side (split) layout; keeps the cursor line and ends visual mode when the drawn layout changes; toasts when the pane is too narrow to show it. In split, `c` anchors to the column the cursor is in (a context line on either side) | `diff.toggle_split` | Done |
+| `h` | diff | cursor on the old (left) column of a split row (a blank side falls back to the other; ignored in visual mode; only records the preference in the unified layout) | `diff.cursor_left` | Done |
+| `l` | diff | cursor on the new (right) column of a split row, same rules as `h` | `diff.cursor_right` | Done |
 | `]c` | diff | jump to the next thread, crossing into the next file that has one once the current file runs out; toasts `last comment` at the very end | `diff.next_thread` | Done |
 | `[c` | diff | jump to the previous thread, crossing into the previous file that has one once the current file runs out; toasts `first comment` at the very start | `diff.prev_thread` | Done |
 | `]f` | diff | jump to the next file | `diff.next_file` | Done (M2) |
