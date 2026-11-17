@@ -122,15 +122,16 @@ type Keymap struct {
 // which never produces a NUL byte itself) uniquely determined by its Keys
 // — this is not relied on for the *prefix* check (see ctxTable's doc
 // comment), only for exact-match map keys and display text.
-func sequenceKey(seq []Key) string {
-	var b strings.Builder
+func sequenceKey(seq []Key) string { return joinKeys(seq, "\x00") }
+
+// joinKeys renders seq's keys, separated by sep: the one place a key
+// sequence is turned into text.
+func joinKeys(seq []Key, sep string) string {
+	parts := make([]string, len(seq))
 	for i, k := range seq {
-		if i > 0 {
-			b.WriteByte(0)
-		}
-		b.WriteString(k.String())
+		parts[i] = k.String()
 	}
-	return b.String()
+	return strings.Join(parts, sep)
 }
 
 // build compiles a flat binding list into per-context lookup tables,
@@ -223,6 +224,20 @@ func (km Keymap) Bindings(ctx Context) []Binding {
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Sequence < out[j].Sequence })
 	return out
+}
+
+// DisplaySequence renders the sequence bound to action in ctx in vim
+// notation (for example "zw" or "<Space>w"), for messages that name a key.
+// It is the canonical form Key.String produces, so an equivalent spelling in
+// the config ("<C-i>") is shown normalised ("<Tab>"). ok is false when action
+// has no binding in ctx.
+func (km Keymap) DisplaySequence(ctx Context, action Action) (seq string, ok bool) {
+	for _, e := range km.tables[ctx].entries {
+		if e.action == action {
+			return joinKeys(e.seq, ""), true
+		}
+	}
+	return "", false
 }
 
 // Merge builds a Keymap starting from defaults and applying overrides,

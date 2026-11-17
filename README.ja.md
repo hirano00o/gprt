@@ -75,6 +75,8 @@ browser: ""               # command for o; defaults to $BROWSER, then the OS def
 highlight_style: github-dark  # any chroma style name
 image_protocol: auto      # auto | kitty | none; draw images with the kitty graphics protocol
 tab_width: 4
+diff:
+  wrap: false             # true wraps long diff lines instead of truncating them (toggle with w)
 list:
   state: open             # open | closed | merged | all
   sections:               # extra search sections, appended to the built-in ones
@@ -150,6 +152,7 @@ keys:                     # remap any action (vim notation); see docs/KEYBINDING
 | `]c` / `[c` | 次 / 前のスレッド(現在のファイルになければ次 / 前のファイルへ移動) |
 | `]f` / `[f` | 次 / 前のファイル |
 | `zh` / `zl` | 水平スクロール |
+| `w` | 長い行の折り返し表示を切り替え |
 | `/` | 変更のあった全ファイルを横断して差分を検索(正規表現、smartcase。`Enter` で実行、`Esc` で入力を取り消し / ハイライトを解除) |
 | `n` / `N` | 次 / 前の検索結果へ移動(端まで行くとトーストを出して先頭 / 末尾へ折り返す) |
 

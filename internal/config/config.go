@@ -34,9 +34,18 @@ type Config struct {
 	TabWidth int `yaml:"tab_width"`
 	// List configures the pull request list view.
 	List ListConfig `yaml:"list"`
+	// Diff configures the diff view.
+	Diff DiffConfig `yaml:"diff"`
 	// Keys maps an action ID to the key sequence (vim notation) that
 	// triggers it, overriding the built-in default for that action.
 	Keys map[string]string `yaml:"keys"`
+}
+
+// DiffConfig configures the diff view.
+type DiffConfig struct {
+	// Wrap soft-wraps long diff lines instead of truncating them. It is the
+	// initial state; the w key toggles it at runtime.
+	Wrap bool `yaml:"wrap"`
 }
 
 // ListConfig configures the pull request list view.

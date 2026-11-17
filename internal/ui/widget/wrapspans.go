@@ -61,13 +61,25 @@ func splitParagraphs(spans []Span) [][]cell {
 
 // spanCells splits s into one cell per grapheme cluster.
 func spanCells(s Span) []cell {
-	var cells []cell
+	cells, _, _ := appendSpanCells(nil, s, 0, 0)
+	return cells
+}
+
+// appendSpanCells appends s's cells to dst, where used is the width already
+// collected. With budget > 0 it stops, reporting true, as soon as used
+// exceeds budget while text remains, so a huge span is not segmented in full.
+func appendSpanCells(dst []cell, s Span, used, budget int) (cells []cell, newUsed int, stopped bool) {
 	it := graphemes.FromString(s.Text)
 	for it.Next() {
+		if budget > 0 && used > budget {
+			return dst, used, true
+		}
 		cluster := it.Value()
-		cells = append(cells, cell{text: cluster, width: displaywidth.String(cluster), style: s.Style})
+		c := cell{text: cluster, width: displaywidth.String(cluster), style: s.Style}
+		dst = append(dst, c)
+		used += c.width
 	}
-	return cells
+	return dst, used, false
 }
 
 // chopSpans splits spans into lines of at most width columns without any
@@ -75,18 +87,39 @@ func spanCells(s Span) []cell {
 // as source code whose spacing must be shown as written. Empty input yields
 // one empty line.
 func chopSpans(spans []Span, width int) [][]Span {
+	lines, _ := chopSpansLimit(spans, width, 0)
+	return lines
+}
+
+// chopSpansLimit is chopSpans keeping at most maxLines lines (no limit when
+// maxLines <= 0), reporting whether text was left out. It stops segmenting
+// text once maxLines lines are certainly full, even in the middle of a span.
+func chopSpansLimit(spans []Span, width, maxLines int) (lines [][]Span, truncated bool) {
+	// Every chunk is at most width wide (callers wrap at width >= 2, so no
+	// cell is wider than a line), so maxLines chunks hold at most
+	// maxLines*width columns: reading more than that guarantees text is left
+	// over. 0 when unlimited.
+	budget := maxLines * width
 	var cells []cell
+	used := 0
 	for _, s := range spans {
-		cells = append(cells, spanCells(s)...)
+		var stopped bool
+		if cells, used, stopped = appendSpanCells(cells, s, used, budget); stopped {
+			truncated = true
+			break
+		}
 	}
 	if len(cells) == 0 {
-		return [][]Span{nil}
+		return [][]Span{nil}, false
 	}
-	var lines [][]Span
-	for _, chunk := range hardBreakCells(cells, width) {
+	chunks := hardBreakCells(cells, width)
+	if maxLines > 0 && len(chunks) > maxLines {
+		chunks, truncated = chunks[:maxLines], true
+	}
+	for _, chunk := range chunks {
 		lines = append(lines, cellsToSpans(chunk))
 	}
-	return lines
+	return lines, truncated
 }
 
 // wordToken is a word together with the space cell that preceded it in the

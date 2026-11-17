@@ -6,6 +6,7 @@ import (
 
 	"github.com/hirano00o/gprt/internal/ui/editor"
 	"github.com/hirano00o/gprt/internal/ui/keys"
+	"github.com/hirano00o/gprt/internal/ui/theme"
 )
 
 // handleKey is the App's single app.SetInputCapture function: every key
@@ -500,10 +501,20 @@ func (a *App) dispatch(action keys.Action, count int) {
 		a.diffView.FoldAll(false)
 	case keys.ActionDiffFoldAll:
 		a.diffView.FoldAll(true)
-	case keys.ActionDiffScrollLeft:
-		a.diffView.ScrollHorizontal(-diffScrollStep)
-	case keys.ActionDiffScrollRight:
-		a.diffView.ScrollHorizontal(diffScrollStep)
+	case keys.ActionDiffScrollLeft, keys.ActionDiffScrollRight:
+		step := diffScrollStep
+		if action == keys.ActionDiffScrollLeft {
+			step = -step
+		}
+		if !a.diffView.ScrollHorizontal(step) {
+			msg := "horizontal scroll is off while wrapping"
+			if key, ok := a.deps.Keymap.DisplaySequence(keys.ContextDiff, keys.ActionDiffToggleWrap); ok {
+				msg += " (" + key + " to unwrap)"
+			}
+			a.showToast(msg, theme.Warning)
+		}
+	case keys.ActionDiffToggleWrap:
+		a.diffView.ToggleWrap()
 	case keys.ActionDiffNextThread:
 		if !a.diffView.NextThread() {
 			a.stepThread(1)

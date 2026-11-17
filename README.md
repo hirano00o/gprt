@@ -75,6 +75,8 @@ browser: ""               # command for o; defaults to $BROWSER, then the OS def
 highlight_style: github-dark  # any chroma style name
 image_protocol: auto      # auto | kitty | none; draw images with the kitty graphics protocol
 tab_width: 4
+diff:
+  wrap: false             # true wraps long diff lines instead of truncating them (toggle with w)
 list:
   state: open             # open | closed | merged | all
   sections:               # extra search sections, appended to the built-in ones
@@ -150,6 +152,7 @@ All keys below except the editor's own can be remapped. The full reference, incl
 | `]c` / `[c` | Next / previous thread, crossing into the next / previous file that has one |
 | `]f` / `[f` | Next / previous file |
 | `zh` / `zl` | Scroll horizontally |
+| `w` | Toggle line wrapping |
 | `/` | Search the diff across every changed file (regexp, smartcase; `Enter` runs it, `Esc` cancels or clears the highlight) |
 | `n` / `N` | Next / previous search match, wrapping with a toast |
 

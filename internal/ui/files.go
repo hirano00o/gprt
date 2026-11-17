@@ -54,6 +54,7 @@ func (a *App) buildFilesTab() {
 
 	a.diffView = widget.NewDiffView()
 	a.diffView.SetImageSource(a.images.sources())
+	a.diffView.SetWrap(a.deps.Config.Diff.Wrap)
 
 	a.filesFlex = tview.NewFlex().SetDirection(tview.FlexColumn)
 	a.layoutFilesPanes()
