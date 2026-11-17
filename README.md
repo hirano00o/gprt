@@ -77,6 +77,7 @@ image_protocol: auto      # auto | kitty | none; draw images with the kitty grap
 tab_width: 4
 diff:
   wrap: false             # true wraps long diff lines instead of truncating them (toggle with w)
+  layout: unified         # unified | split (side by side); toggle with s
 list:
   state: open             # open | closed | merged | all
   sections:               # extra search sections, appended to the built-in ones
@@ -153,6 +154,8 @@ All keys below except the editor's own can be remapped. The full reference, incl
 | `]f` / `[f` | Next / previous file |
 | `zh` / `zl` | Scroll horizontally |
 | `w` | Toggle line wrapping |
+| `s` | Toggle the side-by-side (split) layout |
+| `h` / `l` | Put the cursor on the old / new column (split layout) |
 | `/` | Search the diff across every changed file (regexp, smartcase; `Enter` runs it, `Esc` cancels or clears the highlight) |
 | `n` / `N` | Next / previous search match, wrapping with a toast |
 

@@ -66,3 +66,7 @@ func DiffWordBg(kind diff.LineKind) (bg tcell.Color, ok bool) {
 func IsDiffWordBg(c tcell.Color) bool {
 	return c == colorDiffAddWordBg || c == colorDiffDelWordBg
 }
+
+// DiffFillerBg is the background of a split-layout half that has no line
+// (the shorter side of a modified block): subtler than any line tint.
+var DiffFillerBg = tcell.NewRGBColor(25, 25, 25)

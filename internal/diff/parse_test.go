@@ -303,8 +303,8 @@ func TestRangeAnchor_MixedSidesIsError(t *testing.T) {
 
 func TestRangeAnchor_RequiresAtLeastTwoLines(t *testing.T) {
 	_, err := RangeAnchor([]Line{{Kind: Del, OldNo: 1}})
-	if err == nil {
-		t.Fatal("RangeAnchor() error = nil, want an error for a single line")
+	if !errors.Is(err, ErrTooFewLines) {
+		t.Fatalf("RangeAnchor() error = %v, want ErrTooFewLines for a single line", err)
 	}
 }
 
@@ -853,4 +853,116 @@ func mustParse(t *testing.T, patch string) []Hunk {
 		t.Fatalf("Parse() error = %v", err)
 	}
 	return hunks
+}
+
+func TestAnchorOn(t *testing.T) {
+	tests := []struct {
+		name     string
+		line     Line
+		side     model.DiffSide
+		wantNo   int
+		wantFail bool
+	}{
+		{"del on left uses old", Line{Kind: Del, OldNo: 5}, model.DiffSideLeft, 5, false},
+		{"context on left uses old", Line{Kind: Context, OldNo: 3, NewNo: 4}, model.DiffSideLeft, 3, false},
+		{"add on right uses new", Line{Kind: Add, NewNo: 7}, model.DiffSideRight, 7, false},
+		{"context on right uses new", Line{Kind: Context, OldNo: 3, NewNo: 4}, model.DiffSideRight, 4, false},
+		{"add on left is refused", Line{Kind: Add, NewNo: 7}, model.DiffSideLeft, 0, true},
+		{"del on right is refused", Line{Kind: Del, OldNo: 5}, model.DiffSideRight, 0, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			side, no, err := AnchorOn(tt.line, tt.side)
+			if (err != nil) != tt.wantFail {
+				t.Fatalf("AnchorOn(%+v, %v) error = %v, wantFail %v", tt.line, tt.side, err, tt.wantFail)
+			}
+			if err == nil && (side != tt.side || no != tt.wantNo) {
+				t.Errorf("AnchorOn(%+v, %v) = (%v, %d), want (%v, %d)", tt.line, tt.side, side, no, tt.side, tt.wantNo)
+			}
+		})
+	}
+}
+
+func TestRangeAnchorOn(t *testing.T) {
+	ctx := Line{Kind: Context, OldNo: 1, NewNo: 1}
+	del2 := Line{Kind: Del, OldNo: 2}
+	del3 := Line{Kind: Del, OldNo: 3}
+	add2 := Line{Kind: Add, NewNo: 2}
+	ctx3 := Line{Kind: Context, OldNo: 4, NewNo: 3}
+	tests := []struct {
+		name     string
+		lines    []Line
+		side     model.DiffSide
+		want     Range
+		wantFail bool
+	}{
+		{
+			"context and dels on left use old numbers",
+			[]Line{ctx, del2, del3},
+			model.DiffSideLeft,
+			Range{StartSide: model.DiffSideLeft, Side: model.DiffSideLeft, StartLine: 1, Line: 3},
+			false,
+		},
+		{
+			"adds and context on right use new numbers",
+			[]Line{add2, ctx3},
+			model.DiffSideRight,
+			Range{StartSide: model.DiffSideRight, Side: model.DiffSideRight, StartLine: 2, Line: 3},
+			false,
+		},
+		{
+			"context only on left",
+			[]Line{ctx, ctx3},
+			model.DiffSideLeft,
+			Range{StartSide: model.DiffSideLeft, Side: model.DiffSideLeft, StartLine: 1, Line: 4},
+			false,
+		},
+		{"add on left is refused", []Line{ctx, add2}, model.DiffSideLeft, Range{}, true},
+		{"del on right is refused", []Line{ctx, del2}, model.DiffSideRight, Range{}, true},
+		{"one line is refused", []Line{ctx}, model.DiffSideLeft, Range{}, true},
+		{"no lines is refused", nil, model.DiffSideRight, Range{}, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := RangeAnchorOn(tt.lines, tt.side)
+			if (err != nil) != tt.wantFail {
+				t.Fatalf("RangeAnchorOn error = %v, wantFail %v", err, tt.wantFail)
+			}
+			if err == nil && got != tt.want {
+				t.Errorf("RangeAnchorOn = %+v, want %+v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestOnSide(t *testing.T) {
+	tests := []struct {
+		kind LineKind
+		side model.DiffSide
+		want bool
+	}{
+		{Context, model.DiffSideLeft, true},
+		{Context, model.DiffSideRight, true},
+		{Del, model.DiffSideLeft, true},
+		{Del, model.DiffSideRight, false},
+		{Add, model.DiffSideRight, true},
+		{Add, model.DiffSideLeft, false},
+		{Context, "", false},
+	}
+	for _, tt := range tests {
+		if got := OnSide(Line{Kind: tt.kind}, tt.side); got != tt.want {
+			t.Errorf("OnSide(kind %v, %q) = %v, want %v", tt.kind, tt.side, got, tt.want)
+		}
+	}
+}
+
+func TestRangeAnchorOnTooFewLinesIsDistinguishable(t *testing.T) {
+	_, err := RangeAnchorOn([]Line{{Kind: Context}}, model.DiffSideLeft)
+	if !errors.Is(err, ErrTooFewLines) {
+		t.Errorf("RangeAnchorOn(1 line) error = %v, want ErrTooFewLines", err)
+	}
+	_, err = RangeAnchorOn([]Line{{Kind: Context}, {Kind: Add}}, model.DiffSideLeft)
+	if !errors.Is(err, ErrWrongSide) {
+		t.Errorf("RangeAnchorOn(add on left) error = %v, want ErrWrongSide", err)
+	}
 }

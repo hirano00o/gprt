@@ -268,7 +268,7 @@ type Range struct {
 // ErrMixedSides.
 func RangeAnchor(lines []Line) (Range, error) {
 	if len(lines) < 2 {
-		return Range{}, fmt.Errorf("diff: RangeAnchor requires at least 2 lines, got %d", len(lines))
+		return Range{}, fmt.Errorf("%w: RangeAnchor got %d", ErrTooFewLines, len(lines))
 	}
 
 	allDel, anyDel := true, false
@@ -295,6 +295,61 @@ func RangeAnchor(lines []Line) (Range, error) {
 	default:
 		return Range{}, ErrMixedSides
 	}
+}
+
+// ErrWrongSide is returned by AnchorOn and RangeAnchorOn for a line that does
+// not exist on the requested side: an addition on LEFT or a deletion on RIGHT.
+var ErrWrongSide = errors.New("diff: line is not on that side")
+
+// ErrTooFewLines is returned by RangeAnchorOn for fewer than two lines.
+var ErrTooFewLines = errors.New("diff: a range needs at least 2 lines")
+
+// OnSide reports whether l exists on side of a diff: a context line on both,
+// a deletion on LEFT only, an addition on RIGHT only.
+func OnSide(l Line, side model.DiffSide) bool {
+	switch side {
+	case model.DiffSideLeft:
+		return l.Kind != Add
+	case model.DiffSideRight:
+		return l.Kind != Del
+	}
+	return false
+}
+
+// NumberOn is l's line number on side: old for LEFT, new for RIGHT.
+func NumberOn(l Line, side model.DiffSide) int {
+	if side == model.DiffSideLeft {
+		return l.OldNo
+	}
+	return l.NewNo
+}
+
+// AnchorOn is Anchor for a view that names the side itself (the split layout's
+// column), where a context line anchors to either side, with that side's
+// line number. It returns ErrWrongSide for a line not on side.
+func AnchorOn(l Line, side model.DiffSide) (model.DiffSide, int, error) {
+	if !OnSide(l, side) {
+		return side, 0, ErrWrongSide
+	}
+	return side, NumberOn(l, side), nil
+}
+
+// RangeAnchorOn is RangeAnchor for a range on a named side: every line must be
+// on side (see OnSide) and at least two are required (ErrTooFewLines); the
+// anchor uses that side's line numbers.
+func RangeAnchorOn(lines []Line, side model.DiffSide) (Range, error) {
+	if len(lines) < 2 {
+		return Range{}, ErrTooFewLines
+	}
+	for _, l := range lines {
+		if !OnSide(l, side) {
+			return Range{}, ErrWrongSide
+		}
+	}
+	return Range{
+		StartSide: side, Side: side,
+		StartLine: NumberOn(lines[0], side), Line: NumberOn(lines[len(lines)-1], side),
+	}, nil
 }
 
 // LocateThread finds the (hunk index, line index) of the diff line a review
@@ -590,15 +645,8 @@ func expandTrailing(hunks []Hunk, headLines []string) []Hunk {
 func LocateLine(hunks []Hunk, side model.DiffSide, lineNo int) (hunk, line int, ok bool) {
 	for hi, h := range hunks {
 		for li, l := range h.Lines {
-			switch side {
-			case model.DiffSideLeft:
-				if l.OldNo == lineNo && (l.Kind == Del || l.Kind == Context) {
-					return hi, li, true
-				}
-			case model.DiffSideRight:
-				if l.NewNo == lineNo && (l.Kind == Add || l.Kind == Context) {
-					return hi, li, true
-				}
+			if OnSide(l, side) && NumberOn(l, side) == lineNo {
+				return hi, li, true
 			}
 		}
 	}

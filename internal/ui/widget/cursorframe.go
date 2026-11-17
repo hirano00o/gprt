@@ -26,9 +26,15 @@ func drawCursorFrame(screen tcell.Screen, x, y, width int, bg tcell.Color) {
 	if width <= 0 {
 		return
 	}
+	drawCursorBars(screen, x, x+width-1, y, bg)
+}
+
+// drawCursorBars draws the cursor's accent bar, on background bg, at columns
+// xl and xr of line y (a split row frames its active half only).
+func drawCursorBars(screen tcell.Screen, xl, xr, y int, bg tcell.Color) {
 	style := theme.Accent.Background(bg)
-	screen.SetContent(x, y, '┃', nil, style)
-	screen.SetContent(x+width-1, y, '┃', nil, style)
+	screen.SetContent(xl, y, '┃', nil, style)
+	screen.SetContent(xr, y, '┃', nil, style)
 }
 
 // withBackground returns spans with every span's background replaced by

@@ -9,6 +9,7 @@
 package ui
 
 import (
+	"errors"
 	"strings"
 
 	"github.com/hirano00o/gprt/internal/diff"
@@ -54,14 +55,18 @@ func (a *App) openLineOrRangeCommentFromCursor() {
 			// RangeAnchor's own "requires at least 2 lines" error for what
 			// is, in effect, the same thing as pressing "c" without "V" at
 			// all.
-			side, num := diff.Anchor(lines[0])
+			side, num, err := a.lineAnchor(lines[0])
+			if err != nil {
+				a.showToast(rangeAnchorToast(err), theme.Warning)
+				return
+			}
 			a.diffView.EndVisual()
 			a.openLineOrRangeComposer(path, diff.Range{StartSide: side, Side: side, Line: num})
 			return
 		}
-		r, err := diff.RangeAnchor(lines)
+		r, err := a.rangeAnchor(lines)
 		if err != nil {
-			a.showToast("select lines on one side only", theme.Warning)
+			a.showToast(rangeAnchorToast(err), theme.Warning)
 			return
 		}
 		a.diffView.EndVisual()
@@ -73,8 +78,39 @@ func (a *App) openLineOrRangeCommentFromCursor() {
 	if !ok {
 		return
 	}
-	side, num := diff.Anchor(line)
+	side, num, err := a.lineAnchor(line)
+	if err != nil {
+		a.showToast(rangeAnchorToast(err), theme.Warning)
+		return
+	}
 	a.openLineOrRangeComposer(path, diff.Range{StartSide: side, Side: side, Line: num})
+}
+
+// lineAnchor anchors l by the column the cursor is in when the diff shows two
+// (DiffView.CommentSide), where a context line is on either side, and by l's
+// kind otherwise (diff.Anchor).
+func (a *App) lineAnchor(l diff.Line) (model.DiffSide, int, error) {
+	if side, explicit := a.diffView.CommentSide(); explicit {
+		return diff.AnchorOn(l, side)
+	}
+	side, num := diff.Anchor(l)
+	return side, num, nil
+}
+
+// rangeAnchorToast words why a line or range could not be anchored.
+func rangeAnchorToast(err error) string {
+	if errors.Is(err, diff.ErrTooFewLines) {
+		return "select at least two lines"
+	}
+	return "select lines on one side only"
+}
+
+// rangeAnchor is lineAnchor for a selection.
+func (a *App) rangeAnchor(lines []diff.Line) (diff.Range, error) {
+	if side, explicit := a.diffView.CommentSide(); explicit {
+		return diff.RangeAnchorOn(lines, side)
+	}
+	return diff.RangeAnchor(lines)
 }
 
 // diffCommentFile implements "C" (diff.comment_file): refused with a toast

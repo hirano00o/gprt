@@ -197,6 +197,21 @@ diff:
 	}
 }
 
+func TestLoad_DiffLayout(t *testing.T) {
+	path := writeConfigFile(t, `
+diff:
+  layout: split
+`)
+
+	got, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if got.Diff.Layout != "split" {
+		t.Errorf("Diff.Layout = %q, want %q", got.Diff.Layout, "split")
+	}
+}
+
 func TestLoad_UnknownKeyRejected(t *testing.T) {
 	path := writeConfigFile(t, `
 hostt: github.example.com
