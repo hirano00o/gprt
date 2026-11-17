@@ -76,20 +76,27 @@ func DrawSpans(screen tcell.Screen, x, y, maxWidth int, spans []Span) int {
 	return cursor + 1 - x
 }
 
-// highlightRanges splits spans at the byte boundaries named by ranges (each
-// a [start, end) pair, as returned by regexp.FindAllStringIndex against the
-// concatenation of every span's own Text, i.e. text) and applies style to
-// the pieces that fall inside a range; pieces outside keep their own span's
-// original style. ranges must be sorted and non-overlapping (true of
-// FindAllStringIndex's own output). Byte offsets are rune-safe here because
-// both a span boundary and a regexp match boundary always land on a UTF-8
-// rune boundary.
+// highlightRanges is restyleRanges that replaces the style of the pieces
+// inside ranges with style outright.
+func highlightRanges(spans []Span, text string, ranges [][]int, style tcell.Style) []Span {
+	return restyleRanges(spans, text, ranges, func(tcell.Style) tcell.Style { return style })
+}
+
+// restyleRanges splits spans at the byte boundaries named by ranges (each a
+// [start, end) pair into text, the concatenation of every span's own Text)
+// and replaces the style of the pieces inside a range with restyle(their
+// span's style); pieces outside keep their span's original style.
+//
+// ranges come from regexp.FindAllStringIndex (search) or
+// diff.IntraLineRanges (changed words) and must be sorted, non-overlapping
+// and on rune boundaries: both a span boundary and those ranges' ends always
+// land on a UTF-8 rune boundary, so the byte offsets are rune-safe.
 //
 // Returns spans unchanged if the spans' concatenated text does not
 // reconstruct text exactly: defensive only (a diff line's token spans
 // always do reconstruct it), so a caller's assumption drifting never
 // mis-highlights a line instead of failing loudly elsewhere.
-func highlightRanges(spans []Span, text string, ranges [][]int, style tcell.Style) []Span {
+func restyleRanges(spans []Span, text string, ranges [][]int, restyle func(tcell.Style) tcell.Style) []Span {
 	total := 0
 	for _, s := range spans {
 		total += len(s.Text)
@@ -119,7 +126,7 @@ func highlightRanges(spans []Span, text string, ranges [][]int, style tcell.Styl
 				cut = localStart
 			}
 			if localEnd := hiEnd - spanStart; localEnd > cut {
-				out = append(out, Span{Text: s.Text[cut:localEnd], Style: style})
+				out = append(out, Span{Text: s.Text[cut:localEnd], Style: restyle(s.Style)})
 				cut = localEnd
 			}
 			if ranges[ri][1] > spanEnd {

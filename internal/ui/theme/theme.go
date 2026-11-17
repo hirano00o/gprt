@@ -45,15 +45,18 @@ var (
 	Info = tcell.StyleDefault.Foreground(colorInfo).Background(colorBg)
 	// Code styles inline code spans in rendered Markdown. Foreground only (no
 	// background tint): diff rows overwrite span backgrounds with the
-	// row's own via withBackground.
+	// row's own, via widget's withBackground (every background) or
+	// withBackgroundKeepingWords (all but word-emphasis ones, see
+	// IsDiffWordBg).
 	Code = tcell.StyleDefault.Foreground(colorWarning).Background(colorBg)
 	// Link styles Markdown link text and bare URLs: Accent plus an underline
 	// so a link reads as one even without colour.
 	Link = tcell.StyleDefault.Foreground(colorAccent).Background(colorBg).Underline(true)
 	// SearchMatch highlights a "/" search hit in the diff. Reverse, not a
 	// Background colour: widget.DiffView.drawLineRow overwrites every span's
-	// background with the row's own background via withBackground (add/del/
-	// selection tinting), which would erase a background colour set here;
+	// background, except word-emphasis ones, with the row's own background
+	// (add/del/selection tinting), which would erase a background colour set
+	// here;
 	// Reverse survives Style.Background() and still reads clearly on any
 	// tinted row.
 	SearchMatch = tcell.StyleDefault.Foreground(colorWarning).Background(colorBg).Reverse(true)

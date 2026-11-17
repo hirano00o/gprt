@@ -3,7 +3,9 @@ package widget
 import (
 	"errors"
 	"fmt"
+	"reflect"
 	"regexp"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -2058,5 +2060,275 @@ func TestDiffViewWrapTruncatedAtMaxWrapLinesEndsInAMutedEllipsis(t *testing.T) {
 	fg, _, _ := cellStyle(screen, 28, y).Decompose()
 	if wantFg, _, _ := theme.Muted.Decompose(); fg != wantFg {
 		t.Errorf("ellipsis fg %v, want Muted %v", fg, wantFg)
+	}
+}
+
+// emphasisFile has one hunk: "-foo(a, b)", "+foo(a, c)" (a pair whose only
+// changed word is the 8th byte) and "+only added" (an unpaired add). Its rows
+// are file header(0), hunk header(1), del(2), add(3), unpaired add(4).
+func emphasisFile(t *testing.T) DiffFile {
+	t.Helper()
+	hunks, err := diff.Parse("@@ -1,1 +1,2 @@\n-foo(a, b)\n+foo(a, c)\n+only added\n")
+	if err != nil {
+		t.Fatalf("diff.Parse: %v", err)
+	}
+	return DiffFile{Path: "f.go", HasPatch: true, Hunks: hunks}
+}
+
+func emphasisView(t *testing.T) (*DiffView, tcell.SimulationScreen) {
+	t.Helper()
+	dv := NewDiffView()
+	dv.SetFile(emphasisFile(t))
+	dv.SetRect(0, 0, 60, 20)
+	screen := newTestScreen(t, 60, 20)
+	dv.Draw(screen)
+	return dv, screen
+}
+
+func cellBG(screen tcell.Screen, x, y int) tcell.Color {
+	_, bg, _ := cellStyle(screen, x, y).Decompose()
+	return bg
+}
+
+// wordBgCells counts the cells of the w x h screen drawn with a word
+// emphasis background.
+func wordBgCells(screen tcell.Screen, w, h int) int {
+	n := 0
+	for y := range h {
+		for x := range w {
+			if theme.IsDiffWordBg(cellBG(screen, x, y)) {
+				n++
+			}
+		}
+	}
+	return n
+}
+
+func TestDiffViewEmphasisWordBackgroundOnPair(t *testing.T) {
+	dv, screen := emphasisView(t)
+	gw := SpanWidth(dv.rows[2].primary().gutter)
+	for _, tc := range []struct {
+		kind diff.LineKind
+		y    int
+	}{{diff.Del, 2}, {diff.Add, 3}} {
+		_, lineBG, _ := theme.DiffLineStyle(tc.kind, false).Decompose()
+		wordBG, _ := theme.DiffWordBg(tc.kind)
+		for i := range len("foo(a, b)") {
+			want := lineBG
+			if i == 7 {
+				want = wordBG
+			}
+			if got := cellBG(screen, 1+gw+i, tc.y); got != want {
+				t.Errorf("kind %v cell %d background = %v, want %v", tc.kind, i, got, want)
+			}
+		}
+	}
+}
+
+func TestDiffViewEmphasisNoneOnUnpaired(t *testing.T) {
+	dv, screen := emphasisView(t)
+	gw := SpanWidth(dv.rows[4].primary().gutter)
+	_, addBG, _ := theme.DiffLineStyle(diff.Add, false).Decompose()
+	for i := range len("only added") {
+		if got := cellBG(screen, 1+gw+i, 4); got != addBG {
+			t.Errorf("unpaired add cell %d background = %v, want the plain tint %v", i, got, addBG)
+		}
+	}
+}
+
+func TestDiffViewEmphasisKeptInSelection(t *testing.T) {
+	dv, screen := emphasisView(t)
+	dv.MoveTop() // the del line: the first selectable row
+	dv.StartVisual()
+	dv.MoveBy(1) // selects the del and the add
+	dv.Draw(screen)
+
+	gw := SpanWidth(dv.rows[2].primary().gutter)
+	_, selBG, _ := theme.DiffLineStyle(diff.Context, true).Decompose()
+	for _, tc := range []struct {
+		kind diff.LineKind
+		y    int
+	}{{diff.Del, 2}, {diff.Add, 3}} {
+		wordBG, _ := theme.DiffWordBg(tc.kind)
+		if got := cellBG(screen, 1+gw+7, tc.y); got != wordBG {
+			t.Errorf("selected %v row word cell background = %v, want %v", tc.kind, got, wordBG)
+		}
+		if got := cellBG(screen, 1+gw+1, tc.y); got != selBG {
+			t.Errorf("selected %v row other cell background = %v, want the selection tint %v", tc.kind, got, selBG)
+		}
+	}
+}
+
+func TestDiffViewSearchOverEmphasisStaysReverse(t *testing.T) {
+	dv, screen := emphasisView(t)
+	dv.SetSearch(regexp.MustCompile("c"))
+	dv.Draw(screen)
+
+	gw := SpanWidth(dv.rows[3].primary().gutter)
+	_, _, attr := cellStyle(screen, 1+gw+7, 3).Decompose()
+	if attr&tcell.AttrReverse == 0 {
+		t.Error("search match over an emphasised word must be drawn Reverse")
+	}
+	_, addBG, _ := theme.DiffLineStyle(diff.Add, false).Decompose()
+	if got := cellBG(screen, 1+gw+7, 3); got != addBG {
+		t.Errorf("search match background = %v, want the plain tint %v (search replaces the emphasis)", got, addBG)
+	}
+}
+
+func TestDiffViewEmphasisWithWrap(t *testing.T) {
+	prefix := strings.Repeat("x", 50)
+	hunks, err := diff.Parse("@@ -1,1 +1,1 @@\n-" + prefix + " old tail\n+" + prefix + " new tail\n")
+	if err != nil {
+		t.Fatalf("diff.Parse: %v", err)
+	}
+	dv := NewDiffView()
+	dv.SetWrap(true)
+	dv.SetFile(DiffFile{Path: "f.go", HasPatch: true, Hunks: hunks})
+	dv.SetRect(0, 0, 30, 20)
+	screen := newTestScreen(t, 30, 20)
+	dv.Draw(screen)
+
+	if got := wordBgCells(screen, 30, 20); got != 6 {
+		t.Errorf("emphasised cells = %d, want 6 (\"old\" and \"new\")", got)
+	}
+	for x := range 30 {
+		if theme.IsDiffWordBg(cellBG(screen, x, 2)) {
+			t.Errorf("first display line of the del row has emphasis at x=%d; the changed word sits on a continuation line", x)
+		}
+	}
+}
+
+func TestDiffViewOldNewTwoNoEmphasis(t *testing.T) {
+	dv := NewDiffView()
+	dv.SetFile(twoHunkFile(t))
+	dv.SetRect(0, 0, 60, 20)
+	screen := newTestScreen(t, 60, 20)
+	dv.Draw(screen)
+	if got := wordBgCells(screen, 60, 20); got != 0 {
+		t.Errorf("emphasised cells = %d, want 0 (old2/new2 share no word)", got)
+	}
+}
+
+// TestDiffViewWordRangesReusedForTheSameHunks pins that neither a rebuild
+// (here a search) nor a SetFile with the same hunks slice (a refresh that
+// only changed tokens, threads, drafts, ...) diffs every line pair again,
+// while a different hunks slice (a gap expansion builds one) does.
+func TestDiffViewWordRangesReusedForTheSameHunks(t *testing.T) {
+	dv, screen := emphasisView(t)
+	// first stays referenced until the end, so its address cannot be
+	// reused by a later map and fake a "same map" result.
+	first := dv.wordRanges[0]
+	same := func() bool { return reflect.ValueOf(dv.wordRanges[0]).Pointer() == reflect.ValueOf(first).Pointer() }
+
+	dv.SetSearch(regexp.MustCompile("foo"))
+	dv.Draw(screen)
+	if !same() {
+		t.Error("a search rebuild recomputed the word ranges")
+	}
+
+	again := dv.file
+	again.Loading = false
+	dv.SetFile(again)
+	dv.Draw(screen)
+	if !same() {
+		t.Error("SetFile with the same hunks slice recomputed the word ranges")
+	}
+
+	dv.SetFile(emphasisFile(t))
+	dv.Draw(screen)
+	if same() {
+		t.Error("SetFile with a new hunks slice must recompute the word ranges")
+	}
+	runtime.KeepAlive(first)
+}
+
+// TestDiffViewWordRangesRecomputedWhenHunksChangeShape covers a hunks slice
+// that shares its first element with the cached one but is shorter (recomputed),
+// and an empty SetFile (a loading or error placeholder) between two SetFiles
+// of the same hunks (the cache is kept: no line rows are read meanwhile).
+func TestDiffViewWordRangesRecomputedWhenHunksChangeShape(t *testing.T) {
+	f := twoHunkFile(t)
+	f.Hunks[1].Lines = append([]diff.Line{{Kind: diff.Del, Text: "foo(a, b)"}, {Kind: diff.Add, Text: "foo(a, c)"}}, f.Hunks[1].Lines...)
+	dv := NewDiffView()
+	dv.SetFile(f)
+	if len(dv.wordRanges) != 2 || len(dv.wordRanges[1]) == 0 {
+		t.Fatalf("wordRanges = %v, want ranges for the second hunk", dv.wordRanges)
+	}
+	cached := dv.wordRanges[1]
+
+	empty := f
+	empty.Hunks = nil
+	dv.SetFile(empty)
+	dv.SetFile(f)
+	if reflect.ValueOf(dv.wordRanges[1]).Pointer() != reflect.ValueOf(cached).Pointer() {
+		t.Error("an empty SetFile in between must not drop the cached word ranges")
+	}
+
+	shorter := f
+	shorter.Hunks = f.Hunks[:1] // same first element, different length
+	dv.SetFile(shorter)
+	if len(dv.wordRanges) != 1 {
+		t.Errorf("len(wordRanges) = %d after a shorter slice, want 1", len(dv.wordRanges))
+	}
+	runtime.KeepAlive(cached)
+}
+
+// TestDrawCutEllipsisWideRuneKeepsWordBackground draws the cut "…" over the
+// right half of a double-width rune inside an emphasised word: the blanked
+// left half and the "…" both keep the word background. A wrapped line can
+// end exactly on such a rune (the chopper fills a line to its full width),
+// but building that through layout depends on gutter width parity, so this
+// calls drawCutEllipsis directly.
+func TestDrawCutEllipsisWideRuneKeepsWordBackground(t *testing.T) {
+	wordBG, _ := theme.DiffWordBg(diff.Del)
+	line := []Span{{Text: "あいう", Style: theme.Base.Background(wordBG)}}
+	screen := newTestScreen(t, 10, 1)
+	drawCutEllipsis(screen, 5, 0, line, 6, tcell.ColorBlack)
+
+	if got := cellRune(screen, 5, 0); got != ellipsisRune {
+		t.Fatalf("cell 5 = %q, want the ellipsis", got)
+	}
+	if got := cellRune(screen, 4, 0); got != ' ' {
+		t.Errorf("cell 4 = %q, want the blanked half", got)
+	}
+	for _, x := range []int{4, 5} {
+		if got := cellBG(screen, x, 0); got != wordBG {
+			t.Errorf("cell %d background = %v, want the word background %v", x, got, wordBG)
+		}
+	}
+}
+
+// TestDiffViewCutEllipsisInsideEmphasisKeepsWordBackground covers a wrapped
+// row cut at the pane height inside a changed word: the "…" replaces a cell
+// of that word, so it keeps the word's background rather than the row tint.
+func TestDiffViewCutEllipsisInsideEmphasisKeepsWordBackground(t *testing.T) {
+	hunks, err := diff.Parse("@@ -1,1 +1,1 @@\n-" + strings.Repeat("x", 150) + " " + strings.Repeat("A", 200) +
+		"\n+" + strings.Repeat("x", 150) + " " + strings.Repeat("B", 200) + "\n")
+	if err != nil {
+		t.Fatalf("diff.Parse: %v", err)
+	}
+	dv := NewDiffView()
+	dv.SetWrap(true)
+	dv.SetFile(DiffFile{Path: "f.go", HasPatch: true, Hunks: hunks})
+	const w, h = 30, 12
+	dv.SetRect(0, 0, w, h)
+	screen := newTestScreen(t, w, h)
+	dv.Draw(screen)
+
+	last, ex := h-1, -1 // the del row fills the pane to its last line
+	for x := range w {
+		if cellRune(screen, x, last) == ellipsisRune {
+			ex = x
+		}
+	}
+	if ex < 0 {
+		t.Fatalf("no ellipsis on the last line (y=%d): %q", last, screenLine(screen, w, last))
+	}
+	wordBG, _ := theme.DiffWordBg(diff.Del)
+	if got := cellBG(screen, ex-1, last); got != wordBG {
+		t.Fatalf("cell before the ellipsis background = %v, want the word background %v (cut must land inside the word)", got, wordBG)
+	}
+	if got := cellBG(screen, ex, last); got != wordBG {
+		t.Errorf("ellipsis background = %v, want the word background %v", got, wordBG)
 	}
 }

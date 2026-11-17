@@ -265,3 +265,28 @@ func TestHighlightRanges(t *testing.T) {
 		})
 	}
 }
+
+// TestRestyleRanges covers restyleRanges deriving each piece's new style
+// from its own span's style, so a foreground survives a background change.
+func TestRestyleRanges(t *testing.T) {
+	red := tcell.StyleDefault.Foreground(tcell.ColorRed)
+	blue := tcell.StyleDefault.Foreground(tcell.ColorBlue)
+	spans := []Span{{Text: "ab", Style: red}, {Text: "cd", Style: blue}}
+	got := restyleRanges(spans, "abcd", [][]int{{1, 3}}, func(s tcell.Style) tcell.Style {
+		return s.Background(tcell.ColorGreen)
+	})
+	want := []Span{
+		{Text: "a", Style: red},
+		{Text: "b", Style: red.Background(tcell.ColorGreen)},
+		{Text: "c", Style: blue.Background(tcell.ColorGreen)},
+		{Text: "d", Style: blue},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("restyleRanges() = %+v, want %+v", got, want)
+	}
+	for i := range got {
+		if got[i] != want[i] {
+			t.Errorf("span[%d] = %+v, want %+v", i, got[i], want[i])
+		}
+	}
+}
